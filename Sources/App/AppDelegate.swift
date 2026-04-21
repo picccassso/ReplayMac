@@ -70,6 +70,46 @@ class AppDelegate: NSObject, NSApplicationDelegate, @unchecked Sendable {
         if AppSettings.autoStartRecordingOnLaunch {
             startCapturePipeline(userInitiated: false)
         }
+
+        NSApp.setActivationPolicy(.accessory)
+        setupWindowObservers()
+    }
+
+    private func setupWindowObservers() {
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(windowVisibilityChanged),
+            name: NSWindow.didBecomeKeyNotification,
+            object: nil
+        )
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(windowVisibilityChanged),
+            name: NSWindow.willCloseNotification,
+            object: nil
+        )
+    }
+
+    @objc private func windowVisibilityChanged() {
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) { [weak self] in
+            self?.updateActivationPolicy()
+        }
+    }
+
+    private func updateActivationPolicy() {
+        let hasVisibleWindows = NSApp.windows.contains { window in
+            window.isVisible && window.styleMask.contains(.titled)
+        }
+
+        if hasVisibleWindows {
+            if NSApp.activationPolicy() != .regular {
+                NSApp.setActivationPolicy(.regular)
+            }
+        } else {
+            if NSApp.activationPolicy() != .accessory {
+                NSApp.setActivationPolicy(.accessory)
+            }
+        }
     }
 
     private func configurePipelines() {
@@ -212,8 +252,22 @@ class AppDelegate: NSObject, NSApplicationDelegate, @unchecked Sendable {
     }
 
     private func openSettingsWindow() {
+        NSApp.setActivationPolicy(.regular)
         NSApp.activate(ignoringOtherApps: true)
         NSApp.sendAction(Selector(("showSettingsWindow:")), to: nil, from: nil)
+
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) { [weak self] in
+            self?.bringSettingsWindowToFront()
+        }
+    }
+
+    private func bringSettingsWindowToFront() {
+        guard let settingsWindow = NSApp.windows.first(where: {
+            $0.styleMask.contains(.titled) && $0 != clipLibraryWindowController?.window
+        }) else {
+            return
+        }
+        settingsWindow.makeKeyAndOrderFront(nil)
     }
 
     private func saveConfiguredClip(lastSeconds: TimeInterval) async {
@@ -324,6 +378,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, @unchecked Sendable {
 
         clipLibraryWindowController?.showWindow(nil)
         NSApp.activate(ignoringOtherApps: true)
+        updateActivationPolicy()
     }
 
     private func enforceMemoryBudgets(

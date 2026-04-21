@@ -22,8 +22,6 @@
     <string>1</string>
     <key>LSMinimumSystemVersion</key>
     <string>15.0</string>
-    <key>LSUIElement</key>
-    <true/>
     <key>NSMicrophoneUsageDescription</key>
     <string>ReplayMac needs microphone access to include your voice in captured clips.</string>
     <key>NSAudioCaptureUsageDescription</key>
