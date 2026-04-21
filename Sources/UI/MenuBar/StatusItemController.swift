@@ -175,9 +175,6 @@ private struct StatusBadgeView: View {
                         .pulsingDot()
                 }
                 .frame(width: 12, height: 12)
-
-                Text(state.formattedBufferDuration)
-                    .foregroundStyle(AppTheme.danger)
             } else {
                 Image(systemName: "record.circle")
                     .foregroundStyle(AppTheme.accent)
