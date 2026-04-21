@@ -38,6 +38,18 @@ else
   printf 'Using signing identity: %s\n' "$SIGN_IDENTITY"
 fi
 
+# Build once so SPM generates resource bundle accessors
+swift build -c release --package-path "$ROOT_DIR"
+
+# Patch generated accessors to load bundles from Contents/Resources
+# instead of the app root, which avoids breaking code signing.
+for accessor in "$ROOT_DIR"/.build/arm64-apple-macosx/release/*.build/DerivedSources/resource_bundle_accessor.swift; do
+  if [ -f "$accessor" ]; then
+    sed -i '' 's|Bundle.main.bundleURL.appendingPathComponent("\(.*\)_\1.bundle")|Bundle.main.bundleURL.appendingPathComponent("Contents/Resources/\1_\1.bundle")|g' "$accessor"
+  fi
+done
+
+# Rebuild so the patched accessors are compiled in
 swift build -c release --package-path "$ROOT_DIR"
 
 BIN_DIR="$(swift build -c release --show-bin-path --package-path "$ROOT_DIR")"
@@ -58,6 +70,13 @@ fi
 if [ -d "$SPARKLE_FRAMEWORK_PATH" ]; then
   cp -R "$SPARKLE_FRAMEWORK_PATH" "$APP_DIR/Contents/Frameworks/Sparkle.framework"
 fi
+
+# Copy SPM resource bundles into Contents/Resources so they are sealed by codesign
+for bundle in "$BIN_DIR"/*.bundle; do
+  if [ -d "$bundle" ]; then
+    cp -R "$bundle" "$APP_DIR/Contents/Resources/"
+  fi
+done
 
 if ! /usr/bin/otool -l "$APP_DIR/Contents/MacOS/$BIN_NAME" | /usr/bin/grep -q "@executable_path/../Frameworks"; then
   /usr/bin/install_name_tool -add_rpath "@executable_path/../Frameworks" "$APP_DIR/Contents/MacOS/$BIN_NAME"
