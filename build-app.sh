@@ -6,6 +6,7 @@ APP_DIR="$ROOT_DIR/dist/ReplayMac.app"
 BIN_NAME="ReplayMac"
 INFO_PLIST="$ROOT_DIR/Resources/Info.plist"
 ENTITLEMENTS="$ROOT_DIR/Resources/ReplayMac.dev.entitlements"
+ICON_PATH="$ROOT_DIR/Resources/ReplayMac.icns"
 
 resolve_signing_identity() {
   if [ -n "${SIGNING_IDENTITY:-}" ]; then
@@ -49,6 +50,10 @@ mkdir -p "$APP_DIR/Contents/MacOS" "$APP_DIR/Contents/Resources" "$APP_DIR/Conte
 cp "$INFO_PLIST" "$APP_DIR/Contents/Info.plist"
 cp "$BIN_PATH" "$APP_DIR/Contents/MacOS/$BIN_NAME"
 chmod +x "$APP_DIR/Contents/MacOS/$BIN_NAME"
+
+if [ -f "$ICON_PATH" ]; then
+  cp "$ICON_PATH" "$APP_DIR/Contents/Resources/ReplayMac.icns"
+fi
 
 if [ -d "$SPARKLE_FRAMEWORK_PATH" ]; then
   cp -R "$SPARKLE_FRAMEWORK_PATH" "$APP_DIR/Contents/Frameworks/Sparkle.framework"

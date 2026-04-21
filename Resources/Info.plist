@@ -10,6 +10,8 @@
     <string>com.replaymac.app</string>
     <key>CFBundleInfoDictionaryVersion</key>
     <string>6.0</string>
+    <key>CFBundleIconFile</key>
+    <string>ReplayMac</string>
     <key>CFBundleName</key>
     <string>ReplayMac</string>
     <key>CFBundlePackageType</key>
