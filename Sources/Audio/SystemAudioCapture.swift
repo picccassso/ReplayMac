@@ -8,6 +8,7 @@ public final class SystemAudioCapture: @unchecked Sendable {
     private let lock = NSLock()
     private var handler: ((CMSampleBuffer) -> Void)?
     private var nextExpectedPTS: CMTime?
+    private var volume: Double = 1.0
 
     public init() {}
 
@@ -17,11 +18,23 @@ public final class SystemAudioCapture: @unchecked Sendable {
         lock.unlock()
     }
 
+    public func setVolume(_ volume: Double) {
+        lock.lock()
+        self.volume = volume
+        lock.unlock()
+    }
+
     public func process(sampleBuffer: CMSampleBuffer) {
         // Deep-copy the buffer so SCK can recycle its original. SCK audio uses
         // a small internal pool (~1.3s) and stops delivering once we exhaust it
         // by retaining buffers in downstream ring buffers.
         guard let copied = Self.deepCopy(sampleBuffer) else { return }
+
+        lock.lock()
+        let currentVolume = volume
+        lock.unlock()
+
+        Self.scaleVolume(of: copied, volume: currentVolume)
 
         let pts = CMSampleBufferGetPresentationTimeStamp(copied)
         let duration = CMSampleBufferGetDuration(copied)
@@ -114,6 +127,26 @@ public final class SystemAudioCapture: @unchecked Sendable {
         )
         guard createStatus == noErr else { return nil }
         return newSample
+    }
+
+    private static func scaleVolume(of sampleBuffer: CMSampleBuffer, volume: Double) {
+        guard volume != 1.0 else { return }
+        guard let dataBuffer = CMSampleBufferGetDataBuffer(sampleBuffer) else { return }
+        let totalBytes = CMBlockBufferGetDataLength(dataBuffer)
+        guard totalBytes > 0 else { return }
+
+        var dataPtr: UnsafeMutablePointer<Int8>?
+        guard CMBlockBufferGetDataPointer(
+            dataBuffer, atOffset: 0, lengthAtOffsetOut: nil, totalLengthOut: nil, dataPointerOut: &dataPtr
+        ) == noErr, let dataPtr else { return }
+
+        let floatCount = totalBytes / MemoryLayout<Float>.size
+        let volumeFloat = Float(volume)
+        dataPtr.withMemoryRebound(to: Float.self, capacity: floatCount) { floatPtr in
+            for i in 0..<floatCount {
+                floatPtr[i] *= volumeFloat
+            }
+        }
     }
 
     private func makeSilenceBuffer(

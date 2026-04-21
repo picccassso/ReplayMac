@@ -24,12 +24,19 @@ public final class MicCapture: @unchecked Sendable {
     private var outputFormat: AVAudioFormat?
     private var outputFormatDescription: CMAudioFormatDescription?
     private var isRunning = false
+    private var volume: Double = 1.0
 
     public init() {}
 
     public func setHandler(_ handler: @escaping (CMSampleBuffer) -> Void) {
         lock.lock()
         self.handler = handler
+        lock.unlock()
+    }
+
+    public func setVolume(_ volume: Double) {
+        lock.lock()
+        self.volume = volume
         lock.unlock()
     }
 
@@ -112,6 +119,24 @@ public final class MicCapture: @unchecked Sendable {
             return buffer
         }
         guard status != .error, outputBuffer.frameLength > 0 else { return }
+
+        lock.lock()
+        let currentVolume = volume
+        lock.unlock()
+
+        if currentVolume != 1.0 {
+            let abl = UnsafeMutableAudioBufferListPointer(outputBuffer.mutableAudioBufferList)
+            let volumeFloat = Float(currentVolume)
+            for buffer in abl {
+                guard let data = buffer.mData else { continue }
+                let byteSize = Int(buffer.mDataByteSize)
+                let floatCount = byteSize / MemoryLayout<Float>.size
+                let floatPtr = data.assumingMemoryBound(to: Float.self)
+                for i in 0..<floatCount {
+                    floatPtr[i] *= volumeFloat
+                }
+            }
+        }
 
         guard let sampleBuffer = makeSampleBuffer(from: outputBuffer, at: time) else { return }
 

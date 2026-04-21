@@ -316,6 +316,10 @@ class AppDelegate: NSObject, NSApplicationDelegate, @unchecked Sendable {
                 }
 
                 tick += 1
+
+                self.systemAudioCapture.setVolume(AppSettings.systemAudioVolume)
+                self.micAudioCapture.setVolume(AppSettings.microphoneVolume)
+
                 let videoDuration = self.videoRingBuffer.duration
                 self.menuBarState.setBufferedSeconds(videoDuration)
 

@@ -122,6 +122,9 @@ public enum AppSettings {
     public static var overlayCorner: OverlayCorner {
         OverlayCorner(rawValue: Defaults[.overlayCorner]) ?? .topRight
     }
+
+    public static var systemAudioVolume: Double { Defaults[.systemAudioVolume] }
+    public static var microphoneVolume: Double { Defaults[.microphoneVolume] }
 }
 
 public extension Defaults.Keys {
@@ -152,4 +155,7 @@ public extension Defaults.Keys {
     static let showNotificationOnSave = Key<Bool>("showNotificationOnSave", default: true)
     static let watermarkSavedClips = Key<Bool>("watermarkSavedClips", default: false)
     static let sparkleAppcastURLString = Key<String>("sparkleAppcastURLString", default: "")
+
+    static let systemAudioVolume = Key<Double>("systemAudioVolume", default: 1.0)
+    static let microphoneVolume = Key<Double>("microphoneVolume", default: 1.0)
 }

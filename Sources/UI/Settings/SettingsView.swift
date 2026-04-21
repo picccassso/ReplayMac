@@ -25,6 +25,8 @@ public struct SettingsView: View {
     @Default(.captureMicrophone) private var captureMicrophone
     @Default(.microphoneID) private var microphoneID
     @Default(.excludeOwnAppAudio) private var excludeOwnAppAudio
+    @Default(.systemAudioVolume) private var systemAudioVolume
+    @Default(.microphoneVolume) private var microphoneVolume
 
     @Default(.memoryCapMB) private var memoryCapMB
     @Default(.queueDepth) private var queueDepth
@@ -216,6 +218,36 @@ public struct SettingsView: View {
                 Toggle("Exclude ReplayMac audio", isOn: $excludeOwnAppAudio)
             } header: {
                 sectionHeader(icon: "waveform", title: "Sources")
+            }
+
+            Section {
+                VStack(alignment: .leading, spacing: 6) {
+                    HStack {
+                        Text("System audio volume")
+                        Spacer()
+                        Text("\(Int(systemAudioVolume * 100))%")
+                            .foregroundStyle(AppTheme.accent)
+                            .fontWeight(.semibold)
+                    }
+                    Slider(value: $systemAudioVolume, in: 0...1, step: 0.05)
+                        .tint(AppTheme.accent)
+                }
+                .disabled(!captureSystemAudio)
+
+                VStack(alignment: .leading, spacing: 6) {
+                    HStack {
+                        Text("Microphone volume")
+                        Spacer()
+                        Text("\(Int(microphoneVolume * 100))%")
+                            .foregroundStyle(AppTheme.accent)
+                            .fontWeight(.semibold)
+                    }
+                    Slider(value: $microphoneVolume, in: 0...1, step: 0.05)
+                        .tint(AppTheme.accent)
+                }
+                .disabled(!captureMicrophone)
+            } header: {
+                sectionHeader(icon: "speaker.wave.2", title: "Levels")
             }
 
             Section {
