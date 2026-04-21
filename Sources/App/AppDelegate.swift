@@ -260,7 +260,8 @@ class AppDelegate: NSObject, NSApplicationDelegate, @unchecked Sendable {
         NSApp.activate(ignoringOtherApps: true)
         NSApp.sendAction(Selector(("showSettingsWindow:")), to: nil, from: nil)
 
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) { [weak self] in
+        bringSettingsWindowToFront()
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) { [weak self] in
             self?.bringSettingsWindowToFront()
         }
     }
@@ -380,8 +381,10 @@ class AppDelegate: NSObject, NSApplicationDelegate, @unchecked Sendable {
             clipLibraryWindowController = NSWindowController(window: window)
         }
 
-        clipLibraryWindowController?.showWindow(nil)
+        NSApp.setActivationPolicy(.regular)
         NSApp.activate(ignoringOtherApps: true)
+        clipLibraryWindowController?.showWindow(nil)
+        clipLibraryWindowController?.window?.makeKeyAndOrderFront(nil)
         updateActivationPolicy()
     }
 
