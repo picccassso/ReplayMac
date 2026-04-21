@@ -282,11 +282,17 @@ private struct ClipThumbnailView: View {
 
 private struct ClipPreviewView: View {
     let url: URL
+    @State private var player: AVPlayer?
 
     var body: some View {
         VStack(spacing: 12) {
-            VideoPlayer(player: AVPlayer(url: url))
-                .frame(minWidth: 640, minHeight: 360)
+            if let player {
+                AVPlayerViewRepresentable(player: player)
+                    .frame(minWidth: 640, minHeight: 360)
+            } else {
+                ProgressView("Loading preview…")
+                    .frame(minWidth: 640, minHeight: 360)
+            }
 
             Text(url.lastPathComponent)
                 .font(.system(size: 12, weight: .medium, design: .rounded))
@@ -294,6 +300,31 @@ private struct ClipPreviewView: View {
                 .lineLimit(1)
         }
         .padding(14)
+        .onAppear {
+            guard player == nil else { return }
+            let newPlayer = AVPlayer(url: url)
+            newPlayer.play()
+            player = newPlayer
+        }
+        .onDisappear {
+            player?.pause()
+            player = nil
+        }
+    }
+}
+
+private struct AVPlayerViewRepresentable: NSViewRepresentable {
+    let player: AVPlayer
+
+    func makeNSView(context: Context) -> AVPlayerView {
+        let view = AVPlayerView()
+        view.player = player
+        view.controlsStyle = .inline
+        return view
+    }
+
+    func updateNSView(_ nsView: AVPlayerView, context: Context) {
+        nsView.player = player
     }
 }
 
