@@ -11,17 +11,19 @@ It continuously buffers recent screen/audio capture and saves the last N seconds
 - macOS 15+
 - Swift 6
 
-## Build app bundle
+## Download
+
+Grab the latest release from the [Releases](https://github.com/alex/ReplayMac/releases) page.
+
+> **Note:** ReplayMac is not notarized. On first launch, right-click the app and select **Open** to bypass Gatekeeper.
+
+## Build from source
 
 ```bash
-./scripts/build-app.sh
+./build-app.sh
 ```
 
-## Package DMG
-
-```bash
-./scripts/package-dmg.sh
-```
+This compiles the app and outputs `dist/ReplayMac.app`.
 
 ## Output directory
 
