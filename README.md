@@ -1,1 +1,28 @@
-CLIP MY MAC
+# ReplayMac
+
+ReplayMac is a macOS menu bar instant-replay clipper.
+
+It continuously buffers recent screen/audio capture and saves the last N seconds to an MP4 when triggered.
+
+## Requirements
+
+- macOS 15+
+- Swift 6
+
+## Run (development)
+
+```bash
+./run-dev.sh
+```
+
+## Build app bundle
+
+```bash
+./build-app.sh
+```
+
+## Output directory
+
+Saved clips are written to:
+
+`~/Movies/ReplayMac/`
