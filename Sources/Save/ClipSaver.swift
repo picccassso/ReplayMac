@@ -144,10 +144,11 @@ public actor ClipSaver {
         let videoStartPTS = CMSampleBufferGetPresentationTimeStamp(firstVideoSample)
         let systemAudioStartPTS = systemAudioSamples.first.map { CMSampleBufferGetPresentationTimeStamp($0) }
         let micAudioStartPTS = micAudioSamples.first.map { CMSampleBufferGetPresentationTimeStamp($0) }
-        let offset = [videoStartPTS, systemAudioStartPTS, micAudioStartPTS]
-            .compactMap { $0 }
-            .filter(\.isValid)
-            .min(by: { $0 < $1 }) ?? videoStartPTS
+        let offset = Self.timelineOffset(
+            videoStartPTS: videoStartPTS,
+            systemAudioStartPTS: systemAudioStartPTS,
+            micAudioStartPTS: micAudioStartPTS
+        )
 
         let retimedVideo = videoSamples.compactMap { retimeSample($0, offset: offset) }
         let retimedSystemAudio = systemAudioSamples
@@ -158,7 +159,11 @@ public actor ClipSaver {
             .filter { CMSampleBufferGetPresentationTimeStamp($0).seconds >= 0 }
 
         logger.info("Saving clip: video=\(retimedVideo.count) audio=\(retimedSystemAudio.count) mic=\(retimedMicAudio.count)")
-        print("[SAVE] offset=\(offset.seconds) retimed video=\(retimedVideo.count) sysAudio=\(retimedSystemAudio.count) mic=\(retimedMicAudio.count)")
+        let earliestTrackStart = [videoStartPTS, systemAudioStartPTS, micAudioStartPTS]
+            .compactMap { $0 }
+            .filter(\.isValid)
+            .min(by: { $0 < $1 }) ?? videoStartPTS
+        print("[SAVE] offset(videoStart)=\(offset.seconds) earliestTrackStart=\(earliestTrackStart.seconds) retimed video=\(retimedVideo.count) sysAudio=\(retimedSystemAudio.count) mic=\(retimedMicAudio.count)")
         if let firstV = retimedVideo.first, let lastV = retimedVideo.last {
             print("[SAVE] retimed video PTS: \(CMSampleBufferGetPresentationTimeStamp(firstV).seconds) ... \(CMSampleBufferGetPresentationTimeStamp(lastV).seconds)")
         }
@@ -202,6 +207,23 @@ public actor ClipSaver {
     }
 
     // MARK: - Helpers
+
+    static func timelineOffset(
+        videoStartPTS: CMTime,
+        systemAudioStartPTS: CMTime?,
+        micAudioStartPTS: CMTime?
+    ) -> CMTime {
+        // Always anchor the clip timeline to the first video frame. If audio
+        // starts earlier than video and we anchor to audio, players render a
+        // black lead-in before the first video frame arrives.
+        if videoStartPTS.isValid {
+            return videoStartPTS
+        }
+        return [systemAudioStartPTS, micAudioStartPTS]
+            .compactMap { $0 }
+            .filter(\.isValid)
+            .min(by: { $0 < $1 }) ?? .zero
+    }
 
     private func channelCountForSamples(_ samples: [CMSampleBuffer]) -> Int {
         guard let first = samples.first,

@@ -94,6 +94,7 @@ let package = Package(
         ),
         .testTarget(name: "RingBufferTests", dependencies: ["RingBuffer"], path: "Tests/RingBufferTests"),
         .testTarget(name: "EncoderTests", dependencies: ["Encode"], path: "Tests/EncoderTests"),
-        .testTarget(name: "SavePipelineTests", dependencies: ["Save", "RingBuffer"], path: "Tests/SavePipelineTests")
+        .testTarget(name: "SavePipelineTests", dependencies: ["Save", "RingBuffer"], path: "Tests/SavePipelineTests"),
+        .testTarget(name: "CaptureTests", dependencies: ["Capture"], path: "Tests/CaptureTests")
     ]
 )

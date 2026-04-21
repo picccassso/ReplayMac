@@ -50,6 +50,7 @@ public final class CaptureDelegate: NSObject, SCStreamOutput, SCStreamDelegate, 
         switch outputType {
         case .screen:
             guard sampleBuffer.isValid else { return }
+            guard let status = frameStatus(of: sampleBuffer), status == .complete else { return }
             frameCount += 1
             let pts = CMSampleBufferGetPresentationTimeStamp(sampleBuffer)
             if let pixelBuffer = CMSampleBufferGetImageBuffer(sampleBuffer) {
@@ -92,6 +93,17 @@ public final class CaptureDelegate: NSObject, SCStreamOutput, SCStreamDelegate, 
         default:
             break
         }
+    }
+
+    func frameStatus(of sampleBuffer: CMSampleBuffer) -> SCFrameStatus? {
+        guard let attachmentsArray = CMSampleBufferGetSampleAttachmentsArray(sampleBuffer, createIfNecessary: false) as? [[SCStreamFrameInfo: Any]],
+              let attachments = attachmentsArray.first else {
+            return nil
+        }
+        guard let statusRawValue = attachments[SCStreamFrameInfo.status] as? Int else {
+            return nil
+        }
+        return SCFrameStatus(rawValue: statusRawValue)
     }
 
     public func stream(_ stream: SCStream, didStopWithError error: Error) {

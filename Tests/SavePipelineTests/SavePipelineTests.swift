@@ -1,5 +1,6 @@
 import XCTest
 import AVFoundation
+import CoreMedia
 @testable import Save
 @testable import RingBuffer
 
@@ -78,5 +79,35 @@ final class SavePipelineTests: XCTestCase {
         } catch {
             XCTFail("Unexpected error: \(error)")
         }
+    }
+
+    func testTimelineOffsetAnchorsToVideoStartWhenAudioStartsEarlier() {
+        let timescale: CMTimeScale = 600
+        let videoStart = CMTime(seconds: 10.0, preferredTimescale: timescale)
+        let systemAudioStart = CMTime(seconds: 9.0, preferredTimescale: timescale)
+        let micAudioStart = CMTime(seconds: 9.4, preferredTimescale: timescale)
+
+        let offset = ClipSaver.timelineOffset(
+            videoStartPTS: videoStart,
+            systemAudioStartPTS: systemAudioStart,
+            micAudioStartPTS: micAudioStart
+        )
+
+        XCTAssertEqual(offset.seconds, videoStart.seconds, accuracy: 0.0001)
+    }
+
+    func testTimelineOffsetFallsBackToAudioWhenVideoIsInvalid() {
+        let timescale: CMTimeScale = 600
+        let invalidVideoStart = CMTime.invalid
+        let systemAudioStart = CMTime(seconds: 4.2, preferredTimescale: timescale)
+        let micAudioStart = CMTime(seconds: 4.7, preferredTimescale: timescale)
+
+        let offset = ClipSaver.timelineOffset(
+            videoStartPTS: invalidVideoStart,
+            systemAudioStartPTS: systemAudioStart,
+            micAudioStartPTS: micAudioStart
+        )
+
+        XCTAssertEqual(offset.seconds, systemAudioStart.seconds, accuracy: 0.0001)
     }
 }
