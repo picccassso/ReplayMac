@@ -38,7 +38,7 @@ public struct SettingsView: View {
     @State private var displayLoadError: String?
 
     public init() {}
-    
+
     public var body: some View {
         TabView {
             generalTab
@@ -82,30 +82,41 @@ public struct SettingsView: View {
 
     private var generalTab: some View {
         Form {
-            Section("Replay") {
+            Section {
                 Stepper(value: $bufferDurationSeconds, in: 15...300, step: 5) {
-                    Text("Buffer duration: \(bufferDurationSeconds) seconds")
+                    HStack(spacing: 6) {
+                        Image(systemName: "timer")
+                            .foregroundStyle(AppTheme.accent)
+                        Text("Buffer duration: \(bufferDurationSeconds) seconds")
+                    }
                 }
+            } header: {
+                sectionHeader(icon: "clock.arrow.circlepath", title: "Replay")
             }
 
-            Section("Storage") {
+            Section {
                 HStack(alignment: .firstTextBaseline, spacing: 8) {
                     Text("Output directory")
                     Spacer()
                     Text(outputDirectoryPath)
                         .lineLimit(1)
                         .truncationMode(.middle)
-                        .foregroundStyle(.secondary)
+                        .foregroundStyle(AppTheme.textSecondary)
                 }
 
                 Button("Choose Folder…") {
                     chooseOutputDirectory()
                 }
+                .buttonStyle(AccentButtonStyle())
+            } header: {
+                sectionHeader(icon: "folder", title: "Storage")
             }
 
-            Section("Startup") {
+            Section {
                 Toggle("Launch at login", isOn: $launchAtLogin)
                 Toggle("Auto-start recording on launch", isOn: $autoStartRecordingOnLaunch)
+            } header: {
+                sectionHeader(icon: "power", title: "Startup")
             }
 
             if let launchAtLoginError {
@@ -120,7 +131,7 @@ public struct SettingsView: View {
 
     private var videoTab: some View {
         Form {
-            Section("Capture") {
+            Section {
                 Picker("Codec", selection: $videoCodecRawValue) {
                     ForEach(VideoCodec.allCases) { codec in
                         Text(codec.title).tag(codec.rawValue)
@@ -132,7 +143,7 @@ public struct SettingsView: View {
                         Text("Capture source")
                         Spacer()
                         Text(displayLoadError ?? "No displays available yet")
-                            .foregroundStyle(.secondary)
+                            .foregroundStyle(AppTheme.textSecondary)
                     }
                 } else {
                     Picker("Capture source", selection: $captureDisplayID) {
@@ -141,9 +152,11 @@ public struct SettingsView: View {
                         }
                     }
                 }
+            } header: {
+                sectionHeader(icon: "camera", title: "Capture")
             }
 
-            Section("Encoding") {
+            Section {
                 Picker("Resolution", selection: $captureResolutionRawValue) {
                     ForEach(CaptureResolution.allCases) { mode in
                         Text(mode.title).tag(mode.rawValue)
@@ -169,9 +182,11 @@ public struct SettingsView: View {
                         Text("Bitrate")
                         Spacer()
                         Text("\(Int(bitrateMbps)) Mbps")
-                            .foregroundStyle(.secondary)
+                            .foregroundStyle(AppTheme.accent)
+                            .fontWeight(.semibold)
                     }
                     Slider(value: $bitrateMbps, in: 10...50, step: 1)
+                        .tint(AppTheme.accent)
                 }
 
                 Picker("Quality preset", selection: $qualityPresetRawValue) {
@@ -179,11 +194,14 @@ public struct SettingsView: View {
                         Text(preset.title).tag(preset.rawValue)
                     }
                 }
+            } header: {
+                sectionHeader(icon: "film.stack", title: "Encoding")
             }
 
             Section {
                 Label("Capture and encoder changes apply after restarting recording.", systemImage: "arrow.clockwise.circle")
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(AppTheme.textSecondary)
+                    .font(.system(size: 12, design: .rounded))
             }
         }
         .formStyle(.grouped)
@@ -191,19 +209,21 @@ public struct SettingsView: View {
 
     private var audioTab: some View {
         Form {
-            Section("Sources") {
+            Section {
                 Toggle("Capture system audio", isOn: $captureSystemAudio)
                 Toggle("Capture microphone", isOn: $captureMicrophone)
                 Toggle("Exclude ReplayMac audio", isOn: $excludeOwnAppAudio)
+            } header: {
+                sectionHeader(icon: "waveform", title: "Sources")
             }
 
-            Section("Microphone") {
+            Section {
                 if microphones.isEmpty {
                     HStack {
                         Text("Mic device")
                         Spacer()
                         Text("No microphones detected")
-                            .foregroundStyle(.secondary)
+                            .foregroundStyle(AppTheme.textSecondary)
                     }
                 } else {
                     Picker("Mic device", selection: $microphoneID) {
@@ -213,11 +233,14 @@ public struct SettingsView: View {
                     }
                     .disabled(!captureMicrophone)
                 }
+            } header: {
+                sectionHeader(icon: "mic", title: "Microphone")
             }
 
             Section {
                 Label("Audio source changes apply after restarting recording.", systemImage: "arrow.clockwise.circle")
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(AppTheme.textSecondary)
+                    .font(.system(size: 12, design: .rounded))
             }
         }
         .formStyle(.grouped)
@@ -225,14 +248,18 @@ public struct SettingsView: View {
 
     private var hotkeysTab: some View {
         Form {
-            Section("Primary") {
+            Section {
                 KeyboardShortcuts.Recorder("Save clip", name: .saveClip)
                 KeyboardShortcuts.Recorder("Start/stop recording", name: .toggleRecording)
+            } header: {
+                sectionHeader(icon: "bolt.fill", title: "Primary")
             }
 
-            Section("Quick Presets") {
+            Section {
                 KeyboardShortcuts.Recorder("Save last 15 seconds", name: .saveLast15Seconds)
                 KeyboardShortcuts.Recorder("Save last 60 seconds", name: .saveLast60Seconds)
+            } header: {
+                sectionHeader(icon: "stopwatch", title: "Quick Presets")
             }
         }
         .formStyle(.grouped)
@@ -240,29 +267,47 @@ public struct SettingsView: View {
 
     private var advancedTab: some View {
         Form {
-            Section("Performance") {
+            Section {
                 VStack(alignment: .leading, spacing: 6) {
                     HStack {
                         Text("Memory cap")
                         Spacer()
                         Text(memoryCapLabel)
-                            .foregroundStyle(.secondary)
+                            .foregroundStyle(AppTheme.accent)
+                            .fontWeight(.semibold)
                     }
                     Slider(value: $memoryCapMB, in: 256...4096, step: 64)
+                        .tint(AppTheme.accent)
                 }
 
                 Stepper(value: $queueDepth, in: 3...10) {
                     Text("SCK queue depth: \(queueDepth)")
                 }
+            } header: {
+                sectionHeader(icon: "cpu", title: "Performance")
             }
 
-            Section("Feedback") {
+            Section {
                 Toggle("Play audio cue on save", isOn: $playAudioCueOnSave)
                 Toggle("Show notification on save", isOn: $showNotificationOnSave)
                 Toggle("Watermark saved clips", isOn: $watermarkSavedClips)
+            } header: {
+                sectionHeader(icon: "speaker.wave.2.bubble.left", title: "Feedback")
             }
         }
         .formStyle(.grouped)
+    }
+
+    private func sectionHeader(icon: String, title: String) -> some View {
+        HStack(spacing: 6) {
+            Image(systemName: icon)
+                .font(.system(size: 12, weight: .semibold))
+                .foregroundStyle(AppTheme.accent)
+            Text(title)
+                .font(.system(size: 12, weight: .bold, design: .rounded))
+                .foregroundStyle(AppTheme.textPrimary)
+        }
+        .padding(.bottom, 2)
     }
 
     private var memoryCapLabel: String {

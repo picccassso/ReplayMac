@@ -14,92 +14,31 @@ public struct ClipLibraryView: View {
     public init() {}
 
     public var body: some View {
-        VStack(spacing: 10) {
-            HStack {
-                Picker("Sort", selection: $sortMode) {
-                    ForEach(ClipSortMode.allCases) { mode in
-                        Text(mode.title).tag(mode)
-                    }
-                }
-                .pickerStyle(.segmented)
-                .frame(maxWidth: 320)
+        VStack(spacing: 0) {
+            toolbarView
+                .padding(.horizontal, 20)
+                .padding(.vertical, 14)
 
-                Spacer()
-
-                Button("Refresh") {
-                    Task { await model.reload() }
-                }
-            }
+            Divider()
+                .padding(.horizontal, 20)
 
             if model.rows.isEmpty {
-                ContentUnavailableView(
-                    "No Clips Yet",
-                    systemImage: "film",
-                    description: Text("Saved clips will appear here.")
-                )
+                emptyStateView
+                    .frame(maxHeight: .infinity)
             } else {
-                Table(model.sortedRows(by: sortMode), selection: $selection) {
-                    TableColumn("Clip") { row in
-                        HStack(spacing: 10) {
-                            ClipThumbnailView(image: row.thumbnail)
-                            Text(row.fileName)
-                                .lineLimit(1)
-                        }
-                    }
-                    .width(min: 260, ideal: 360)
-
-                    TableColumn("Duration") { row in
-                        Text(row.durationLabel)
-                    }
-                    .width(90)
-
-                    TableColumn("Size") { row in
-                        Text(row.sizeLabel)
-                    }
-                    .width(90)
-
-                    TableColumn("Created") { row in
-                        Text(row.dateLabel)
-                    }
-                    .width(min: 120, ideal: 180)
-
-                    TableColumn("Actions") { row in
-                        HStack(spacing: 10) {
-                            Button("Play") {
-                                NSWorkspace.shared.open(row.info.fileURL)
-                            }
-                            .buttonStyle(.link)
-
-                            Button("Reveal") {
-                                NSWorkspace.shared.activateFileViewerSelecting([row.info.fileURL])
-                            }
-                            .buttonStyle(.link)
-
-                            Button("Delete", role: .destructive) {
-                                deleteCandidate = row
-                            }
-                            .buttonStyle(.link)
-                        }
-                    }
-                    .width(min: 220, ideal: 280)
-                }
+                tableView
+                    .padding(.horizontal, 20)
+                    .padding(.vertical, 12)
             }
 
             if let selectedRow {
-                HStack {
-                    Button("Quick Preview") {
-                        previewURL = selectedRow.info.fileURL
-                    }
-                    Text(selectedRow.info.fileURL.lastPathComponent)
-                        .foregroundStyle(.secondary)
-                        .lineLimit(1)
-                    Spacer()
-                }
-                .font(.system(size: 12, weight: .medium, design: .rounded))
+                bottomBarView(for: selectedRow)
+                    .padding(.horizontal, 20)
+                    .padding(.vertical, 10)
+                    .background(AppTheme.backgroundSecondary.opacity(0.5))
             }
         }
-        .frame(minWidth: 860, minHeight: 500)
-        .padding(16)
+        .frame(minWidth: 900, minHeight: 520)
         .task {
             await model.reload()
         }
@@ -126,6 +65,146 @@ public struct ClipLibraryView: View {
             if let previewURL {
                 ClipPreviewView(url: previewURL)
             }
+        }
+    }
+
+    private var toolbarView: some View {
+        HStack(spacing: 12) {
+            HStack(spacing: 6) {
+                Image(systemName: "arrow.up.arrow.down.circle.fill")
+                    .foregroundStyle(AppTheme.accent)
+                    .font(.system(size: 14))
+                Picker("Sort", selection: $sortMode) {
+                    ForEach(ClipSortMode.allCases) { mode in
+                        Text(mode.title).tag(mode)
+                    }
+                }
+                .pickerStyle(.segmented)
+                .frame(maxWidth: 280)
+            }
+
+            Spacer()
+
+            Button {
+                Task { await model.reload() }
+            } label: {
+                HStack(spacing: 6) {
+                    Image(systemName: "arrow.clockwise")
+                    Text("Refresh")
+                }
+                .font(.system(size: 12, weight: .semibold, design: .rounded))
+            }
+            .buttonStyle(.borderedProminent)
+            .tint(AppTheme.accent)
+            .controlSize(.small)
+        }
+    }
+
+    @ViewBuilder
+    private var emptyStateView: some View {
+        VStack(spacing: 16) {
+            ZStack {
+                Circle()
+                    .fill(
+                        LinearGradient(
+                            colors: [AppTheme.accent.opacity(0.15), AppTheme.accentSecondary.opacity(0.1)],
+                            startPoint: .topLeading,
+                            endPoint: .bottomTrailing
+                        )
+                    )
+                    .frame(width: 100, height: 100)
+
+                Image(systemName: "film.stack")
+                    .font(.system(size: 40, weight: .medium))
+                    .foregroundStyle(AppTheme.accent)
+            }
+
+            VStack(spacing: 6) {
+                Text("No Clips Yet")
+                    .font(.system(size: 18, weight: .bold, design: .rounded))
+                    .foregroundStyle(AppTheme.textPrimary)
+
+                Text("Saved clips will appear here.")
+                    .font(.system(size: 13, weight: .regular, design: .rounded))
+                    .foregroundStyle(AppTheme.textSecondary)
+            }
+        }
+    }
+
+    private var tableView: some View {
+        Table(model.sortedRows(by: sortMode), selection: $selection) {
+            TableColumn("Clip") { row in
+                HStack(spacing: 12) {
+                    ClipThumbnailView(image: row.thumbnail)
+                    Text(row.fileName)
+                        .lineLimit(1)
+                        .font(.system(size: 13, weight: .medium, design: .rounded))
+                }
+            }
+            .width(min: 280, ideal: 380)
+
+            TableColumn("Duration") { row in
+                Text(row.durationLabel)
+                    .font(.system(size: 12, weight: .medium, design: .rounded))
+                    .foregroundStyle(AppTheme.textSecondary)
+            }
+            .width(90)
+
+            TableColumn("Size") { row in
+                Text(row.sizeLabel)
+                    .font(.system(size: 12, weight: .medium, design: .rounded))
+                    .foregroundStyle(AppTheme.textSecondary)
+            }
+            .width(90)
+
+            TableColumn("Created") { row in
+                Text(row.dateLabel)
+                    .font(.system(size: 12, weight: .medium, design: .rounded))
+                    .foregroundStyle(AppTheme.textSecondary)
+            }
+            .width(min: 130, ideal: 180)
+
+            TableColumn("Actions") { row in
+                HStack(spacing: 14) {
+                    IconActionButton(icon: "play.fill", color: AppTheme.accent) {
+                        NSWorkspace.shared.open(row.info.fileURL)
+                    }
+
+                    IconActionButton(icon: "folder", color: AppTheme.textSecondary) {
+                        NSWorkspace.shared.activateFileViewerSelecting([row.info.fileURL])
+                    }
+
+                    IconActionButton(icon: "trash", color: AppTheme.danger) {
+                        deleteCandidate = row
+                    }
+                }
+            }
+            .width(min: 140, ideal: 180)
+        }
+        .tableStyle(.inset(alternatesRowBackgrounds: true))
+    }
+
+    private func bottomBarView(for row: ClipRow) -> some View {
+        HStack(spacing: 12) {
+            Button {
+                previewURL = row.info.fileURL
+            } label: {
+                HStack(spacing: 6) {
+                    Image(systemName: "play.circle.fill")
+                    Text("Quick Preview")
+                }
+                .font(.system(size: 12, weight: .semibold, design: .rounded))
+            }
+            .buttonStyle(.borderedProminent)
+            .tint(AppTheme.accent)
+            .controlSize(.small)
+
+            Text(row.info.fileURL.lastPathComponent)
+                .font(.system(size: 12, weight: .medium, design: .rounded))
+                .foregroundStyle(AppTheme.textSecondary)
+                .lineLimit(1)
+
+            Spacer()
         }
     }
 
@@ -262,21 +341,49 @@ private struct ClipThumbnailView: View {
     let image: NSImage?
 
     var body: some View {
-        Group {
+        ZStack {
+            AppTheme.backgroundSecondary
+
             if let image {
                 Image(nsImage: image)
                     .resizable()
                     .scaledToFill()
             } else {
-                ZStack {
-                    Color.gray.opacity(0.18)
-                    Image(systemName: "film")
-                        .foregroundStyle(.secondary)
-                }
+                Image(systemName: "film")
+                    .foregroundStyle(AppTheme.textSecondary)
             }
         }
-        .frame(width: 72, height: 40)
-        .clipShape(RoundedRectangle(cornerRadius: 6))
+        .frame(width: 80, height: 45)
+        .clipShape(RoundedRectangle(cornerRadius: AppTheme.cornerRadiusSmall, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: AppTheme.cornerRadiusSmall, style: .continuous)
+                .stroke(Color.white.opacity(0.1), lineWidth: 0.5)
+        )
+        .shadow(color: .black.opacity(0.08), radius: 4, x: 0, y: 2)
+    }
+}
+
+private struct IconActionButton: View {
+    let icon: String
+    let color: Color
+    let action: () -> Void
+
+    @State private var isHovering = false
+
+    var body: some View {
+        Button(action: action) {
+            Image(systemName: icon)
+                .font(.system(size: 12, weight: .semibold))
+                .foregroundStyle(color)
+                .frame(width: 28, height: 28)
+                .background(
+                    RoundedRectangle(cornerRadius: 6, style: .continuous)
+                        .fill(color.opacity(isHovering ? 0.15 : 0.08))
+                )
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .onHover { isHovering = $0 }
     }
 }
 
@@ -285,21 +392,27 @@ private struct ClipPreviewView: View {
     @State private var player: AVPlayer?
 
     var body: some View {
-        VStack(spacing: 12) {
+        VStack(spacing: 14) {
             if let player {
                 AVPlayerViewRepresentable(player: player)
                     .frame(minWidth: 640, minHeight: 360)
+                    .clipShape(RoundedRectangle(cornerRadius: AppTheme.cornerRadiusMedium, style: .continuous))
+                    .shadow(color: .black.opacity(0.12), radius: 12, x: 0, y: 6)
             } else {
-                ProgressView("Loading preview…")
-                    .frame(minWidth: 640, minHeight: 360)
+                ZStack {
+                    AppTheme.backgroundSecondary
+                    ProgressView("Loading preview…")
+                }
+                .frame(minWidth: 640, minHeight: 360)
+                .clipShape(RoundedRectangle(cornerRadius: AppTheme.cornerRadiusMedium, style: .continuous))
             }
 
             Text(url.lastPathComponent)
                 .font(.system(size: 12, weight: .medium, design: .rounded))
-                .foregroundStyle(.secondary)
+                .foregroundStyle(AppTheme.textSecondary)
                 .lineLimit(1)
         }
-        .padding(14)
+        .padding(16)
         .onAppear {
             guard player == nil else { return }
             let newPlayer = AVPlayer(url: url)

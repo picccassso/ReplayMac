@@ -160,30 +160,54 @@ private struct StatusBadgeView: View {
     let onWidthChange: (CGFloat) -> Void
 
     var body: some View {
-        HStack(spacing: 4) {
+        HStack(spacing: 5) {
             if state.isSaving {
                 Image(systemName: "checkmark.circle.fill")
-                    .foregroundStyle(.green)
+                    .foregroundStyle(AppTheme.success)
+                    .transition(.scale.combined(with: .opacity))
                 Text("Saved")
+                    .foregroundStyle(AppTheme.success)
             } else if state.isRecording {
-                Image(systemName: "record.circle.fill")
-                    .foregroundStyle(.red)
+                ZStack {
+                    Circle()
+                        .fill(AppTheme.danger)
+                        .frame(width: 8, height: 8)
+                        .pulsingDot()
+                }
+                .frame(width: 12, height: 12)
+
                 Text(state.formattedBufferDuration)
+                    .foregroundStyle(AppTheme.danger)
             } else {
                 Image(systemName: "record.circle")
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(AppTheme.accent)
             }
         }
         .font(.system(size: 12, weight: .semibold, design: .rounded))
-        .padding(.horizontal, 6)
-        .padding(.vertical, 2)
+        .padding(.horizontal, 8)
+        .padding(.vertical, 4)
         .fixedSize()
+        .background(
+            Capsule()
+                .fill(backgroundColor)
+        )
         .background(
             GeometryReader { proxy in
                 Color.clear.preference(key: StatusWidthPreferenceKey.self, value: proxy.size.width)
             }
         )
         .onPreferenceChange(StatusWidthPreferenceKey.self, perform: onWidthChange)
+        .animation(.easeOut(duration: 0.2), value: state.isSaving)
+        .animation(.easeOut(duration: 0.2), value: state.isRecording)
+    }
+
+    private var backgroundColor: Color {
+        if state.isSaving {
+            return AppTheme.success.opacity(0.12)
+        } else if state.isRecording {
+            return AppTheme.danger.opacity(0.12)
+        }
+        return AppTheme.accent.opacity(0.10)
     }
 }
 
