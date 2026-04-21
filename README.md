@@ -11,16 +11,16 @@ It continuously buffers recent screen/audio capture and saves the last N seconds
 - macOS 15+
 - Swift 6
 
-## Run (development)
-
-```bash
-./run-dev.sh
-```
-
 ## Build app bundle
 
 ```bash
-./build-app.sh
+./scripts/build-app.sh
+```
+
+## Package DMG
+
+```bash
+./scripts/package-dmg.sh
 ```
 
 ## Output directory
