@@ -55,11 +55,20 @@ public actor CaptureManager {
     }
 
     @discardableResult
-    public func start(interactivePermissionPrompt: Bool = true, fps: Int, queueDepth: Int) async throws -> CaptureConfig {
+    public func start(
+        interactivePermissionPrompt: Bool = true,
+        captureDisplayID: String? = nil,
+        fps: Int,
+        queueDepth: Int
+    ) async throws -> CaptureConfig {
         let permissions = CapturePermissions()
         let content = try await permissions.requestAccess(interactive: interactivePermissionPrompt)
 
-        guard let display = content.displays.first else {
+        let selectedDisplay = content.displays.first { display in
+            String(display.displayID) == captureDisplayID
+        }
+
+        guard let display = selectedDisplay ?? content.displays.first else {
             throw CaptureError.noDisplay
         }
 

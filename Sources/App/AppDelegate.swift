@@ -173,6 +173,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, @unchecked Sendable {
 
                 let config = try await captureManager.start(
                     interactivePermissionPrompt: userInitiated,
+                    captureDisplayID: AppSettings.captureDisplayID.isEmpty ? nil : AppSettings.captureDisplayID,
                     fps: AppSettings.frameRate,
                     queueDepth: AppSettings.queueDepth
                 )

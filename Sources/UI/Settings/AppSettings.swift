@@ -119,6 +119,10 @@ public enum AppSettings {
         Defaults[.queueDepth]
     }
 
+    public static var captureDisplayID: String {
+        Defaults[.captureDisplayID]
+    }
+
     public static var overlayCorner: OverlayCorner {
         OverlayCorner(rawValue: Defaults[.overlayCorner]) ?? .topRight
     }
