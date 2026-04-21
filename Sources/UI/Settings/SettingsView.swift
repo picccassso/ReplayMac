@@ -175,6 +175,7 @@ public struct SettingsView: View {
                 Picker("Frame rate", selection: $frameRate) {
                     Text("30 fps").tag(30)
                     Text("60 fps").tag(60)
+                    Text("120 fps").tag(120)
                 }
 
                 VStack(alignment: .leading, spacing: 6) {
@@ -347,6 +348,10 @@ public struct SettingsView: View {
             captureResolutionRawValue = CaptureResolution.native.rawValue
             frameRate = 60
             bitrateMbps = 25
+        case .ultra:
+            captureResolutionRawValue = CaptureResolution.native.rawValue
+            frameRate = 120
+            bitrateMbps = 40
         case .custom:
             break
         }

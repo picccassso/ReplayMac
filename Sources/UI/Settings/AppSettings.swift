@@ -39,6 +39,7 @@ public enum CaptureResolution: String, CaseIterable, Identifiable {
 public enum QualityPreset: String, CaseIterable, Identifiable {
     case performance
     case quality
+    case ultra
     case custom
 
     public var id: String { rawValue }
@@ -49,6 +50,8 @@ public enum QualityPreset: String, CaseIterable, Identifiable {
             return "Performance"
         case .quality:
             return "Quality"
+        case .ultra:
+            return "Ultra"
         case .custom:
             return "Custom"
         }
@@ -106,6 +109,14 @@ public enum AppSettings {
     public static var memoryCapMB: Double { Defaults[.memoryCapMB] }
     public static var sparkleAppcastURLString: String {
         Defaults[.sparkleAppcastURLString]
+    }
+
+    public static var frameRate: Int {
+        Defaults[.frameRate]
+    }
+
+    public static var queueDepth: Int {
+        Defaults[.queueDepth]
     }
 
     public static var overlayCorner: OverlayCorner {

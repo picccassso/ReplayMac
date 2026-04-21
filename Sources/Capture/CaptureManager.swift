@@ -55,7 +55,7 @@ public actor CaptureManager {
     }
 
     @discardableResult
-    public func start(interactivePermissionPrompt: Bool = true) async throws -> CaptureConfig {
+    public func start(interactivePermissionPrompt: Bool = true, fps: Int, queueDepth: Int) async throws -> CaptureConfig {
         let permissions = CapturePermissions()
         let content = try await permissions.requestAccess(interactive: interactivePermissionPrompt)
 
@@ -65,14 +65,11 @@ public actor CaptureManager {
 
         let filter = SCContentFilter(display: display, excludingApplications: [], exceptingWindows: [])
 
-        // Prefer stability over peak FPS to reduce capture/encode contention,
-        // which can starve audio callbacks on some machines.
-        let fps = 30
         let config = SCStreamConfiguration()
         config.width = display.width
         config.height = display.height
         config.minimumFrameInterval = CMTime(value: 1, timescale: CMTimeScale(fps))
-        config.queueDepth = 8
+        config.queueDepth = queueDepth
         config.pixelFormat = kCVPixelFormatType_32BGRA
         config.capturesAudio = true
         // Known macOS 15 issue: setting this to true can cause SCK to deliver

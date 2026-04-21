@@ -154,7 +154,11 @@ class AppDelegate: NSObject, NSApplicationDelegate, @unchecked Sendable {
                     }
                 }
 
-                let config = try await captureManager.start(interactivePermissionPrompt: userInitiated)
+                let config = try await captureManager.start(
+                    interactivePermissionPrompt: userInitiated,
+                    fps: AppSettings.frameRate,
+                    queueDepth: AppSettings.queueDepth
+                )
                 try videoEncoder.start(width: config.width, height: config.height, fps: config.fps)
 
                 if shouldCaptureMic && micPermissionGranted {
