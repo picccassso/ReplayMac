@@ -1,0 +1,389 @@
+import SwiftUI
+import AVFoundation
+import Defaults
+import Hotkeys
+import KeyboardShortcuts
+import ScreenCaptureKit
+import ServiceManagement
+
+public struct SettingsView: View {
+    @Default(.bufferDurationSeconds) private var bufferDurationSeconds
+    @Default(.outputDirectoryPath) private var outputDirectoryPath
+    @Default(.launchAtLogin) private var launchAtLogin
+    @Default(.autoStartRecordingOnLaunch) private var autoStartRecordingOnLaunch
+
+    @Default(.videoCodec) private var videoCodecRawValue
+    @Default(.captureDisplayID) private var captureDisplayID
+    @Default(.captureResolution) private var captureResolutionRawValue
+    @Default(.customCaptureWidth) private var customCaptureWidth
+    @Default(.customCaptureHeight) private var customCaptureHeight
+    @Default(.frameRate) private var frameRate
+    @Default(.bitrateMbps) private var bitrateMbps
+    @Default(.qualityPreset) private var qualityPresetRawValue
+
+    @Default(.captureSystemAudio) private var captureSystemAudio
+    @Default(.captureMicrophone) private var captureMicrophone
+    @Default(.microphoneID) private var microphoneID
+    @Default(.excludeOwnAppAudio) private var excludeOwnAppAudio
+
+    @Default(.memoryCapMB) private var memoryCapMB
+    @Default(.queueDepth) private var queueDepth
+    @Default(.playAudioCueOnSave) private var playAudioCueOnSave
+    @Default(.showNotificationOnSave) private var showNotificationOnSave
+    @Default(.watermarkSavedClips) private var watermarkSavedClips
+
+    @State private var displays: [DisplayOption] = []
+    @State private var microphones: [MicrophoneOption] = []
+    @State private var launchAtLoginError: String?
+    @State private var displayLoadError: String?
+
+    public init() {}
+    
+    public var body: some View {
+        TabView {
+            generalTab
+                .tabItem { Label("General", systemImage: "gearshape") }
+
+            videoTab
+                .tabItem { Label("Video", systemImage: "video") }
+
+            audioTab
+                .tabItem { Label("Audio", systemImage: "speaker.wave.2") }
+
+            hotkeysTab
+                .tabItem { Label("Hotkeys", systemImage: "keyboard") }
+
+            advancedTab
+                .tabItem { Label("Advanced", systemImage: "slider.horizontal.3") }
+        }
+        .padding(20)
+        .frame(width: 760, height: 560)
+        .task {
+            loadMicrophones()
+            await loadDisplays()
+            syncLaunchAtLoginState()
+        }
+        .onChange(of: qualityPresetRawValue) { _, newValue in
+            applyQualityPresetIfNeeded(newValue)
+        }
+        .onChange(of: captureResolutionRawValue) { _, _ in
+            markQualityPresetAsCustom()
+        }
+        .onChange(of: frameRate) { _, _ in
+            markQualityPresetAsCustom()
+        }
+        .onChange(of: bitrateMbps) { _, _ in
+            markQualityPresetAsCustom()
+        }
+        .onChange(of: launchAtLogin) { _, newValue in
+            applyLaunchAtLogin(newValue)
+        }
+    }
+
+    private var generalTab: some View {
+        Form {
+            Section("Replay") {
+                Stepper(value: $bufferDurationSeconds, in: 15...300, step: 5) {
+                    Text("Buffer duration: \(bufferDurationSeconds) seconds")
+                }
+            }
+
+            Section("Storage") {
+                HStack(alignment: .firstTextBaseline, spacing: 8) {
+                    Text("Output directory")
+                    Spacer()
+                    Text(outputDirectoryPath)
+                        .lineLimit(1)
+                        .truncationMode(.middle)
+                        .foregroundStyle(.secondary)
+                }
+
+                Button("Choose Folder…") {
+                    chooseOutputDirectory()
+                }
+            }
+
+            Section("Startup") {
+                Toggle("Launch at login", isOn: $launchAtLogin)
+                Toggle("Auto-start recording on launch", isOn: $autoStartRecordingOnLaunch)
+            }
+
+            if let launchAtLoginError {
+                Section {
+                    Label(launchAtLoginError, systemImage: "exclamationmark.triangle.fill")
+                        .foregroundStyle(.orange)
+                }
+            }
+        }
+        .formStyle(.grouped)
+    }
+
+    private var videoTab: some View {
+        Form {
+            Section("Capture") {
+                Picker("Codec", selection: $videoCodecRawValue) {
+                    ForEach(VideoCodec.allCases) { codec in
+                        Text(codec.title).tag(codec.rawValue)
+                    }
+                }
+
+                if displays.isEmpty {
+                    HStack {
+                        Text("Capture source")
+                        Spacer()
+                        Text(displayLoadError ?? "No displays available yet")
+                            .foregroundStyle(.secondary)
+                    }
+                } else {
+                    Picker("Capture source", selection: $captureDisplayID) {
+                        ForEach(displays) { display in
+                            Text(display.name).tag(display.id)
+                        }
+                    }
+                }
+            }
+
+            Section("Encoding") {
+                Picker("Resolution", selection: $captureResolutionRawValue) {
+                    ForEach(CaptureResolution.allCases) { mode in
+                        Text(mode.title).tag(mode.rawValue)
+                    }
+                }
+
+                if captureResolutionRawValue == CaptureResolution.custom.rawValue {
+                    Stepper(value: $customCaptureWidth, in: 640...7680, step: 16) {
+                        Text("Custom width: \(customCaptureWidth)")
+                    }
+                    Stepper(value: $customCaptureHeight, in: 360...4320, step: 16) {
+                        Text("Custom height: \(customCaptureHeight)")
+                    }
+                }
+
+                Picker("Frame rate", selection: $frameRate) {
+                    Text("30 fps").tag(30)
+                    Text("60 fps").tag(60)
+                }
+
+                VStack(alignment: .leading, spacing: 6) {
+                    HStack {
+                        Text("Bitrate")
+                        Spacer()
+                        Text("\(Int(bitrateMbps)) Mbps")
+                            .foregroundStyle(.secondary)
+                    }
+                    Slider(value: $bitrateMbps, in: 10...50, step: 1)
+                }
+
+                Picker("Quality preset", selection: $qualityPresetRawValue) {
+                    ForEach(QualityPreset.allCases) { preset in
+                        Text(preset.title).tag(preset.rawValue)
+                    }
+                }
+            }
+
+            Section {
+                Label("Capture and encoder changes apply after restarting recording.", systemImage: "arrow.clockwise.circle")
+                    .foregroundStyle(.secondary)
+            }
+        }
+        .formStyle(.grouped)
+    }
+
+    private var audioTab: some View {
+        Form {
+            Section("Sources") {
+                Toggle("Capture system audio", isOn: $captureSystemAudio)
+                Toggle("Capture microphone", isOn: $captureMicrophone)
+                Toggle("Exclude ReplayMac audio", isOn: $excludeOwnAppAudio)
+            }
+
+            Section("Microphone") {
+                if microphones.isEmpty {
+                    HStack {
+                        Text("Mic device")
+                        Spacer()
+                        Text("No microphones detected")
+                            .foregroundStyle(.secondary)
+                    }
+                } else {
+                    Picker("Mic device", selection: $microphoneID) {
+                        ForEach(microphones) { microphone in
+                            Text(microphone.name).tag(microphone.id)
+                        }
+                    }
+                    .disabled(!captureMicrophone)
+                }
+            }
+
+            Section {
+                Label("Audio source changes apply after restarting recording.", systemImage: "arrow.clockwise.circle")
+                    .foregroundStyle(.secondary)
+            }
+        }
+        .formStyle(.grouped)
+    }
+
+    private var hotkeysTab: some View {
+        Form {
+            Section("Primary") {
+                KeyboardShortcuts.Recorder("Save clip", name: .saveClip)
+                KeyboardShortcuts.Recorder("Start/stop recording", name: .toggleRecording)
+            }
+
+            Section("Quick Presets") {
+                KeyboardShortcuts.Recorder("Save last 15 seconds", name: .saveLast15Seconds)
+                KeyboardShortcuts.Recorder("Save last 60 seconds", name: .saveLast60Seconds)
+            }
+        }
+        .formStyle(.grouped)
+    }
+
+    private var advancedTab: some View {
+        Form {
+            Section("Performance") {
+                VStack(alignment: .leading, spacing: 6) {
+                    HStack {
+                        Text("Memory cap")
+                        Spacer()
+                        Text(memoryCapLabel)
+                            .foregroundStyle(.secondary)
+                    }
+                    Slider(value: $memoryCapMB, in: 256...4096, step: 64)
+                }
+
+                Stepper(value: $queueDepth, in: 3...10) {
+                    Text("SCK queue depth: \(queueDepth)")
+                }
+            }
+
+            Section("Feedback") {
+                Toggle("Play audio cue on save", isOn: $playAudioCueOnSave)
+                Toggle("Show notification on save", isOn: $showNotificationOnSave)
+                Toggle("Watermark saved clips", isOn: $watermarkSavedClips)
+            }
+        }
+        .formStyle(.grouped)
+    }
+
+    private var memoryCapLabel: String {
+        if memoryCapMB >= 1024 {
+            return String(format: "%.1f GB", memoryCapMB / 1024)
+        }
+        return "\(Int(memoryCapMB)) MB"
+    }
+
+    private func chooseOutputDirectory() {
+        let panel = NSOpenPanel()
+        panel.title = "Choose Clip Output Folder"
+        panel.canChooseFiles = false
+        panel.canChooseDirectories = true
+        panel.allowsMultipleSelection = false
+        panel.canCreateDirectories = true
+        panel.directoryURL = URL(filePath: outputDirectoryPath, directoryHint: .isDirectory)
+
+        guard panel.runModal() == .OK, let selectedURL = panel.url else {
+            return
+        }
+
+        outputDirectoryPath = selectedURL.path(percentEncoded: false)
+    }
+
+    private func applyQualityPresetIfNeeded(_ presetRawValue: String) {
+        guard let preset = QualityPreset(rawValue: presetRawValue) else {
+            return
+        }
+
+        switch preset {
+        case .performance:
+            captureResolutionRawValue = CaptureResolution.half.rawValue
+            frameRate = 30
+            bitrateMbps = 15
+        case .quality:
+            captureResolutionRawValue = CaptureResolution.native.rawValue
+            frameRate = 60
+            bitrateMbps = 25
+        case .custom:
+            break
+        }
+    }
+
+    private func markQualityPresetAsCustom() {
+        if qualityPresetRawValue != QualityPreset.custom.rawValue {
+            qualityPresetRawValue = QualityPreset.custom.rawValue
+        }
+    }
+
+    private func syncLaunchAtLoginState() {
+        launchAtLogin = SMAppService.mainApp.status == .enabled
+    }
+
+    private func applyLaunchAtLogin(_ enabled: Bool) {
+        do {
+            if enabled {
+                try SMAppService.mainApp.register()
+            } else {
+                try SMAppService.mainApp.unregister()
+            }
+            launchAtLoginError = nil
+        } catch {
+            launchAtLoginError = "Launch at login update failed: \(error.localizedDescription)"
+            launchAtLogin.toggle()
+        }
+    }
+
+    private func loadMicrophones() {
+        let discoverySession = AVCaptureDevice.DiscoverySession(
+            deviceTypes: [.microphone, .external],
+            mediaType: .audio,
+            position: .unspecified
+        )
+
+        microphones = discoverySession.devices.map {
+            MicrophoneOption(id: $0.uniqueID, name: $0.localizedName)
+        }
+
+        if microphones.isEmpty {
+            microphoneID = ""
+        } else if !microphones.contains(where: { $0.id == microphoneID }) {
+            microphoneID = microphones[0].id
+        }
+    }
+
+    private func loadDisplays() async {
+        do {
+            let shareableContent = try await SCShareableContent.excludingDesktopWindows(false, onScreenWindowsOnly: true)
+            let options = shareableContent.displays.map { display in
+                DisplayOption(
+                    id: String(display.displayID),
+                    name: "Display \(display.displayID) (\(display.width)x\(display.height))"
+                )
+            }
+
+            await MainActor.run {
+                displays = options
+                displayLoadError = nil
+
+                if options.isEmpty {
+                    captureDisplayID = ""
+                } else if !options.contains(where: { $0.id == captureDisplayID }) {
+                    captureDisplayID = options[0].id
+                }
+            }
+        } catch {
+            await MainActor.run {
+                displays = []
+                displayLoadError = error.localizedDescription
+            }
+        }
+    }
+}
+
+private struct DisplayOption: Identifiable, Hashable {
+    let id: String
+    let name: String
+}
+
+private struct MicrophoneOption: Identifiable, Hashable {
+    let id: String
+    let name: String
+}
