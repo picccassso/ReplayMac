@@ -71,39 +71,56 @@ class AppDelegate: NSObject, NSApplicationDelegate, @unchecked Sendable {
             startCapturePipeline(userInitiated: false)
         }
 
-        NSApp.setActivationPolicy(.accessory)
         setupWindowObservers()
+
+        DispatchQueue.main.async { [weak self] in
+            self?.updateActivationPolicy(bringVisibleWindowToFront: true)
+        }
     }
 
     private func setupWindowObservers() {
         NotificationCenter.default.addObserver(
             self,
-            selector: #selector(windowVisibilityChanged),
+            selector: #selector(windowVisibilityChanged(_:)),
             name: NSWindow.didBecomeKeyNotification,
             object: nil
         )
         NotificationCenter.default.addObserver(
             self,
-            selector: #selector(windowVisibilityChanged),
+            selector: #selector(windowVisibilityChanged(_:)),
             name: NSWindow.willCloseNotification,
             object: nil
         )
     }
 
-    @objc private func windowVisibilityChanged() {
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) { [weak self] in
-            self?.updateActivationPolicy()
+    @objc private func windowVisibilityChanged(_ notification: Notification) {
+        DispatchQueue.main.async { [weak self] in
+            self?.updateActivationPolicy(bringVisibleWindowToFront: true)
         }
     }
 
-    private func updateActivationPolicy() {
-        let hasVisibleWindows = NSApp.windows.contains { window in
+    private func updateActivationPolicy(bringVisibleWindowToFront: Bool = false) {
+        let visibleWindows = NSApp.windows.filter { window in
             window.isVisible && window.styleMask.contains(.titled)
         }
+        let hasVisibleWindows = !visibleWindows.isEmpty
 
         if hasVisibleWindows {
             if NSApp.activationPolicy() != .regular {
                 NSApp.setActivationPolicy(.regular)
+            }
+
+            guard bringVisibleWindowToFront else {
+                return
+            }
+
+            if !NSApp.isActive {
+                NSApp.activate(ignoringOtherApps: true)
+            }
+
+            if let windowToFront = NSApp.keyWindow ?? visibleWindows.first {
+                windowToFront.makeKeyAndOrderFront(nil)
+                windowToFront.orderFrontRegardless()
             }
         } else {
             if NSApp.activationPolicy() != .accessory {
@@ -273,6 +290,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, @unchecked Sendable {
             return
         }
         settingsWindow.makeKeyAndOrderFront(nil)
+        settingsWindow.orderFrontRegardless()
     }
 
     private func saveConfiguredClip(lastSeconds: TimeInterval) async {
@@ -389,7 +407,8 @@ class AppDelegate: NSObject, NSApplicationDelegate, @unchecked Sendable {
         NSApp.activate(ignoringOtherApps: true)
         clipLibraryWindowController?.showWindow(nil)
         clipLibraryWindowController?.window?.makeKeyAndOrderFront(nil)
-        updateActivationPolicy()
+        clipLibraryWindowController?.window?.orderFrontRegardless()
+        updateActivationPolicy(bringVisibleWindowToFront: true)
     }
 
     private func enforceMemoryBudgets(
