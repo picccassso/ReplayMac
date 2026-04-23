@@ -39,5 +39,6 @@ Saved clips are written to:
 ![Audio settings](app_photos/3_audio_settings.png)
 ![Hotkey settings](app_photos/4_hotkey_settings.png)
 ![Advanced settings](app_photos/5_advanced_settings.png)
+![Clip library](app_photos/6_library.png)
 
 </details>
