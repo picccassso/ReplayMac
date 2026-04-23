@@ -376,19 +376,14 @@ class AppDelegate: NSObject, NSApplicationDelegate, @unchecked Sendable {
     private func handleCaptureInterruption(_ interruption: CaptureInterruption) {
         switch interruption {
         case .restartedAfterGPUPressure:
-            menuBarState.showNotice("Recording resumed")
             menuBarState.setRecording(true)
         case .gpuPressurePaused:
-            menuBarState.showNotice("Recording paused - GPU pressure")
             stopCapturePipeline()
         case .permissionRevoked:
-            menuBarState.showNotice("Recording stopped - permission revoked")
             stopCapturePipeline()
         case .displayDisconnected:
-            menuBarState.showNotice("Recording stopped - display disconnected")
             stopCapturePipeline()
         case .stopped(let reason):
-            menuBarState.showNotice("Recording stopped")
             print("Capture stopped: \(reason)")
             stopCapturePipeline()
         }

@@ -43,12 +43,4 @@ public final class SparkleController {
         didStart = true
         logger.info("Sparkle started for direct distribution updates")
     }
-
-    public func checkForUpdates() {
-        guard let updaterController else {
-            logger.info("Check for updates skipped: Sparkle not configured")
-            return
-        }
-        updaterController.checkForUpdates(nil)
-    }
 }

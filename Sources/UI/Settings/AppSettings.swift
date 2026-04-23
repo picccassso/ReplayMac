@@ -58,28 +58,6 @@ public enum QualityPreset: String, CaseIterable, Identifiable {
     }
 }
 
-public enum OverlayCorner: String, CaseIterable, Identifiable {
-    case topLeft
-    case topRight
-    case bottomLeft
-    case bottomRight
-
-    public var id: String { rawValue }
-
-    public var title: String {
-        switch self {
-        case .topLeft:
-            return "Top Left"
-        case .topRight:
-            return "Top Right"
-        case .bottomLeft:
-            return "Bottom Left"
-        case .bottomRight:
-            return "Bottom Right"
-        }
-    }
-}
-
 private enum AppDefaultValues {
     static var outputDirectoryPath: String {
         let moviesDirectory = FileManager.default.urls(for: .moviesDirectory, in: .userDomainMask).first
@@ -102,7 +80,6 @@ public enum AppSettings {
     public static var autoStartRecordingOnLaunch: Bool { Defaults[.autoStartRecordingOnLaunch] }
     public static var captureSystemAudio: Bool { Defaults[.captureSystemAudio] }
     public static var captureMicrophone: Bool { Defaults[.captureMicrophone] }
-    public static var showOverlayIndicator: Bool { Defaults[.showOverlayIndicator] }
     public static var playAudioCueOnSave: Bool { Defaults[.playAudioCueOnSave] }
     public static var showNotificationOnSave: Bool { Defaults[.showNotificationOnSave] }
     public static var watermarkSavedClips: Bool { Defaults[.watermarkSavedClips] }
@@ -121,10 +98,6 @@ public enum AppSettings {
 
     public static var captureDisplayID: String {
         Defaults[.captureDisplayID]
-    }
-
-    public static var overlayCorner: OverlayCorner {
-        OverlayCorner(rawValue: Defaults[.overlayCorner]) ?? .topRight
     }
 
     public static var systemAudioVolume: Double { Defaults[.systemAudioVolume] }
@@ -153,8 +126,6 @@ public extension Defaults.Keys {
 
     static let memoryCapMB = Key<Double>("memoryCapMB", default: 1536)
     static let queueDepth = Key<Int>("queueDepth", default: 5)
-    static let showOverlayIndicator = Key<Bool>("showOverlayIndicator", default: false)
-    static let overlayCorner = Key<String>("overlayCorner", default: OverlayCorner.topRight.rawValue)
     static let playAudioCueOnSave = Key<Bool>("playAudioCueOnSave", default: true)
     static let showNotificationOnSave = Key<Bool>("showNotificationOnSave", default: true)
     static let watermarkSavedClips = Key<Bool>("watermarkSavedClips", default: false)

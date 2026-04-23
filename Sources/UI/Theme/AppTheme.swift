@@ -15,21 +15,6 @@ public enum AppTheme {
 
     public static let cornerRadiusSmall: CGFloat = 8
     public static let cornerRadiusMedium: CGFloat = 12
-    public static let cornerRadiusLarge: CGFloat = 16
-
-    public static let shadowSmall = ShadowStyle(color: .black.opacity(0.06), radius: 4, x: 0, y: 2)
-    public static let shadowMedium = ShadowStyle(color: .black.opacity(0.08), radius: 8, x: 0, y: 4)
-
-    public struct ShadowStyle: Sendable {
-        public let color: Color
-        public let radius: CGFloat
-        public let x: CGFloat
-        public let y: CGFloat
-
-        public func apply<V: View>(to view: V) -> some View {
-            view.shadow(color: color, radius: radius, x: x, y: y)
-        }
-    }
 }
 
 public struct AccentButtonStyle: ButtonStyle {
@@ -55,22 +40,6 @@ public struct AccentButtonStyle: ButtonStyle {
     }
 }
 
-public struct GlassCardModifier: ViewModifier {
-    public init() {}
-
-    public func body(content: Content) -> some View {
-        content
-            .padding(14)
-            .background(.ultraThinMaterial)
-            .clipShape(RoundedRectangle(cornerRadius: AppTheme.cornerRadiusMedium, style: .continuous))
-            .overlay(
-                RoundedRectangle(cornerRadius: AppTheme.cornerRadiusMedium, style: .continuous)
-                    .stroke(Color.white.opacity(0.15), lineWidth: 0.5)
-            )
-            .shadow(color: .black.opacity(0.06), radius: 6, x: 0, y: 3)
-    }
-}
-
 public struct PulsingDotModifier: ViewModifier {
     @State private var isPulsing = false
 
@@ -93,10 +62,6 @@ public struct PulsingDotModifier: ViewModifier {
 }
 
 public extension View {
-    func glassCard() -> some View {
-        modifier(GlassCardModifier())
-    }
-
     func pulsingDot() -> some View {
         modifier(PulsingDotModifier())
     }

@@ -68,8 +68,7 @@ let package = Package(
                 "Save",
                 "Hotkeys",
                 .product(name: "KeyboardShortcuts", package: "KeyboardShortcuts"),
-                .product(name: "Defaults", package: "Defaults"),
-                .product(name: "Sparkle", package: "Sparkle")
+                .product(name: "Defaults", package: "Defaults")
             ],
             path: "Sources/UI"
         ),
