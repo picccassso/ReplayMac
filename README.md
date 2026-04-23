@@ -30,3 +30,14 @@ This compiles the app and outputs `dist/ReplayMac.app`.
 Saved clips are written to:
 
 `~/Movies/ReplayMac/`
+
+<details>
+<summary>Screenshots</summary>
+
+![General settings](app_photos/1_general_settings.png)
+![Video settings](app_photos/2_video_settings.png)
+![Audio settings](app_photos/3_audio_settings.png)
+![Hotkey settings](app_photos/4_hotkey_settings.png)
+![Advanced settings](app_photos/5_advanced_settings.png)
+
+</details>
