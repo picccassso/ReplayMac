@@ -15,6 +15,7 @@ import SwiftUI
 @MainActor
 class AppDelegate: NSObject, NSApplicationDelegate, @unchecked Sendable {
     let captureManager = CaptureManager()
+    let frameCompositor = FrameCompositor()
     let videoEncoder = VideoEncoder()
     let videoRingBuffer = VideoRingBuffer()
 
@@ -134,6 +135,10 @@ class AppDelegate: NSObject, NSApplicationDelegate, @unchecked Sendable {
             videoRingBuffer.append(encodedSample: sampleBuffer)
         }
 
+        frameCompositor.outputHandler = { [videoEncoder] sampleBuffer in
+            videoEncoder.encode(sampleBuffer: sampleBuffer)
+        }
+
         systemAudioEncoder.outputHandler = { [systemAudioRingBuffer] sampleBuffer in
             systemAudioRingBuffer.append(sampleBuffer)
         }
@@ -162,22 +167,64 @@ class AppDelegate: NSObject, NSApplicationDelegate, @unchecked Sendable {
                     print("Warning: Microphone permission denied; mic track will be unavailable.")
                 }
 
-                await captureManager.setVideoHandler { [videoEncoder] sampleBuffer in
-                    videoEncoder.encode(sampleBuffer: sampleBuffer)
-                }
-                await captureManager.setAudioHandler { [systemAudioCapture] sampleBuffer in
-                    if AppSettings.captureSystemAudio {
-                        systemAudioCapture.process(sampleBuffer: sampleBuffer)
-                    }
-                }
+                let isDual = AppSettings.captureMode == CaptureMode.dualSideBySide.rawValue
 
-                let config = try await captureManager.start(
-                    interactivePermissionPrompt: userInitiated,
-                    captureDisplayID: AppSettings.captureDisplayID.isEmpty ? nil : AppSettings.captureDisplayID,
-                    fps: AppSettings.frameRate,
-                    queueDepth: AppSettings.queueDepth
-                )
-                try videoEncoder.start(width: config.width, height: config.height, fps: config.fps)
+                if isDual {
+                    await captureManager.setVideoHandler1 { [frameCompositor] sampleBuffer in
+                        frameCompositor.pushPrimaryFrame(sampleBuffer)
+                    }
+                    await captureManager.setVideoHandler2 { [frameCompositor] sampleBuffer in
+                        frameCompositor.pushSecondaryFrame(sampleBuffer)
+                    }
+                    await captureManager.setAudioHandler1 { [systemAudioCapture] sampleBuffer in
+                        if AppSettings.captureSystemAudio {
+                            systemAudioCapture.process(sampleBuffer: sampleBuffer)
+                        }
+                    }
+
+                    let dualConfigs = try await captureManager.startDual(
+                        interactivePermissionPrompt: userInitiated,
+                        captureDisplayID1: AppSettings.captureDisplayID.isEmpty ? nil : AppSettings.captureDisplayID,
+                        captureDisplayID2: AppSettings.captureDisplayID2.isEmpty ? nil : AppSettings.captureDisplayID2,
+                        fps: AppSettings.frameRate,
+                        queueDepth: AppSettings.queueDepth
+                    )
+
+                    let compositeWidth = dualConfigs.config1.width + dualConfigs.config2.width
+                    let compositeHeight = max(dualConfigs.config1.height, dualConfigs.config2.height)
+
+                    frameCompositor.configure(
+                        display1Width: dualConfigs.config1.width,
+                        display1Height: dualConfigs.config1.height,
+                        display2Width: dualConfigs.config2.width,
+                        display2Height: dualConfigs.config2.height
+                    )
+
+                    try videoEncoder.start(
+                        width: compositeWidth,
+                        height: compositeHeight,
+                        fps: dualConfigs.config1.fps
+                    )
+
+                    print("Dual capture started: Display1=\(dualConfigs.config1.width)x\(dualConfigs.config1.height), Display2=\(dualConfigs.config2.width)x\(dualConfigs.config2.height), Composite=\(compositeWidth)x\(compositeHeight)")
+                } else {
+                    await captureManager.setVideoHandler { [videoEncoder] sampleBuffer in
+                        videoEncoder.encode(sampleBuffer: sampleBuffer)
+                    }
+                    await captureManager.setAudioHandler { [systemAudioCapture] sampleBuffer in
+                        if AppSettings.captureSystemAudio {
+                            systemAudioCapture.process(sampleBuffer: sampleBuffer)
+                        }
+                    }
+
+                    let config = try await captureManager.start(
+                        interactivePermissionPrompt: userInitiated,
+                        captureDisplayID: AppSettings.captureDisplayID.isEmpty ? nil : AppSettings.captureDisplayID,
+                        fps: AppSettings.frameRate,
+                        queueDepth: AppSettings.queueDepth
+                    )
+                    try videoEncoder.start(width: config.width, height: config.height, fps: config.fps)
+                }
 
                 if shouldCaptureMic && micPermissionGranted {
                     do {
@@ -211,6 +258,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, @unchecked Sendable {
         videoEncoder.stop()
         systemAudioEncoder.stop()
         micAudioEncoder.stop()
+        frameCompositor.reset()
 
         isCaptureRunning = false
         menuBarState.setRecording(false)

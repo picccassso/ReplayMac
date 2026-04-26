@@ -137,6 +137,10 @@ public final class VideoRingBuffer: @unchecked Sendable {
             let duration = presentationTimeStamp(of: newest) - presentationTimeStamp(of: oldest)
             if duration > timeCap {
                 evictOldestGOP()
+            } else if duration == 0 && deque.count > 1 && _currentMemoryBytes > memoryCap / 2 {
+                // PTS all equal — fall back to memory-pressure eviction at 50% cap
+                guard keyframeIndices.count >= 2 else { break }
+                evictOldestGOP()
             } else {
                 break
             }

@@ -13,7 +13,9 @@ public struct SettingsView: View {
     @Default(.autoStartRecordingOnLaunch) private var autoStartRecordingOnLaunch
 
     @Default(.videoCodec) private var videoCodecRawValue
+    @Default(.captureMode) private var captureModeRawValue
     @Default(.captureDisplayID) private var captureDisplayID
+    @Default(.captureDisplayID2) private var captureDisplayID2
     @Default(.captureResolution) private var captureResolutionRawValue
     @Default(.customCaptureWidth) private var customCaptureWidth
     @Default(.customCaptureHeight) private var customCaptureHeight
@@ -38,6 +40,10 @@ public struct SettingsView: View {
     @State private var microphones: [MicrophoneOption] = []
     @State private var launchAtLoginError: String?
     @State private var displayLoadError: String?
+
+    private var dualDisplayOptions: [DisplayOption] {
+        displays.filter { $0.id != captureDisplayID }
+    }
 
     public init() {}
 
@@ -79,6 +85,19 @@ public struct SettingsView: View {
         }
         .onChange(of: launchAtLogin) { _, newValue in
             applyLaunchAtLogin(newValue)
+        }
+        .onChange(of: captureModeRawValue) { _, _ in
+            validateDisplay2Selection()
+        }
+        .onChange(of: captureDisplayID) { _, _ in
+            validateDisplay2Selection()
+        }
+    }
+
+    private func validateDisplay2Selection() {
+        let remaining = displays.filter { $0.id != captureDisplayID }
+        if !remaining.contains(where: { $0.id == captureDisplayID2 }) {
+            captureDisplayID2 = remaining.first?.id ?? ""
         }
     }
 
@@ -140,6 +159,12 @@ public struct SettingsView: View {
                     }
                 }
 
+                Picker("Capture mode", selection: $captureModeRawValue) {
+                    ForEach(CaptureMode.allCases) { mode in
+                        Text(mode.title).tag(mode.rawValue)
+                    }
+                }
+
                 if displays.isEmpty {
                     HStack {
                         Text("Capture source")
@@ -148,9 +173,17 @@ public struct SettingsView: View {
                             .foregroundStyle(AppTheme.textSecondary)
                     }
                 } else {
-                    Picker("Capture source", selection: $captureDisplayID) {
+                    Picker("Display 1", selection: $captureDisplayID) {
                         ForEach(displays) { display in
                             Text(display.name).tag(display.id)
+                        }
+                    }
+
+                    if captureModeRawValue == CaptureMode.dualSideBySide.rawValue {
+                        Picker("Display 2", selection: $captureDisplayID2) {
+                            ForEach(dualDisplayOptions) { display in
+                                Text(display.name).tag(display.id)
+                            }
                         }
                     }
                 }
@@ -447,8 +480,16 @@ public struct SettingsView: View {
 
                 if options.isEmpty {
                     captureDisplayID = ""
-                } else if !options.contains(where: { $0.id == captureDisplayID }) {
-                    captureDisplayID = options[0].id
+                    captureDisplayID2 = ""
+                } else {
+                    if !options.contains(where: { $0.id == captureDisplayID }) {
+                        captureDisplayID = options[0].id
+                    }
+
+                    let remainingForDisplay2 = options.filter { $0.id != captureDisplayID }
+                    if !remainingForDisplay2.contains(where: { $0.id == captureDisplayID2 }) {
+                        captureDisplayID2 = remainingForDisplay2.first?.id ?? ""
+                    }
                 }
             }
         } catch {

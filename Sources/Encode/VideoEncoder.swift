@@ -32,6 +32,8 @@ public final class VideoEncoder: @unchecked Sendable {
     private var compressionSession: VTCompressionSession?
     private let stateLock = NSLock()
     private var _outputHandler: OutputHandler?
+    private var expectedPTSQueue: [CMTime] = []
+    private var encodeCount: Int64 = 0
 
     public var outputHandler: OutputHandler? {
         get {
@@ -148,7 +150,12 @@ public final class VideoEncoder: @unchecked Sendable {
             infoFlagsOut: nil
         )
 
-        if status != noErr {
+        if status == noErr {
+            stateLock.lock()
+            expectedPTSQueue.append(pts)
+            encodeCount += 1
+            stateLock.unlock()
+        } else {
             print("Encoder: VTCompressionSessionEncodeFrame failed with status \(status)")
         }
     }
@@ -157,6 +164,7 @@ public final class VideoEncoder: @unchecked Sendable {
         stateLock.lock()
         let session = compressionSession
         compressionSession = nil
+        expectedPTSQueue.removeAll()
         stateLock.unlock()
 
         guard let session else { return }
@@ -174,8 +182,53 @@ public final class VideoEncoder: @unchecked Sendable {
 
         stateLock.lock()
         let handler = _outputHandler
+        let expectedPTS = expectedPTSQueue.isEmpty ? nil : expectedPTSQueue.removeFirst()
         stateLock.unlock()
 
+        let outputPTS = CMSampleBufferGetPresentationTimeStamp(sampleBuffer)
+
+        if let expectedPTS, expectedPTS.isValid, expectedPTS.seconds > 0 {
+            let ptsMatches = outputPTS.isValid && outputPTS.seconds > 0
+                && abs(outputPTS.seconds - expectedPTS.seconds) < 0.00001
+
+            if !ptsMatches {
+                if encodeCount <= 5 || encodeCount % 300 == 0 {
+                    print("Encoder: PTS mismatch — input=\(expectedPTS.seconds) output=\(outputPTS.seconds) (valid=\(outputPTS.isValid)) — retiming")
+                }
+                if let retimed = Self.retimeSampleBuffer(sampleBuffer, newPTS: expectedPTS) {
+                    handler?(retimed)
+                    return
+                }
+            }
+        } else if !outputPTS.isValid || outputPTS.seconds == 0 {
+            if encodeCount <= 5 || encodeCount % 300 == 0 {
+                print("Encoder: output PTS invalid/zero (\(outputPTS.seconds)) and no expected PTS to fix with")
+            }
+        }
+
         handler?(sampleBuffer)
+    }
+
+    private static func retimeSampleBuffer(_ sampleBuffer: CMSampleBuffer, newPTS: CMTime) -> CMSampleBuffer? {
+        let originalDuration = CMSampleBufferGetDuration(sampleBuffer)
+        let timing = CMSampleTimingInfo(
+            duration: originalDuration.isValid ? originalDuration : CMTime(value: 1, timescale: 60),
+            presentationTimeStamp: newPTS,
+            decodeTimeStamp: .invalid
+        )
+        var retimed: CMSampleBuffer?
+        var mutableTiming = timing
+        let status = CMSampleBufferCreateCopyWithNewTiming(
+            allocator: kCFAllocatorDefault,
+            sampleBuffer: sampleBuffer,
+            sampleTimingEntryCount: 1,
+            sampleTimingArray: &mutableTiming,
+            sampleBufferOut: &retimed
+        )
+        if status != noErr {
+            print("Encoder: CMSampleBufferCreateCopyWithNewTiming failed with status \(status)")
+            return nil
+        }
+        return retimed
     }
 }

@@ -26,7 +26,8 @@ let package = Package(
             linkerSettings: [
                 .linkedFramework("ScreenCaptureKit"),
                 .linkedFramework("CoreMedia"),
-                .linkedFramework("CoreVideo")
+                .linkedFramework("CoreVideo"),
+                .linkedFramework("CoreImage")
             ]
         ),
         .target(

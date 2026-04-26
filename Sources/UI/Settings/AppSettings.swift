@@ -36,6 +36,22 @@ public enum CaptureResolution: String, CaseIterable, Identifiable {
     }
 }
 
+public enum CaptureMode: String, CaseIterable, Identifiable {
+    case single
+    case dualSideBySide = "dual_side_by_side"
+
+    public var id: String { rawValue }
+
+    public var title: String {
+        switch self {
+        case .single:
+            return "Single Display"
+        case .dualSideBySide:
+            return "Dual Side-by-Side"
+        }
+    }
+}
+
 public enum QualityPreset: String, CaseIterable, Identifiable {
     case performance
     case quality
@@ -96,8 +112,16 @@ public enum AppSettings {
         Defaults[.queueDepth]
     }
 
+    public static var captureMode: String {
+        Defaults[.captureMode]
+    }
+
     public static var captureDisplayID: String {
         Defaults[.captureDisplayID]
+    }
+
+    public static var captureDisplayID2: String {
+        Defaults[.captureDisplayID2]
     }
 
     public static var systemAudioVolume: Double { Defaults[.systemAudioVolume] }
@@ -111,7 +135,9 @@ public extension Defaults.Keys {
     static let autoStartRecordingOnLaunch = Key<Bool>("autoStartRecordingOnLaunch", default: true)
 
     static let videoCodec = Key<String>("videoCodec", default: VideoCodec.hevc.rawValue)
+    static let captureMode = Key<String>("captureMode", default: "single")
     static let captureDisplayID = Key<String>("captureDisplayID", default: "")
+    static let captureDisplayID2 = Key<String>("captureDisplayID2", default: "")
     static let captureResolution = Key<String>("captureResolution", default: CaptureResolution.native.rawValue)
     static let customCaptureWidth = Key<Int>("customCaptureWidth", default: 1920)
     static let customCaptureHeight = Key<Int>("customCaptureHeight", default: 1080)
