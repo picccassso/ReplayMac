@@ -18,6 +18,10 @@ class AppDelegate: NSObject, NSApplicationDelegate, @unchecked Sendable {
     let frameCompositor = FrameCompositor()
     let videoEncoder = VideoEncoder()
     let videoRingBuffer = VideoRingBuffer()
+    let dualDisplay1VideoEncoder = VideoEncoder()
+    let dualDisplay2VideoEncoder = VideoEncoder()
+    let dualDisplay1VideoRingBuffer = VideoRingBuffer()
+    let dualDisplay2VideoRingBuffer = VideoRingBuffer()
 
     let systemAudioCapture = SystemAudioCapture()
     let micAudioCapture = MicCapture()
@@ -28,6 +32,8 @@ class AppDelegate: NSObject, NSApplicationDelegate, @unchecked Sendable {
 
     lazy var clipSaver = ClipSaver(
         videoRingBuffer: videoRingBuffer,
+        dualDisplay1VideoRingBuffer: dualDisplay1VideoRingBuffer,
+        dualDisplay2VideoRingBuffer: dualDisplay2VideoRingBuffer,
         systemAudioRingBuffer: systemAudioRingBuffer,
         micRingBuffer: micAudioRingBuffer
     )
@@ -134,6 +140,12 @@ class AppDelegate: NSObject, NSApplicationDelegate, @unchecked Sendable {
         videoEncoder.outputHandler = { [videoRingBuffer] sampleBuffer in
             videoRingBuffer.append(encodedSample: sampleBuffer)
         }
+        dualDisplay1VideoEncoder.outputHandler = { [dualDisplay1VideoRingBuffer] sampleBuffer in
+            dualDisplay1VideoRingBuffer.append(encodedSample: sampleBuffer)
+        }
+        dualDisplay2VideoEncoder.outputHandler = { [dualDisplay2VideoRingBuffer] sampleBuffer in
+            dualDisplay2VideoRingBuffer.append(encodedSample: sampleBuffer)
+        }
 
         frameCompositor.outputHandler = { [videoEncoder] sampleBuffer in
             videoEncoder.encode(sampleBuffer: sampleBuffer)
@@ -161,6 +173,12 @@ class AppDelegate: NSObject, NSApplicationDelegate, @unchecked Sendable {
 
         Task {
             do {
+                videoRingBuffer.clear()
+                dualDisplay1VideoRingBuffer.clear()
+                dualDisplay2VideoRingBuffer.clear()
+                systemAudioRingBuffer.clear()
+                micAudioRingBuffer.clear()
+
                 let shouldCaptureMic = AppSettings.captureMicrophone
                 let micPermissionGranted = shouldCaptureMic ? await requestMicrophonePermissionIfNeeded() : false
                 if shouldCaptureMic && !micPermissionGranted {
@@ -170,11 +188,13 @@ class AppDelegate: NSObject, NSApplicationDelegate, @unchecked Sendable {
                 let isDual = AppSettings.captureMode == CaptureMode.dualSideBySide.rawValue
 
                 if isDual {
-                    await captureManager.setVideoHandler1 { [frameCompositor] sampleBuffer in
+                    await captureManager.setVideoHandler1 { [frameCompositor, dualDisplay1VideoEncoder] sampleBuffer in
                         frameCompositor.pushPrimaryFrame(sampleBuffer)
+                        dualDisplay1VideoEncoder.encode(sampleBuffer: sampleBuffer)
                     }
-                    await captureManager.setVideoHandler2 { [frameCompositor] sampleBuffer in
+                    await captureManager.setVideoHandler2 { [frameCompositor, dualDisplay2VideoEncoder] sampleBuffer in
                         frameCompositor.pushSecondaryFrame(sampleBuffer)
+                        dualDisplay2VideoEncoder.encode(sampleBuffer: sampleBuffer)
                     }
                     await captureManager.setAudioHandler1 { [systemAudioCapture] sampleBuffer in
                         if AppSettings.captureSystemAudio {
@@ -204,6 +224,16 @@ class AppDelegate: NSObject, NSApplicationDelegate, @unchecked Sendable {
                         width: compositeWidth,
                         height: compositeHeight,
                         fps: dualConfigs.config1.fps
+                    )
+                    try dualDisplay1VideoEncoder.start(
+                        width: dualConfigs.config1.width,
+                        height: dualConfigs.config1.height,
+                        fps: dualConfigs.config1.fps
+                    )
+                    try dualDisplay2VideoEncoder.start(
+                        width: dualConfigs.config2.width,
+                        height: dualConfigs.config2.height,
+                        fps: dualConfigs.config2.fps
                     )
 
                     print("Dual capture started: Display1=\(dualConfigs.config1.width)x\(dualConfigs.config1.height), Display2=\(dualConfigs.config2.width)x\(dualConfigs.config2.height), Composite=\(compositeWidth)x\(compositeHeight)")
@@ -256,6 +286,8 @@ class AppDelegate: NSObject, NSApplicationDelegate, @unchecked Sendable {
         captureManager.stop()
         micAudioCapture.stop()
         videoEncoder.stop()
+        dualDisplay1VideoEncoder.stop()
+        dualDisplay2VideoEncoder.stop()
         systemAudioEncoder.stop()
         micAudioEncoder.stop()
         frameCompositor.reset()
@@ -343,26 +375,49 @@ class AppDelegate: NSObject, NSApplicationDelegate, @unchecked Sendable {
     }
 
     private func saveConfiguredClip(lastSeconds: TimeInterval) async {
-        do {
-            let savedURL = try await clipSaver.saveClip(
-                lastSeconds: lastSeconds,
-                outputDirectory: AppSettings.outputDirectoryURL
-            )
-            let finalURL = try await WatermarkCompositor.applyIfEnabled(
-                to: savedURL,
-                enabled: AppSettings.watermarkSavedClips
-            )
+        menuBarState.flashSavedState()
 
-            menuBarState.flashSavedState()
+        do {
+            let isSeparateDualSave = AppSettings.captureMode == CaptureMode.dualSideBySide.rawValue
+                && AppSettings.dualCaptureSaveMode == DualCaptureSaveMode.separateFiles.rawValue
+            let outputDirectory = AppSettings.outputDirectoryURL
+            print("Saving clip to output directory: \(outputDirectory.path(percentEncoded: false))")
+
+            let finalURLs: [URL]
+            if isSeparateDualSave {
+                let savedURLs = try await clipSaver.saveDualDisplayClips(
+                    lastSeconds: lastSeconds,
+                    outputDirectory: outputDirectory
+                )
+                var watermarkedURLs: [URL] = []
+                for url in savedURLs {
+                    let finalURL = try await WatermarkCompositor.applyIfEnabled(
+                        to: url,
+                        enabled: AppSettings.watermarkSavedClips
+                    )
+                    watermarkedURLs.append(finalURL)
+                }
+                finalURLs = watermarkedURLs
+            } else {
+                let savedURL = try await clipSaver.saveClip(
+                    lastSeconds: lastSeconds,
+                    outputDirectory: outputDirectory
+                )
+                let finalURL = try await WatermarkCompositor.applyIfEnabled(
+                    to: savedURL,
+                    enabled: AppSettings.watermarkSavedClips
+                )
+                finalURLs = [finalURL]
+            }
 
             if AppSettings.playAudioCueOnSave {
                 AudioCue.playSaveSuccess()
             }
 
             if AppSettings.showNotificationOnSave {
-                NotificationManager.shared.showClipSavedNotification(fileURL: finalURL, clipDuration: lastSeconds)
+                NotificationManager.shared.showClipSavedNotification(fileURL: finalURLs[0], clipDuration: lastSeconds)
             }
-            print("Clip saved: \(finalURL.path)")
+            print("Clip saved: \(finalURLs.map(\.path).joined(separator: ", "))")
         } catch {
             if AppSettings.showNotificationOnSave {
                 NotificationManager.shared.showSaveFailedNotification(error: error.localizedDescription)
@@ -395,6 +450,8 @@ class AppDelegate: NSObject, NSApplicationDelegate, @unchecked Sendable {
                 }
 
                 let videoMemory = self.videoRingBuffer.currentMemoryBytes
+                let dualDisplay1Memory = self.dualDisplay1VideoRingBuffer.currentMemoryBytes
+                let dualDisplay2Memory = self.dualDisplay2VideoRingBuffer.currentMemoryBytes
                 let videoKeyframes = self.videoRingBuffer.keyframeCount
                 let videoSamples = self.videoRingBuffer.totalSampleCount
                 let systemAudioDuration = self.systemAudioRingBuffer.duration
@@ -405,10 +462,12 @@ class AppDelegate: NSObject, NSApplicationDelegate, @unchecked Sendable {
                 let micSamples = self.micAudioRingBuffer.totalSampleCount
                 print("RingBuffer | Video: \(String(format: "%.1f", videoDuration))s \(videoMemory / (1024 * 1024))MB keyframes=\(videoKeyframes) samples=\(videoSamples) | SystemAudio: \(audioSamples) samples \(audioMemory / 1024)KB \(String(format: "%.1f", systemAudioDuration))s | Mic: \(micSamples) samples \(String(format: "%.1f", micDuration))s")
 
-                let totalRingMemory = videoMemory + audioMemory + micMemory
+                let totalRingMemory = videoMemory + dualDisplay1Memory + dualDisplay2Memory + audioMemory + micMemory
                 self.menuBarState.setBufferMemoryBytes(totalRingMemory)
                 self.enforceMemoryBudgets(
                     totalRingMemory: totalRingMemory,
+                    dualDisplay1Memory: dualDisplay1Memory,
+                    dualDisplay2Memory: dualDisplay2Memory,
                     systemAudioMemory: audioMemory,
                     micAudioMemory: micMemory
                 )
@@ -457,30 +516,38 @@ class AppDelegate: NSObject, NSApplicationDelegate, @unchecked Sendable {
 
     private func enforceMemoryBudgets(
         totalRingMemory: Int,
+        dualDisplay1Memory: Int,
+        dualDisplay2Memory: Int,
         systemAudioMemory: Int,
         micAudioMemory: Int
     ) {
         let capBytes = Int(AppSettings.memoryCapMB * 1024 * 1024)
         if totalRingMemory > capBytes {
-            let targetVideoBytes = max(0, capBytes - systemAudioMemory - micAudioMemory)
+            let targetVideoBytes = max(0, capBytes - dualDisplay1Memory - dualDisplay2Memory - systemAudioMemory - micAudioMemory)
             let evictedVideo = videoRingBuffer.evictToMemory(maxBytes: targetVideoBytes)
+            var remainingBudget = max(0, capBytes - videoRingBuffer.currentMemoryBytes - systemAudioMemory - micAudioMemory)
+            let evictedDisplay1 = dualDisplay1VideoRingBuffer.evictToMemory(maxBytes: remainingBudget / 2)
+            remainingBudget = max(0, remainingBudget - dualDisplay1VideoRingBuffer.currentMemoryBytes)
+            let evictedDisplay2 = dualDisplay2VideoRingBuffer.evictToMemory(maxBytes: remainingBudget)
 
-            var remainingBudget = max(0, capBytes - videoRingBuffer.currentMemoryBytes)
+            remainingBudget = max(0, capBytes - videoRingBuffer.currentMemoryBytes - dualDisplay1VideoRingBuffer.currentMemoryBytes - dualDisplay2VideoRingBuffer.currentMemoryBytes)
             let targetSystemBytes = remainingBudget / 2
             let evictedSystem = systemAudioRingBuffer.evictToMemory(maxBytes: targetSystemBytes)
             remainingBudget = max(0, remainingBudget - systemAudioRingBuffer.currentMemoryBytes)
             let evictedMic = micAudioRingBuffer.evictToMemory(maxBytes: remainingBudget)
 
-            print("Memory cap exceeded. Evicted video=\(evictedVideo)B systemAudio=\(evictedSystem)B mic=\(evictedMic)B")
+            print("Memory cap exceeded. Evicted video=\(evictedVideo)B display1=\(evictedDisplay1)B display2=\(evictedDisplay2)B systemAudio=\(evictedSystem)B mic=\(evictedMic)B")
         }
 
         if let availableMemory = Self.estimatedAvailableMemoryBytes(),
            availableMemory < 512 * 1024 * 1024 {
             let reducedSeconds = max(10, AppSettings.bufferDurationSeconds / 2)
             let evictedVideo = videoRingBuffer.trimToDuration(maxSeconds: TimeInterval(reducedSeconds))
+            let evictedDisplay1 = dualDisplay1VideoRingBuffer.trimToDuration(maxSeconds: TimeInterval(reducedSeconds))
+            let evictedDisplay2 = dualDisplay2VideoRingBuffer.trimToDuration(maxSeconds: TimeInterval(reducedSeconds))
             let evictedSystem = systemAudioRingBuffer.trimToDuration(maxSeconds: TimeInterval(reducedSeconds))
             let evictedMic = micAudioRingBuffer.trimToDuration(maxSeconds: TimeInterval(reducedSeconds))
-            print("Critical memory pressure (\(availableMemory / (1024 * 1024))MB avail). Shrunk buffers to \(reducedSeconds)s; evicted video=\(evictedVideo)B systemAudio=\(evictedSystem)B mic=\(evictedMic)B")
+            print("Critical memory pressure (\(availableMemory / (1024 * 1024))MB avail). Shrunk buffers to \(reducedSeconds)s; evicted video=\(evictedVideo)B display1=\(evictedDisplay1)B display2=\(evictedDisplay2)B systemAudio=\(evictedSystem)B mic=\(evictedMic)B")
         }
     }
 

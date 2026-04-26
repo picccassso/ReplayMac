@@ -140,6 +140,11 @@ public final class VideoEncoder: @unchecked Sendable {
         let pts = CMSampleBufferGetPresentationTimeStamp(sampleBuffer)
         let duration = CMSampleBufferGetDuration(sampleBuffer)
 
+        stateLock.lock()
+        expectedPTSQueue.append(pts)
+        encodeCount += 1
+        stateLock.unlock()
+
         let status = VTCompressionSessionEncodeFrame(
             session,
             imageBuffer: pixelBuffer,
@@ -150,12 +155,10 @@ public final class VideoEncoder: @unchecked Sendable {
             infoFlagsOut: nil
         )
 
-        if status == noErr {
+        if status != noErr {
             stateLock.lock()
-            expectedPTSQueue.append(pts)
-            encodeCount += 1
+            _ = expectedPTSQueue.popLast()
             stateLock.unlock()
-        } else {
             print("Encoder: VTCompressionSessionEncodeFrame failed with status \(status)")
         }
     }
@@ -165,6 +168,7 @@ public final class VideoEncoder: @unchecked Sendable {
         let session = compressionSession
         compressionSession = nil
         expectedPTSQueue.removeAll()
+        encodeCount = 0
         stateLock.unlock()
 
         guard let session else { return }

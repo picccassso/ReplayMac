@@ -52,6 +52,22 @@ public enum CaptureMode: String, CaseIterable, Identifiable {
     }
 }
 
+public enum DualCaptureSaveMode: String, CaseIterable, Identifiable {
+    case sideBySide = "side_by_side"
+    case separateFiles = "separate_files"
+
+    public var id: String { rawValue }
+
+    public var title: String {
+        switch self {
+        case .sideBySide:
+            return "One side-by-side file"
+        case .separateFiles:
+            return "Two separate files"
+        }
+    }
+}
+
 public enum QualityPreset: String, CaseIterable, Identifiable {
     case performance
     case quality
@@ -90,7 +106,12 @@ public enum AppSettings {
     public static var bufferDurationSeconds: Int { Defaults[.bufferDurationSeconds] }
 
     public static var outputDirectoryURL: URL {
-        URL(filePath: Defaults[.outputDirectoryPath], directoryHint: .isDirectory)
+        let path = Defaults[.outputDirectoryPath]
+        guard !path.isEmpty else {
+            return URL(filePath: AppDefaultValues.outputDirectoryPath, directoryHint: .isDirectory)
+        }
+        return URL(filePath: (path as NSString).expandingTildeInPath, directoryHint: .isDirectory)
+            .standardizedFileURL
     }
 
     public static var autoStartRecordingOnLaunch: Bool { Defaults[.autoStartRecordingOnLaunch] }
@@ -124,6 +145,10 @@ public enum AppSettings {
         Defaults[.captureDisplayID2]
     }
 
+    public static var dualCaptureSaveMode: String {
+        Defaults[.dualCaptureSaveMode]
+    }
+
     public static var systemAudioVolume: Double { Defaults[.systemAudioVolume] }
     public static var microphoneVolume: Double { Defaults[.microphoneVolume] }
 }
@@ -138,6 +163,7 @@ public extension Defaults.Keys {
     static let captureMode = Key<String>("captureMode", default: "single")
     static let captureDisplayID = Key<String>("captureDisplayID", default: "")
     static let captureDisplayID2 = Key<String>("captureDisplayID2", default: "")
+    static let dualCaptureSaveMode = Key<String>("dualCaptureSaveMode", default: DualCaptureSaveMode.sideBySide.rawValue)
     static let captureResolution = Key<String>("captureResolution", default: CaptureResolution.native.rawValue)
     static let customCaptureWidth = Key<Int>("customCaptureWidth", default: 1920)
     static let customCaptureHeight = Key<Int>("customCaptureHeight", default: 1080)

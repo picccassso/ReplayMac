@@ -32,16 +32,22 @@ public enum ClipSaveError: LocalizedError {
 
 public actor ClipSaver {
     private let videoRingBuffer: VideoRingBuffer
+    private let dualDisplay1VideoRingBuffer: VideoRingBuffer?
+    private let dualDisplay2VideoRingBuffer: VideoRingBuffer?
     private let systemAudioRingBuffer: AudioRingBuffer?
     private let micRingBuffer: AudioRingBuffer?
     private let logger = Logger(subsystem: "com.replaymac", category: "Save")
 
     public init(
         videoRingBuffer: VideoRingBuffer,
+        dualDisplay1VideoRingBuffer: VideoRingBuffer? = nil,
+        dualDisplay2VideoRingBuffer: VideoRingBuffer? = nil,
         systemAudioRingBuffer: AudioRingBuffer? = nil,
         micRingBuffer: AudioRingBuffer? = nil
     ) {
         self.videoRingBuffer = videoRingBuffer
+        self.dualDisplay1VideoRingBuffer = dualDisplay1VideoRingBuffer
+        self.dualDisplay2VideoRingBuffer = dualDisplay2VideoRingBuffer
         self.systemAudioRingBuffer = systemAudioRingBuffer
         self.micRingBuffer = micRingBuffer
     }
@@ -49,6 +55,44 @@ public actor ClipSaver {
     public func saveClip(
         lastSeconds: TimeInterval,
         outputDirectory: URL
+    ) async throws -> URL {
+        try await saveClip(
+            from: videoRingBuffer,
+            lastSeconds: lastSeconds,
+            outputDirectory: outputDirectory,
+            fileNameSuffix: nil
+        )
+    }
+
+    public func saveDualDisplayClips(
+        lastSeconds: TimeInterval,
+        outputDirectory: URL
+    ) async throws -> [URL] {
+        guard let dualDisplay1VideoRingBuffer, let dualDisplay2VideoRingBuffer else {
+            throw ClipSaveError.noSamples
+        }
+
+        let display1URL = try await saveClip(
+            from: dualDisplay1VideoRingBuffer,
+            lastSeconds: lastSeconds,
+            outputDirectory: outputDirectory,
+            fileNameSuffix: "Display_1"
+        )
+        let display2URL = try await saveClip(
+            from: dualDisplay2VideoRingBuffer,
+            lastSeconds: lastSeconds,
+            outputDirectory: outputDirectory,
+            fileNameSuffix: "Display_2"
+        )
+
+        return [display1URL, display2URL]
+    }
+
+    private func saveClip(
+        from videoRingBuffer: VideoRingBuffer,
+        lastSeconds: TimeInterval,
+        outputDirectory: URL,
+        fileNameSuffix: String?
     ) async throws -> URL {
         let videoSamples = videoRingBuffer.samples(last: lastSeconds)
 
@@ -74,7 +118,7 @@ public actor ClipSaver {
             print("[SAVE] mic PTS range: \(CMSampleBufferGetPresentationTimeStamp(firstMic).seconds) ... \(CMSampleBufferGetPresentationTimeStamp(lastMic).seconds)")
         }
 
-        let fileURL = try ClipMetadata.generateUniqueFileURL(in: outputDirectory)
+        let fileURL = try ClipMetadata.generateUniqueFileURL(in: outputDirectory, suffix: fileNameSuffix)
 
         let writer = try AVAssetWriter(outputURL: fileURL, fileType: .mp4)
         writer.metadata = ClipMetadata.makeMetadataItems()

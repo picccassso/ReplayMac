@@ -35,7 +35,7 @@ public enum ClipMetadata {
                 .appendingPathComponent("Movies/ReplayMac", isDirectory: true)
     }
 
-    public static func generateUniqueFileURL(in directory: URL) throws -> URL {
+    public static func generateUniqueFileURL(in directory: URL, suffix: String? = nil) throws -> URL {
         try createOutputDirectoryIfNeeded(directory)
 
         let formatter = DateFormatter()
@@ -43,7 +43,8 @@ public enum ClipMetadata {
         formatter.locale = Locale(identifier: "en_US_POSIX")
         formatter.timeZone = TimeZone.current
 
-        let baseName = "ReplayMac_\(formatter.string(from: Date()))"
+        let cleanSuffix = suffix.map { "_\($0)" } ?? ""
+        let baseName = "ReplayMac_\(formatter.string(from: Date()))\(cleanSuffix)"
         let ext = "mp4"
 
         var fileURL = directory.appendingPathComponent("\(baseName).\(ext)")

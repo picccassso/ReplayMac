@@ -16,6 +16,7 @@ public struct SettingsView: View {
     @Default(.captureMode) private var captureModeRawValue
     @Default(.captureDisplayID) private var captureDisplayID
     @Default(.captureDisplayID2) private var captureDisplayID2
+    @Default(.dualCaptureSaveMode) private var dualCaptureSaveModeRawValue
     @Default(.captureResolution) private var captureResolutionRawValue
     @Default(.customCaptureWidth) private var customCaptureWidth
     @Default(.customCaptureHeight) private var customCaptureHeight
@@ -183,6 +184,12 @@ public struct SettingsView: View {
                         Picker("Display 2", selection: $captureDisplayID2) {
                             ForEach(dualDisplayOptions) { display in
                                 Text(display.name).tag(display.id)
+                            }
+                        }
+
+                        Picker("Save dual recording as", selection: $dualCaptureSaveModeRawValue) {
+                            ForEach(DualCaptureSaveMode.allCases) { mode in
+                                Text(mode.title).tag(mode.rawValue)
                             }
                         }
                     }
@@ -396,7 +403,11 @@ public struct SettingsView: View {
             return
         }
 
-        outputDirectoryPath = selectedURL.path(percentEncoded: false)
+        let path = selectedURL.standardizedFileURL.path(percentEncoded: false)
+        outputDirectoryPath = path
+        Defaults[.outputDirectoryPath] = path
+        UserDefaults.standard.set(path, forKey: "outputDirectoryPath")
+        UserDefaults.standard.synchronize()
     }
 
     private func applyQualityPresetIfNeeded(_ presetRawValue: String) {
