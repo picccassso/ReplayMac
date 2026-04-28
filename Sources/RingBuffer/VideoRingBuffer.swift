@@ -8,7 +8,7 @@ public final class VideoRingBuffer: @unchecked Sendable {
     private var keyframeIndices: [Int] = []
     private var _currentMemoryBytes: Int = 0
 
-    public let timeCap: TimeInterval
+    public var timeCap: TimeInterval
     public let memoryCap: Int
 
     public init(timeCap: TimeInterval = 30.0, memoryCap: Int = 1_500_000_000) {

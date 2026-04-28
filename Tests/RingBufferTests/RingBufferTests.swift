@@ -252,4 +252,146 @@ final class RingBufferTests: XCTestCase {
         XCTAssertEqual(buffer.currentMemoryBytes, 0)
         XCTAssertEqual(buffer.duration, 0)
     }
+
+    // MARK: - Regression: Non-default buffer duration
+
+    func testVideoRingBufferNonDefaultDuration() {
+        let configuredDuration: TimeInterval = 100
+        let buffer = VideoRingBuffer(timeCap: configuredDuration, memoryCap: 1_500_000_000)
+
+        // Append 60 seconds of frames at 60fps, GOP=2s
+        for i in 0..<3600 {
+            let pts = Double(i) / 60.0
+            buffer.append(encodedSample: Self.makeSampleBuffer(pts: pts, isKeyframe: i % 120 == 0))
+        }
+
+        // Should retain all 60 seconds since timeCap is 100
+        let duration = buffer.duration
+        XCTAssertGreaterThanOrEqual(duration, 58)
+        XCTAssertLessThanOrEqual(duration, configuredDuration + 2)
+
+        // samples(last:) should be able to return the full configured window
+        let samples = buffer.samples(last: configuredDuration)
+        XCTAssertFalse(samples.isEmpty)
+
+        let firstPTS = CMSampleBufferGetPresentationTimeStamp(samples.first!).seconds
+        let lastPTS = CMSampleBufferGetPresentationTimeStamp(samples.last!).seconds
+        let span = lastPTS - firstPTS
+        // Should cover at least 58s of the configured duration (after keyframe alignment)
+        XCTAssertGreaterThanOrEqual(span, 58)
+    }
+
+    func testVideoRingBufferDynamicTimeCapDecrease() {
+        let buffer = VideoRingBuffer(timeCap: 100, memoryCap: 1_500_000_000)
+
+        // Append 60 seconds of frames
+        for i in 0..<3600 {
+            let pts = Double(i) / 60.0
+            buffer.append(encodedSample: Self.makeSampleBuffer(pts: pts, isKeyframe: i % 120 == 0))
+        }
+
+        // Dynamically reduce timeCap to 30 and trim
+        buffer.timeCap = 30
+        buffer.trimToDuration(maxSeconds: 30)
+
+        // Duration should now be ~30s (plus one GOP)
+        let duration = buffer.duration
+        XCTAssertLessThanOrEqual(duration, 33)
+        XCTAssertGreaterThan(duration, 25)
+    }
+
+    func testVideoRingBufferDynamicTimeCapIncrease() {
+        let buffer = VideoRingBuffer(timeCap: 30, memoryCap: 1_500_000_000)
+
+        // Append 60 seconds of frames
+        for i in 0..<3600 {
+            let pts = Double(i) / 60.0
+            buffer.append(encodedSample: Self.makeSampleBuffer(pts: pts, isKeyframe: i % 120 == 0))
+        }
+
+        // Duration should be capped at ~30s
+        var duration = buffer.duration
+        XCTAssertLessThanOrEqual(duration, 33)
+
+        // Increase timeCap — buffer should now allow growth on future appends
+        buffer.timeCap = 100
+        // Already-evicted data cannot be recovered, but no crash or corruption
+        duration = buffer.duration
+        XCTAssertGreaterThan(duration, 25)
+        XCTAssertLessThanOrEqual(duration, 33)
+
+        // Append 60 more seconds — now the buffer should retain more
+        for i in 3600..<7200 {
+            let pts = Double(i) / 60.0
+            buffer.append(encodedSample: Self.makeSampleBuffer(pts: pts, isKeyframe: i % 120 == 0))
+        }
+
+        duration = buffer.duration
+        XCTAssertGreaterThan(duration, 55)
+        XCTAssertLessThanOrEqual(duration, 102)
+    }
+
+    func testAudioRingBufferNonDefaultDuration() {
+        let configuredDuration: TimeInterval = 100
+        let buffer = AudioRingBuffer(timeCap: configuredDuration, memoryCap: 50_000_000)
+
+        // Append 60 seconds of audio samples at 60Hz
+        for i in 0..<3600 {
+            let pts = Double(i) / 60.0
+            buffer.append(Self.makeSampleBuffer(pts: pts, isKeyframe: true, sampleSize: 100))
+        }
+
+        // Should retain all 60 seconds
+        let duration = buffer.duration
+        XCTAssertGreaterThanOrEqual(duration, 58)
+        XCTAssertLessThanOrEqual(duration, configuredDuration)
+
+        // samples(last:) should return the full configured window
+        let samples = buffer.samples(last: configuredDuration)
+        XCTAssertFalse(samples.isEmpty)
+
+        let firstPTS = CMSampleBufferGetPresentationTimeStamp(samples.first!).seconds
+        let lastPTS = CMSampleBufferGetPresentationTimeStamp(samples.last!).seconds
+        let span = lastPTS - firstPTS
+        XCTAssertGreaterThanOrEqual(span, 58)
+    }
+
+    func testAudioRingBufferDynamicTimeCapDecrease() {
+        let buffer = AudioRingBuffer(timeCap: 100, memoryCap: 50_000_000)
+
+        for i in 0..<3600 {
+            let pts = Double(i) / 60.0
+            buffer.append(Self.makeSampleBuffer(pts: pts, isKeyframe: true, sampleSize: 100))
+        }
+
+        buffer.timeCap = 5
+        buffer.trimToDuration(maxSeconds: 5)
+
+        let duration = buffer.duration
+        XCTAssertLessThanOrEqual(duration, 6)
+        XCTAssertGreaterThan(duration, 3)
+    }
+
+    func testAudioRingBufferDynamicTimeCapIncrease() {
+        let buffer = AudioRingBuffer(timeCap: 5, memoryCap: 50_000_000)
+
+        for i in 0..<600 {
+            let pts = Double(i) / 60.0
+            buffer.append(Self.makeSampleBuffer(pts: pts, isKeyframe: true, sampleSize: 100))
+        }
+
+        var duration = buffer.duration
+        XCTAssertLessThanOrEqual(duration, 6)
+
+        buffer.timeCap = 30
+
+        for i in 600..<1800 {
+            let pts = Double(i) / 60.0
+            buffer.append(Self.makeSampleBuffer(pts: pts, isKeyframe: true, sampleSize: 100))
+        }
+
+        duration = buffer.duration
+        XCTAssertGreaterThan(duration, 15)
+        XCTAssertLessThanOrEqual(duration, 31)
+    }
 }

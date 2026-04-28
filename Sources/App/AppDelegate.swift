@@ -11,24 +11,25 @@ import Update
 import AVFoundation
 import Darwin.Mach
 import SwiftUI
+import Defaults
 
 @MainActor
 class AppDelegate: NSObject, NSApplicationDelegate, @unchecked Sendable {
     let captureManager = CaptureManager()
     let frameCompositor = FrameCompositor()
     let videoEncoder = VideoEncoder()
-    let videoRingBuffer = VideoRingBuffer()
+    let videoRingBuffer = VideoRingBuffer(timeCap: TimeInterval(AppSettings.bufferDurationSeconds))
     let dualDisplay1VideoEncoder = VideoEncoder()
     let dualDisplay2VideoEncoder = VideoEncoder()
-    let dualDisplay1VideoRingBuffer = VideoRingBuffer()
-    let dualDisplay2VideoRingBuffer = VideoRingBuffer()
+    let dualDisplay1VideoRingBuffer = VideoRingBuffer(timeCap: TimeInterval(AppSettings.bufferDurationSeconds))
+    let dualDisplay2VideoRingBuffer = VideoRingBuffer(timeCap: TimeInterval(AppSettings.bufferDurationSeconds))
 
     let systemAudioCapture = SystemAudioCapture()
     let micAudioCapture = MicCapture()
     let systemAudioEncoder = AudioEncoder()
     let micAudioEncoder = AudioEncoder()
-    let systemAudioRingBuffer = AudioRingBuffer()
-    let micAudioRingBuffer = AudioRingBuffer()
+    let systemAudioRingBuffer = AudioRingBuffer(timeCap: TimeInterval(AppSettings.bufferDurationSeconds))
+    let micAudioRingBuffer = AudioRingBuffer(timeCap: TimeInterval(AppSettings.bufferDurationSeconds))
 
     lazy var clipSaver = ClipSaver(
         videoRingBuffer: videoRingBuffer,
@@ -46,6 +47,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, @unchecked Sendable {
     var isCaptureRunning = false
     var monitoringTask: Task<Void, Never>?
     var clipLibraryWindowController: NSWindowController?
+    private var bufferDurationObservation: Defaults.Observation?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         NotificationManager.shared.requestAuthorization()
@@ -79,6 +81,10 @@ class AppDelegate: NSObject, NSApplicationDelegate, @unchecked Sendable {
         }
 
         setupWindowObservers()
+
+        bufferDurationObservation = Defaults.observe(.bufferDurationSeconds) { [weak self] _ in
+            self?.syncBufferDurationToSettings()
+        }
 
         DispatchQueue.main.async { [weak self] in
             self?.updateActivationPolicy(bringVisibleWindowToFront: true)
@@ -424,6 +430,22 @@ class AppDelegate: NSObject, NSApplicationDelegate, @unchecked Sendable {
             }
             print("Failed to save clip: \(error)")
         }
+    }
+
+    private func syncBufferDurationToSettings() {
+        let duration = TimeInterval(AppSettings.bufferDurationSeconds)
+        videoRingBuffer.timeCap = duration
+        dualDisplay1VideoRingBuffer.timeCap = duration
+        dualDisplay2VideoRingBuffer.timeCap = duration
+        systemAudioRingBuffer.timeCap = duration
+        micAudioRingBuffer.timeCap = duration
+
+        guard isCaptureRunning else { return }
+        videoRingBuffer.trimToDuration(maxSeconds: duration)
+        dualDisplay1VideoRingBuffer.trimToDuration(maxSeconds: duration)
+        dualDisplay2VideoRingBuffer.trimToDuration(maxSeconds: duration)
+        systemAudioRingBuffer.trimToDuration(maxSeconds: duration)
+        micAudioRingBuffer.trimToDuration(maxSeconds: duration)
     }
 
     private func startMonitoring() {

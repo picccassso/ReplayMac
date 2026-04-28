@@ -9,7 +9,7 @@ public final class AudioRingBuffer: @unchecked Sendable {
     private var deque = Deque<CMSampleBuffer>()
     private var _currentMemoryBytes: Int = 0
 
-    public let timeCap: TimeInterval
+    public var timeCap: TimeInterval
     public let memoryCap: Int
 
     public init(timeCap: TimeInterval = 30.0, memoryCap: Int = 50_000_000) {

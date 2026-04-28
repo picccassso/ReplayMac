@@ -16,7 +16,10 @@ let package = Package(
     targets: [
         .executableTarget(
             name: "ReplayMac",
-            dependencies: ["Capture", "Encode", "RingBuffer", "Save", "Audio", "UI", "Hotkeys", "Feedback", "Update"],
+            dependencies: [
+                "Capture", "Encode", "RingBuffer", "Save", "Audio", "UI", "Hotkeys", "Feedback", "Update",
+                .product(name: "Defaults", package: "Defaults")
+            ],
             path: "Sources/App",
             swiftSettings: [.enableExperimentalFeature("StrictConcurrency")]
         ),
