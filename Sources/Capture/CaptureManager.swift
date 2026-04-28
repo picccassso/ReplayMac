@@ -6,7 +6,19 @@ import os.log
 public struct CaptureConfig: Sendable {
     public let width: Int
     public let height: Int
+    public let sourceWidth: Int
+    public let sourceHeight: Int
     public let fps: Int
+}
+
+public struct CaptureResolutionConfig: Sendable {
+    public let width: Int
+    public let height: Int
+
+    public init(width: Int, height: Int) {
+        self.width = width
+        self.height = height
+    }
 }
 
 public actor CaptureManager {
@@ -43,6 +55,97 @@ public actor CaptureManager {
     private var interruptionHandler: (@Sendable (CaptureInterruption) -> Void)?
 
     public init() {}
+
+    // MARK: - SCK Configuration updates
+
+    public func updateStreamConfiguration(
+        fps: Int,
+        queueDepth: Int,
+        excludeOwnAppAudio: Bool,
+        resolution: CaptureResolutionConfig? = nil
+    ) async throws {
+        guard !isDualMode else { return }
+        guard let activeStream = stream, let currentConfig = currentConfiguration else {
+            throw CaptureRestartError.missingConfiguration
+        }
+
+        let config = SCStreamConfiguration()
+        config.width = resolution?.width ?? currentConfig.width
+        config.height = resolution?.height ?? currentConfig.height
+        config.minimumFrameInterval = CMTime(value: 1, timescale: CMTimeScale(fps))
+        config.queueDepth = queueDepth
+        config.pixelFormat = currentConfig.pixelFormat
+        config.capturesAudio = currentConfig.capturesAudio
+        config.excludesCurrentProcessAudio = excludeOwnAppAudio
+
+        try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
+            activeStream.updateConfiguration(config) { error in
+                if let error {
+                    continuation.resume(throwing: error)
+                } else {
+                    continuation.resume()
+                }
+            }
+        }
+
+        self.currentConfiguration = config
+    }
+
+    public func updateDualStreamConfigurations(
+        fps: Int,
+        queueDepth: Int,
+        excludeOwnAppAudio: Bool,
+        resolution1: CaptureResolutionConfig? = nil,
+        resolution2: CaptureResolutionConfig? = nil
+    ) async throws {
+        guard isDualMode else { return }
+        guard let activeStream1 = stream1,
+              let activeStream2 = stream2,
+              let currentConfig1 = dualConfiguration1,
+              let currentConfig2 = dualConfiguration2 else {
+            throw CaptureRestartError.missingConfiguration
+        }
+
+        let config1 = SCStreamConfiguration()
+        config1.width = resolution1?.width ?? currentConfig1.width
+        config1.height = resolution1?.height ?? currentConfig1.height
+        config1.minimumFrameInterval = CMTime(value: 1, timescale: CMTimeScale(fps))
+        config1.queueDepth = queueDepth
+        config1.pixelFormat = currentConfig1.pixelFormat
+        config1.capturesAudio = currentConfig1.capturesAudio
+        config1.excludesCurrentProcessAudio = excludeOwnAppAudio
+
+        let config2 = SCStreamConfiguration()
+        config2.width = resolution2?.width ?? currentConfig2.width
+        config2.height = resolution2?.height ?? currentConfig2.height
+        config2.minimumFrameInterval = CMTime(value: 1, timescale: CMTimeScale(fps))
+        config2.queueDepth = queueDepth
+        config2.pixelFormat = currentConfig2.pixelFormat
+        config2.capturesAudio = currentConfig2.capturesAudio
+        config2.excludesCurrentProcessAudio = excludeOwnAppAudio
+
+        try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
+            activeStream1.updateConfiguration(config1) { error in
+                if let error {
+                    continuation.resume(throwing: error)
+                } else {
+                    continuation.resume()
+                }
+            }
+        }
+        try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
+            activeStream2.updateConfiguration(config2) { error in
+                if let error {
+                    continuation.resume(throwing: error)
+                } else {
+                    continuation.resume()
+                }
+            }
+        }
+
+        self.dualConfiguration1 = config1
+        self.dualConfiguration2 = config2
+    }
 
     // MARK: - Single-display handlers (backward compatible)
 
@@ -114,7 +217,10 @@ public actor CaptureManager {
         interactivePermissionPrompt: Bool = true,
         captureDisplayID: String? = nil,
         fps: Int,
-        queueDepth: Int
+        queueDepth: Int,
+        outputWidth: Int? = nil,
+        outputHeight: Int? = nil,
+        excludeOwnAppAudio: Bool = false
     ) async throws -> CaptureConfig {
         let permissions = CapturePermissions()
         let content = try await permissions.requestAccess(interactive: interactivePermissionPrompt)
@@ -129,14 +235,17 @@ public actor CaptureManager {
 
         let filter = SCContentFilter(display: display, excludingApplications: [], exceptingWindows: [])
 
+        let captureWidth = outputWidth ?? Int(display.width)
+        let captureHeight = outputHeight ?? Int(display.height)
+
         let config = SCStreamConfiguration()
-        config.width = display.width
-        config.height = display.height
+        config.width = captureWidth
+        config.height = captureHeight
         config.minimumFrameInterval = CMTime(value: 1, timescale: CMTimeScale(fps))
         config.queueDepth = queueDepth
         config.pixelFormat = kCVPixelFormatType_32BGRA
         config.capturesAudio = true
-        config.excludesCurrentProcessAudio = false
+        config.excludesCurrentProcessAudio = excludeOwnAppAudio
 
         let newStream = SCStream(filter: filter, configuration: config, delegate: delegate)
         try newStream.addStreamOutput(delegate, type: .screen, sampleHandlerQueue: videoQueue)
@@ -150,7 +259,13 @@ public actor CaptureManager {
         currentConfiguration = config
         self.stream = newStream
 
-        return CaptureConfig(width: Int(display.width), height: Int(display.height), fps: fps)
+        return CaptureConfig(
+            width: captureWidth,
+            height: captureHeight,
+            sourceWidth: Int(display.width),
+            sourceHeight: Int(display.height),
+            fps: fps
+        )
     }
 
     // MARK: - Start dual display
@@ -161,7 +276,12 @@ public actor CaptureManager {
         captureDisplayID1: String? = nil,
         captureDisplayID2: String? = nil,
         fps: Int,
-        queueDepth: Int
+        queueDepth: Int,
+        outputWidth1: Int? = nil,
+        outputHeight1: Int? = nil,
+        outputWidth2: Int? = nil,
+        outputHeight2: Int? = nil,
+        excludeOwnAppAudio: Bool = false
     ) async throws -> (config1: CaptureConfig, config2: CaptureConfig) {
         let permissions = CapturePermissions()
         let content = try await permissions.requestAccess(interactive: interactivePermissionPrompt)
@@ -188,18 +308,23 @@ public actor CaptureManager {
         let filter1 = SCContentFilter(display: display1, excludingApplications: [], exceptingWindows: [])
         let filter2 = SCContentFilter(display: display2, excludingApplications: [], exceptingWindows: [])
 
+        let capWidth1 = outputWidth1 ?? Int(display1.width)
+        let capHeight1 = outputHeight1 ?? Int(display1.height)
+        let capWidth2 = outputWidth2 ?? Int(display2.width)
+        let capHeight2 = outputHeight2 ?? Int(display2.height)
+
         let config1 = SCStreamConfiguration()
-        config1.width = display1.width
-        config1.height = display1.height
+        config1.width = capWidth1
+        config1.height = capHeight1
         config1.minimumFrameInterval = CMTime(value: 1, timescale: CMTimeScale(fps))
         config1.queueDepth = queueDepth
         config1.pixelFormat = kCVPixelFormatType_32BGRA
         config1.capturesAudio = true
-        config1.excludesCurrentProcessAudio = false
+        config1.excludesCurrentProcessAudio = excludeOwnAppAudio
 
         let config2 = SCStreamConfiguration()
-        config2.width = display2.width
-        config2.height = display2.height
+        config2.width = capWidth2
+        config2.height = capHeight2
         config2.minimumFrameInterval = CMTime(value: 1, timescale: CMTimeScale(fps))
         config2.queueDepth = queueDepth
         config2.pixelFormat = kCVPixelFormatType_32BGRA
@@ -226,17 +351,27 @@ public actor CaptureManager {
         self.stream2 = newStream2
 
         return (
-            config1: CaptureConfig(width: Int(display1.width), height: Int(display1.height), fps: fps),
-            config2: CaptureConfig(width: Int(display2.width), height: Int(display2.height), fps: fps)
+            config1: CaptureConfig(
+                width: capWidth1,
+                height: capHeight1,
+                sourceWidth: Int(display1.width),
+                sourceHeight: Int(display1.height),
+                fps: fps
+            ),
+            config2: CaptureConfig(
+                width: capWidth2,
+                height: capHeight2,
+                sourceWidth: Int(display2.width),
+                sourceHeight: Int(display2.height),
+                fps: fps
+            )
         )
     }
 
     // MARK: - Stop
 
-    public nonisolated func stop() {
-        Task {
-            await performStop()
-        }
+    public func stop() async {
+        await performStop()
     }
 
     private func performStop() async {
@@ -358,6 +493,7 @@ public actor CaptureManager {
             stream = replacement
         }
     }
+
 }
 
 public enum CaptureInterruption: Sendable {

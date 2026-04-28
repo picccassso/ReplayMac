@@ -242,7 +242,7 @@ public struct SettingsView: View {
             }
 
             Section {
-                Label("Capture and encoder changes apply after restarting recording.", systemImage: "arrow.clockwise.circle")
+                Label("Most changes apply automatically.", systemImage: "bolt.circle")
                     .foregroundStyle(AppTheme.textSecondary)
                     .font(.system(size: 12, design: .rounded))
             }
@@ -304,14 +304,18 @@ public struct SettingsView: View {
                             Text(microphone.name).tag(microphone.id)
                         }
                     }
-                    .disabled(!captureMicrophone)
+                    .disabled(true)
+
+                    Label("ReplayMac currently records from the macOS default input device.", systemImage: "info.circle")
+                        .foregroundStyle(AppTheme.textSecondary)
+                        .font(.system(size: 12, design: .rounded))
                 }
             } header: {
                 sectionHeader(icon: "mic", title: "Microphone")
             }
 
             Section {
-                Label("Audio source changes apply after restarting recording.", systemImage: "arrow.clockwise.circle")
+                Label("Audio source changes apply automatically.", systemImage: "bolt.circle")
                     .foregroundStyle(AppTheme.textSecondary)
                     .font(.system(size: 12, design: .rounded))
             }

@@ -151,6 +151,26 @@ public enum AppSettings {
 
     public static var systemAudioVolume: Double { Defaults[.systemAudioVolume] }
     public static var microphoneVolume: Double { Defaults[.microphoneVolume] }
+
+    public static var videoCodec: String { Defaults[.videoCodec] }
+    public static var videoCodecEnum: VideoCodec { VideoCodec(rawValue: Defaults[.videoCodec]) ?? .hevc }
+    public static var bitrateMbps: Double { Defaults[.bitrateMbps] }
+    public static var captureResolution: String { Defaults[.captureResolution] }
+    public static var customCaptureWidth: Int { Defaults[.customCaptureWidth] }
+    public static var customCaptureHeight: Int { Defaults[.customCaptureHeight] }
+    public static var excludeOwnAppAudio: Bool { Defaults[.excludeOwnAppAudio] }
+    public static var microphoneID: String { Defaults[.microphoneID] }
+
+    public static func scaledDimensions(displayWidth: Int, displayHeight: Int) -> (width: Int, height: Int) {
+        switch captureResolution {
+        case CaptureResolution.half.rawValue:
+            return (displayWidth / 2, displayHeight / 2)
+        case CaptureResolution.custom.rawValue:
+            return (customCaptureWidth, customCaptureHeight)
+        default:
+            return (displayWidth, displayHeight)
+        }
+    }
 }
 
 public extension Defaults.Keys {
