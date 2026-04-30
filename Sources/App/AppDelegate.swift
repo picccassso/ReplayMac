@@ -171,6 +171,9 @@ class AppDelegate: NSObject, NSApplicationDelegate, @unchecked Sendable {
         settingsObservations.append(Defaults.observe(.captureMicrophone) { [weak self] _ in
             self?.scheduleRuntimeSettingsReconcile()
         })
+        settingsObservations.append(Defaults.observe(.dualCaptureSaveMode) { [weak self] _ in
+            self?.scheduleRuntimeSettingsReconcile()
+        })
 
         // Capture mode and display selection trigger full pipeline restart
         settingsObservations.append(Defaults.observe(.captureMode) { [weak self] _ in
@@ -276,14 +279,8 @@ class AppDelegate: NSObject, NSApplicationDelegate, @unchecked Sendable {
                 let excludeOwn = AppSettings.excludeOwnAppAudio
 
             if isDual {
-                    await captureManager.setVideoHandler1 { [frameCompositor, dualDisplay1VideoEncoder] sampleBuffer in
-                        frameCompositor.pushPrimaryFrame(sampleBuffer)
-                        dualDisplay1VideoEncoder.encode(sampleBuffer: sampleBuffer)
-                    }
-                    await captureManager.setVideoHandler2 { [frameCompositor, dualDisplay2VideoEncoder] sampleBuffer in
-                        frameCompositor.pushSecondaryFrame(sampleBuffer)
-                        dualDisplay2VideoEncoder.encode(sampleBuffer: sampleBuffer)
-                    }
+                    let dualSaveMode = AppSettings.dualCaptureSaveModeEnum
+                    await configureDualVideoHandlers(saveMode: dualSaveMode)
                     await captureManager.setAudioHandler1 { [systemAudioCapture] sampleBuffer in
                         if AppSettings.captureSystemAudio {
                             systemAudioCapture.process(sampleBuffer: sampleBuffer)
@@ -329,26 +326,18 @@ class AppDelegate: NSObject, NSApplicationDelegate, @unchecked Sendable {
                         display1Width: scaled1.width,
                         display1Height: scaled1.height,
                         display2Width: scaled2.width,
-                        display2Height: scaled2.height
+                        display2Height: scaled2.height,
+                        fps: fps
                     )
 
-                    try videoEncoder.start(
-                        width: compositeWidth,
-                        height: compositeHeight,
-                        fps: fps,
-                        codec: codec,
-                        bitrate: bitrate
-                    )
-                    try dualDisplay1VideoEncoder.start(
-                        width: scaled1.width,
-                        height: scaled1.height,
-                        fps: fps,
-                        codec: codec,
-                        bitrate: bitrate
-                    )
-                    try dualDisplay2VideoEncoder.start(
-                        width: scaled2.width,
-                        height: scaled2.height,
+                    try startDualVideoEncoders(
+                        saveMode: dualSaveMode,
+                        compositeWidth: compositeWidth,
+                        compositeHeight: compositeHeight,
+                        display1Width: scaled1.width,
+                        display1Height: scaled1.height,
+                        display2Width: scaled2.width,
+                        display2Height: scaled2.height,
                         fps: fps,
                         codec: codec,
                         bitrate: bitrate
@@ -538,6 +527,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, @unchecked Sendable {
         if isDualMode {
             let scaled1 = AppSettings.scaledDimensions(displayWidth: originalDualWidth1, displayHeight: originalDualHeight1)
             let scaled2 = AppSettings.scaledDimensions(displayWidth: originalDualWidth2, displayHeight: originalDualHeight2)
+            let dualSaveMode = AppSettings.dualCaptureSaveModeEnum
 
             let compositeWidth = scaled1.width + scaled2.width
             let compositeHeight = max(scaled1.height, scaled2.height)
@@ -546,7 +536,8 @@ class AppDelegate: NSObject, NSApplicationDelegate, @unchecked Sendable {
                 display1Width: scaled1.width,
                 display1Height: scaled1.height,
                 display2Width: scaled2.width,
-                display2Height: scaled2.height
+                display2Height: scaled2.height,
+                fps: fps
             )
 
             try await captureManager.updateDualStreamConfigurations(
@@ -557,10 +548,21 @@ class AppDelegate: NSObject, NSApplicationDelegate, @unchecked Sendable {
                 resolution2: CaptureResolutionConfig(width: scaled2.width, height: scaled2.height)
             )
 
+            await configureDualVideoHandlers(saveMode: dualSaveMode)
+
             // Restart encoders with new codec/bitrate/resolution
-            try videoEncoder.start(width: compositeWidth, height: compositeHeight, fps: fps, codec: codec, bitrate: bitrate)
-            try dualDisplay1VideoEncoder.start(width: scaled1.width, height: scaled1.height, fps: fps, codec: codec, bitrate: bitrate)
-            try dualDisplay2VideoEncoder.start(width: scaled2.width, height: scaled2.height, fps: fps, codec: codec, bitrate: bitrate)
+            try startDualVideoEncoders(
+                saveMode: dualSaveMode,
+                compositeWidth: compositeWidth,
+                compositeHeight: compositeHeight,
+                display1Width: scaled1.width,
+                display1Height: scaled1.height,
+                display2Width: scaled2.width,
+                display2Height: scaled2.height,
+                fps: fps,
+                codec: codec,
+                bitrate: bitrate
+            )
         } else {
             let scaled = AppSettings.scaledDimensions(displayWidth: originalDisplayWidth, displayHeight: originalDisplayHeight)
 
@@ -576,6 +578,64 @@ class AppDelegate: NSObject, NSApplicationDelegate, @unchecked Sendable {
         }
 
         currentFPS = fps
+    }
+
+    private func configureDualVideoHandlers(saveMode: DualCaptureSaveMode) async {
+        switch saveMode {
+        case .sideBySide:
+            await captureManager.setVideoHandler1 { [frameCompositor] sampleBuffer in
+                frameCompositor.pushPrimaryFrame(sampleBuffer)
+            }
+            await captureManager.setVideoHandler2 { [frameCompositor] sampleBuffer in
+                frameCompositor.pushSecondaryFrame(sampleBuffer)
+            }
+        case .separateFiles:
+            await captureManager.setVideoHandler1 { [dualDisplay1VideoEncoder] sampleBuffer in
+                dualDisplay1VideoEncoder.encode(sampleBuffer: sampleBuffer)
+            }
+            await captureManager.setVideoHandler2 { [dualDisplay2VideoEncoder] sampleBuffer in
+                dualDisplay2VideoEncoder.encode(sampleBuffer: sampleBuffer)
+            }
+        }
+    }
+
+    private func startDualVideoEncoders(
+        saveMode: DualCaptureSaveMode,
+        compositeWidth: Int,
+        compositeHeight: Int,
+        display1Width: Int,
+        display1Height: Int,
+        display2Width: Int,
+        display2Height: Int,
+        fps: Int,
+        codec: Encode.VideoCodec,
+        bitrate: Int
+    ) throws {
+        switch saveMode {
+        case .sideBySide:
+            try videoEncoder.start(
+                width: compositeWidth,
+                height: compositeHeight,
+                fps: fps,
+                codec: codec,
+                bitrate: bitrate
+            )
+        case .separateFiles:
+            try dualDisplay1VideoEncoder.start(
+                width: display1Width,
+                height: display1Height,
+                fps: fps,
+                codec: codec,
+                bitrate: bitrate
+            )
+            try dualDisplay2VideoEncoder.start(
+                width: display2Width,
+                height: display2Height,
+                fps: fps,
+                codec: codec,
+                bitrate: bitrate
+            )
+        }
     }
 
     private func applyMicSettingIfNeeded() async {

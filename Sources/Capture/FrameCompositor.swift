@@ -22,8 +22,11 @@ public final class FrameCompositor: @unchecked Sendable {
     private var secondaryFrame: DisplayFrame?
     private var compositeWidth: Int = 0
     private var compositeHeight: Int = 0
+    private var targetFrameDuration = CMTime(value: 1, timescale: 60)
     private var pixelBufferPool: CVPixelBufferPool?
     private var _outputHandler: OutputHandler?
+    private let ciContext = CIContext(options: [.cacheIntermediates: false])
+    private let colorSpace = CGColorSpaceCreateDeviceRGB()
 
     private var primaryTimeoutCounter = 0
     private var secondaryTimeoutCounter = 0
@@ -50,7 +53,8 @@ public final class FrameCompositor: @unchecked Sendable {
     public init() {}
 
     public func configure(display1Width: Int, display1Height: Int,
-                          display2Width: Int, display2Height: Int) {
+                          display2Width: Int, display2Height: Int,
+                          fps: Int) {
         lock.lock()
         defer { lock.unlock() }
 
@@ -59,6 +63,7 @@ public final class FrameCompositor: @unchecked Sendable {
 
         compositeWidth = totalWidth
         compositeHeight = maxHeight
+        targetFrameDuration = CMTime(value: 1, timescale: CMTimeScale(max(1, fps)))
 
         var pool: CVPixelBufferPool?
         let pixelFormat = kCVPixelFormatType_32BGRA
@@ -83,6 +88,9 @@ public final class FrameCompositor: @unchecked Sendable {
             &pool
         )
         pixelBufferPool = pool
+        lastOutputPTS = nil
+        lastSyntheticPTS = .zero
+        syntheticPTSBasis = nil
     }
 
     public func pushPrimaryFrame(_ sampleBuffer: CMSampleBuffer) {
@@ -124,13 +132,15 @@ public final class FrameCompositor: @unchecked Sendable {
         let secondary = secondaryFrame
 
         if primary != nil && secondary != nil {
-            let pts = nextOutputPTS(preferred: frame.sampleBuffer, fallback: primary!.sampleBuffer)
-            let compositeBuffer = Self.composite(
+            guard shouldEmitFrame(preferred: frame.sampleBuffer, fallback: primary!.sampleBuffer) else {
+                lock.unlock()
+                return
+            }
+            let pts = reserveOutputPTS(preferred: frame.sampleBuffer, fallback: primary!.sampleBuffer)
+            let compositeBuffer = composite(
                 primary: primary!,
                 secondary: secondary!,
                 presentationTimeStamp: pts,
-                compositeWidth: compositeWidth,
-                compositeHeight: compositeHeight,
                 pool: pool
             )
             compositeFrameCount += 1
@@ -152,18 +162,19 @@ public final class FrameCompositor: @unchecked Sendable {
         let primaryStale = primary == nil && primaryTimeoutCounter > Self.maxStaleFrames
         let secondaryStale = secondary == nil && secondaryTimeoutCounter > Self.maxStaleFrames
         let staleFrame = (primaryStale || secondaryStale) ? primary ?? secondary : nil
-        let staleFramePTS = staleFrame.map { nextOutputPTS(preferred: $0.sampleBuffer) }
+        let staleFramePTS = staleFrame.flatMap { frame -> CMTime? in
+            guard shouldEmitFrame(preferred: frame.sampleBuffer) else { return nil }
+            return reserveOutputPTS(preferred: frame.sampleBuffer)
+        }
 
         lock.unlock()
 
         if primaryStale || secondaryStale {
             if let handler, let frame = staleFrame, let pts = staleFramePTS {
-                let compositeBuffer = Self.singleDisplayComposite(
+                let compositeBuffer = singleDisplayComposite(
                     frame: frame,
                     isPrimary: primary != nil,
                     presentationTimeStamp: pts,
-                    compositeWidth: compositeWidth,
-                    compositeHeight: compositeHeight,
                     pool: pool
                 )
                 if compositeFrameCount <= 5 {
@@ -177,41 +188,19 @@ public final class FrameCompositor: @unchecked Sendable {
         }
     }
 
-    private static func composite(
+    private func composite(
         primary: DisplayFrame,
         secondary: DisplayFrame,
         presentationTimeStamp pts: CMTime,
-        compositeWidth: Int,
-        compositeHeight: Int,
         pool: CVPixelBufferPool
     ) -> CMSampleBuffer? {
         var outputPixelBuffer: CVPixelBuffer?
         let status = CVPixelBufferPoolCreatePixelBuffer(kCFAllocatorDefault, pool, &outputPixelBuffer)
         guard status == kCVReturnSuccess, let outBuffer = outputPixelBuffer else { return nil }
 
-        CVPixelBufferLockBaseAddress(outBuffer, [])
-        defer { CVPixelBufferUnlockBaseAddress(outBuffer, []) }
-
-        guard let baseAddress = CVPixelBufferGetBaseAddress(outBuffer) else { return nil }
-        let bytesPerRow = CVPixelBufferGetBytesPerRow(outBuffer)
-
-        let context = CGContext(
-            data: baseAddress,
-            width: compositeWidth,
-            height: compositeHeight,
-            bitsPerComponent: 8,
-            bytesPerRow: bytesPerRow,
-            space: CGColorSpaceCreateDeviceRGB(),
-            bitmapInfo: CGBitmapInfo.byteOrder32Little.rawValue | CGImageAlphaInfo.premultipliedFirst.rawValue
-        )
-
-        guard let ctx = context else { return nil }
-
-        ctx.setFillColor(CGColor.black)
-        ctx.fill(CGRect(x: 0, y: 0, width: compositeWidth, height: compositeHeight))
-
-        drawPixelBuffer(primary.sampleBuffer, in: ctx, atX: 0, width: primary.width, height: primary.height, canvasHeight: compositeHeight)
-        drawPixelBuffer(secondary.sampleBuffer, in: ctx, atX: primary.width, width: secondary.width, height: secondary.height, canvasHeight: compositeHeight)
+        clear(outBuffer)
+        drawPixelBuffer(primary.sampleBuffer, into: outBuffer, atX: 0, width: primary.width, height: primary.height)
+        drawPixelBuffer(secondary.sampleBuffer, into: outBuffer, atX: primary.width, width: secondary.width, height: secondary.height)
 
         let sourceDuration = CMSampleBufferGetDuration(primary.sampleBuffer)
         let duration = sourceDuration.isValid ? sourceDuration : CMTime(value: 1, timescale: 60)
@@ -243,41 +232,19 @@ public final class FrameCompositor: @unchecked Sendable {
         return sampleBuffer
     }
 
-    private static func singleDisplayComposite(
+    private func singleDisplayComposite(
         frame: DisplayFrame,
         isPrimary: Bool,
         presentationTimeStamp pts: CMTime,
-        compositeWidth: Int,
-        compositeHeight: Int,
         pool: CVPixelBufferPool
     ) -> CMSampleBuffer? {
         var outputPixelBuffer: CVPixelBuffer?
         let status = CVPixelBufferPoolCreatePixelBuffer(kCFAllocatorDefault, pool, &outputPixelBuffer)
         guard status == kCVReturnSuccess, let outBuffer = outputPixelBuffer else { return nil }
 
-        CVPixelBufferLockBaseAddress(outBuffer, [])
-        defer { CVPixelBufferUnlockBaseAddress(outBuffer, []) }
-
-        guard let baseAddress = CVPixelBufferGetBaseAddress(outBuffer) else { return nil }
-        let bytesPerRow = CVPixelBufferGetBytesPerRow(outBuffer)
-
-        let context = CGContext(
-            data: baseAddress,
-            width: compositeWidth,
-            height: compositeHeight,
-            bitsPerComponent: 8,
-            bytesPerRow: bytesPerRow,
-            space: CGColorSpaceCreateDeviceRGB(),
-            bitmapInfo: CGBitmapInfo.byteOrder32Little.rawValue | CGImageAlphaInfo.premultipliedFirst.rawValue
-        )
-
-        guard let ctx = context else { return nil }
-
-        ctx.setFillColor(CGColor.black)
-        ctx.fill(CGRect(x: 0, y: 0, width: compositeWidth, height: compositeHeight))
-
+        clear(outBuffer)
         let xOffset = isPrimary ? 0 : frame.width
-        drawPixelBuffer(frame.sampleBuffer, in: ctx, atX: xOffset, width: frame.width, height: frame.height, canvasHeight: compositeHeight)
+        drawPixelBuffer(frame.sampleBuffer, into: outBuffer, atX: xOffset, width: frame.width, height: frame.height)
 
         let sourceDuration = CMSampleBufferGetDuration(frame.sampleBuffer)
         let duration = sourceDuration.isValid ? sourceDuration : CMTime(value: 1, timescale: 60)
@@ -309,41 +276,26 @@ public final class FrameCompositor: @unchecked Sendable {
         return sampleBuffer
     }
 
-    private static func drawPixelBuffer(
+    private func clear(_ pixelBuffer: CVPixelBuffer) {
+        let bounds = CGRect(x: 0, y: 0, width: compositeWidth, height: compositeHeight)
+        let image = CIImage(color: .black).cropped(to: bounds)
+        ciContext.render(image, to: pixelBuffer, bounds: bounds, colorSpace: colorSpace)
+    }
+
+    private func drawPixelBuffer(
         _ sampleBuffer: CMSampleBuffer,
-        in context: CGContext,
+        into outputBuffer: CVPixelBuffer,
         atX x: Int,
         width: Int,
-        height: Int,
-        canvasHeight: Int
+        height: Int
     ) {
         guard let pixelBuffer = CMSampleBufferGetImageBuffer(sampleBuffer) else { return }
 
+        let yOffset = (compositeHeight - height) / 2
+        let bounds = CGRect(x: CGFloat(x), y: CGFloat(yOffset), width: CGFloat(width), height: CGFloat(height))
         let ciImage = CIImage(cvPixelBuffer: pixelBuffer)
-        let yOffset = (canvasHeight - height) / 2
-        let rect = CGRect(x: CGFloat(x), y: CGFloat(yOffset), width: CGFloat(width), height: CGFloat(height))
-
-        let colorSpace = CGColorSpaceCreateDeviceRGB()
-        let bitmapInfo = CGBitmapInfo.byteOrder32Little.rawValue | CGImageAlphaInfo.premultipliedFirst.rawValue
-
-        var bitmap: CGContext?
-        bitmap = CGContext(
-            data: nil,
-            width: width,
-            height: height,
-            bitsPerComponent: 8,
-            bytesPerRow: width * 4,
-            space: colorSpace,
-            bitmapInfo: bitmapInfo
-        )
-
-        guard let bmp = bitmap else { return }
-
-        let ciContext = CIContext(cgContext: bmp, options: nil)
-        ciContext.draw(ciImage, in: CGRect(x: 0, y: 0, width: CGFloat(width), height: CGFloat(height)), from: ciImage.extent)
-
-        guard let cgImage = bmp.makeImage() else { return }
-        context.draw(cgImage, in: rect)
+            .transformed(by: CGAffineTransform(translationX: bounds.minX, y: bounds.minY))
+        ciContext.render(ciImage, to: outputBuffer, bounds: bounds, colorSpace: colorSpace)
     }
 
     public func reset() {
@@ -363,28 +315,36 @@ public final class FrameCompositor: @unchecked Sendable {
         pts.isValid && pts.seconds > 0
     }
 
-    private func nextOutputPTS(preferred: CMSampleBuffer, fallback: CMSampleBuffer? = nil) -> CMTime {
-        let preferredPTS = CMSampleBufferGetPresentationTimeStamp(preferred)
-        let fallbackPTS = fallback.map(CMSampleBufferGetPresentationTimeStamp) ?? .invalid
-        let candidate = Self.ptsIsValid(preferredPTS) ? preferredPTS : fallbackPTS
-        var pts = Self.ptsIsValid(candidate) ? candidate : nextSyntheticPTS()
+    private func shouldEmitFrame(preferred: CMSampleBuffer, fallback: CMSampleBuffer? = nil) -> Bool {
+        guard let lastOutputPTS else { return true }
+        let candidate = candidateOutputPTS(preferred: preferred, fallback: fallback)
+        return CMTimeCompare(CMTimeSubtract(candidate, lastOutputPTS), targetFrameDuration) >= 0
+    }
 
-        if let lastOutputPTS, CMTimeCompare(pts, lastOutputPTS) <= 0 {
-            let step = CMSampleBufferGetDuration(preferred)
-            let frameDuration = step.isValid && step > .zero ? step : CMTime(value: 1, timescale: 60)
-            pts = CMTimeAdd(lastOutputPTS, frameDuration)
-        }
-
+    private func reserveOutputPTS(preferred: CMSampleBuffer, fallback: CMSampleBuffer? = nil) -> CMTime {
+        let pts = candidateOutputPTS(preferred: preferred, fallback: fallback)
         lastOutputPTS = pts
         return pts
     }
 
-    private func nextSyntheticPTS(fps: Int32 = 60) -> CMTime {
-        let frameDuration = CMTime(value: 1, timescale: fps)
+    private func candidateOutputPTS(preferred: CMSampleBuffer, fallback: CMSampleBuffer? = nil) -> CMTime {
+        let preferredPTS = CMSampleBufferGetPresentationTimeStamp(preferred)
+        let fallbackPTS = fallback.map(CMSampleBufferGetPresentationTimeStamp) ?? .invalid
+        let candidate = Self.ptsIsValid(preferredPTS) ? preferredPTS : fallbackPTS
+        var pts = Self.ptsIsValid(candidate) ? candidate : nextSyntheticPTSCandidate()
+
+        if let lastOutputPTS, CMTimeCompare(pts, lastOutputPTS) <= 0 {
+            pts = CMTimeAdd(lastOutputPTS, targetFrameDuration)
+        }
+
+        return pts
+    }
+
+    private func nextSyntheticPTSCandidate() -> CMTime {
         if syntheticPTSBasis == nil {
             syntheticPTSBasis = CMTime(seconds: ProcessInfo.processInfo.systemUptime, preferredTimescale: 1000000000)
         }
-        lastSyntheticPTS = CMTimeAdd(lastSyntheticPTS, frameDuration)
+        lastSyntheticPTS = CMTimeAdd(lastSyntheticPTS, targetFrameDuration)
         return lastSyntheticPTS
     }
 }

@@ -149,6 +149,10 @@ public enum AppSettings {
         Defaults[.dualCaptureSaveMode]
     }
 
+    public static var dualCaptureSaveModeEnum: DualCaptureSaveMode {
+        DualCaptureSaveMode(rawValue: Defaults[.dualCaptureSaveMode]) ?? .sideBySide
+    }
+
     public static var systemAudioVolume: Double { Defaults[.systemAudioVolume] }
     public static var microphoneVolume: Double { Defaults[.microphoneVolume] }
 

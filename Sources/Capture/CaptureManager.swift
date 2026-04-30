@@ -22,6 +22,8 @@ public struct CaptureResolutionConfig: Sendable {
 }
 
 public actor CaptureManager {
+    private static let screenPixelFormat = kCVPixelFormatType_420YpCbCr8BiPlanarFullRange
+
     // Single-display state
     private var stream: SCStream?
     private nonisolated let delegate = CaptureDelegate()
@@ -243,7 +245,7 @@ public actor CaptureManager {
         config.height = captureHeight
         config.minimumFrameInterval = CMTime(value: 1, timescale: CMTimeScale(fps))
         config.queueDepth = queueDepth
-        config.pixelFormat = kCVPixelFormatType_32BGRA
+        config.pixelFormat = Self.screenPixelFormat
         config.capturesAudio = true
         config.excludesCurrentProcessAudio = excludeOwnAppAudio
 
@@ -318,7 +320,7 @@ public actor CaptureManager {
         config1.height = capHeight1
         config1.minimumFrameInterval = CMTime(value: 1, timescale: CMTimeScale(fps))
         config1.queueDepth = queueDepth
-        config1.pixelFormat = kCVPixelFormatType_32BGRA
+        config1.pixelFormat = Self.screenPixelFormat
         config1.capturesAudio = true
         config1.excludesCurrentProcessAudio = excludeOwnAppAudio
 
@@ -327,7 +329,7 @@ public actor CaptureManager {
         config2.height = capHeight2
         config2.minimumFrameInterval = CMTime(value: 1, timescale: CMTimeScale(fps))
         config2.queueDepth = queueDepth
-        config2.pixelFormat = kCVPixelFormatType_32BGRA
+        config2.pixelFormat = Self.screenPixelFormat
         config2.capturesAudio = false
 
         let newStream1 = SCStream(filter: filter1, configuration: config1, delegate: delegate1)
