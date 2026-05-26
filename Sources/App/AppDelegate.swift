@@ -188,7 +188,9 @@ class AppDelegate: NSObject, NSApplicationDelegate, @unchecked Sendable {
 
         // Capture mode and display selection trigger full pipeline restart
         settingsObservations.append(Defaults.observe(.captureMode) { [weak self] _ in
-            self?.scheduleRuntimeSettingsReconcile(needsFullRestart: true)
+            guard let self else { return }
+            guard self.isCaptureRunning else { return }
+            self.scheduleRuntimeSettingsReconcile(needsFullRestart: true)
         })
         settingsObservations.append(Defaults.observe(.captureDisplayID) { [weak self] _ in
             self?.scheduleRuntimeSettingsReconcile(needsFullRestart: true)
@@ -301,105 +303,89 @@ class AppDelegate: NSObject, NSApplicationDelegate, @unchecked Sendable {
                     let captureDisplayID1 = AppSettings.captureDisplayID.isEmpty ? nil : AppSettings.captureDisplayID
                     let captureDisplayID2 = AppSettings.captureDisplayID2.isEmpty ? nil : AppSettings.captureDisplayID2
 
-                    let dualConfigs = try await captureManager.startDual(
-                        interactivePermissionPrompt: userInitiated,
-                        captureDisplayID1: captureDisplayID1,
-                        captureDisplayID2: captureDisplayID2,
-                        fps: fps,
-                        queueDepth: queueDepth,
-                        outputWidth1: nil,
-                        outputHeight1: nil,
-                        outputWidth2: nil,
-                        outputHeight2: nil,
-                        excludeOwnAppAudio: excludeOwn
-                    )
+                    let dualConfigs: (config1: CaptureConfig, config2: CaptureConfig)?
+                    do {
+                        dualConfigs = try await captureManager.startDual(
+                            interactivePermissionPrompt: userInitiated,
+                            captureDisplayID1: captureDisplayID1,
+                            captureDisplayID2: captureDisplayID2,
+                            fps: fps,
+                            queueDepth: queueDepth,
+                            outputWidth1: nil,
+                            outputHeight1: nil,
+                            outputWidth2: nil,
+                            outputHeight2: nil,
+                            excludeOwnAppAudio: excludeOwn
+                        )
+                    } catch CaptureError.notEnoughDisplays {
+                        Defaults[.captureMode] = CaptureMode.single.rawValue
+                        dualConfigs = nil
+                        print("Dual capture unavailable; falling back to single display capture.")
+                        try await startSingleDisplayCapture(
+                            userInitiated: userInitiated,
+                            fps: fps,
+                            queueDepth: queueDepth,
+                            excludeOwnAppAudio: excludeOwn,
+                            codec: codec,
+                            bitrate: bitrate
+                        )
+                    }
 
-                    originalDualWidth1 = dualConfigs.config1.sourceWidth
-                    originalDualHeight1 = dualConfigs.config1.sourceHeight
-                    originalDualWidth2 = dualConfigs.config2.sourceWidth
-                    originalDualHeight2 = dualConfigs.config2.sourceHeight
+                    if let dualConfigs {
+                        originalDualWidth1 = dualConfigs.config1.sourceWidth
+                        originalDualHeight1 = dualConfigs.config1.sourceHeight
+                        originalDualWidth2 = dualConfigs.config2.sourceWidth
+                        originalDualHeight2 = dualConfigs.config2.sourceHeight
 
-                    let scaled1 = AppSettings.scaledDimensions(displayWidth: originalDualWidth1, displayHeight: originalDualHeight1)
-                    let scaled2 = AppSettings.scaledDimensions(displayWidth: originalDualWidth2, displayHeight: originalDualHeight2)
+                        let scaled1 = AppSettings.scaledDimensions(displayWidth: originalDualWidth1, displayHeight: originalDualHeight1)
+                        let scaled2 = AppSettings.scaledDimensions(displayWidth: originalDualWidth2, displayHeight: originalDualHeight2)
 
-                    try await captureManager.updateDualStreamConfigurations(
-                        fps: fps,
-                        queueDepth: queueDepth,
-                        excludeOwnAppAudio: excludeOwn,
-                        resolution1: CaptureResolutionConfig(width: scaled1.width, height: scaled1.height),
-                        resolution2: CaptureResolutionConfig(width: scaled2.width, height: scaled2.height)
-                    )
+                        try await captureManager.updateDualStreamConfigurations(
+                            fps: fps,
+                            queueDepth: queueDepth,
+                            excludeOwnAppAudio: excludeOwn,
+                            resolution1: CaptureResolutionConfig(width: scaled1.width, height: scaled1.height),
+                            resolution2: CaptureResolutionConfig(width: scaled2.width, height: scaled2.height)
+                        )
 
-                    let compositeWidth = scaled1.width + scaled2.width
-                    let compositeHeight = max(scaled1.height, scaled2.height)
+                        let compositeWidth = scaled1.width + scaled2.width
+                        let compositeHeight = max(scaled1.height, scaled2.height)
 
-                    frameCompositor.configure(
-                        display1Width: scaled1.width,
-                        display1Height: scaled1.height,
-                        display2Width: scaled2.width,
-                        display2Height: scaled2.height,
-                        fps: fps
-                    )
+                        frameCompositor.configure(
+                            display1Width: scaled1.width,
+                            display1Height: scaled1.height,
+                            display2Width: scaled2.width,
+                            display2Height: scaled2.height,
+                            fps: fps
+                        )
 
-                    try startDualVideoEncoders(
-                        saveMode: dualSaveMode,
-                        compositeWidth: compositeWidth,
-                        compositeHeight: compositeHeight,
-                        display1Width: scaled1.width,
-                        display1Height: scaled1.height,
-                        display2Width: scaled2.width,
-                        display2Height: scaled2.height,
-                        fps: fps,
-                        codec: codec,
-                        bitrate: bitrate
-                    )
+                        try startDualVideoEncoders(
+                            saveMode: dualSaveMode,
+                            compositeWidth: compositeWidth,
+                            compositeHeight: compositeHeight,
+                            display1Width: scaled1.width,
+                            display1Height: scaled1.height,
+                            display2Width: scaled2.width,
+                            display2Height: scaled2.height,
+                            fps: fps,
+                            codec: codec,
+                            bitrate: bitrate
+                        )
 
-                    isDualMode = true
-                    syncMemoryCapsToSettings()
+                        isDualMode = true
+                        syncMemoryCapsToSettings()
 
-                    print("Dual capture started: Display1=\(originalDualWidth1)x\(originalDualHeight1) -> \(scaled1.width)x\(scaled1.height), Display2=\(originalDualWidth2)x\(originalDualHeight2) -> \(scaled2.width)x\(scaled2.height), Composite=\(compositeWidth)x\(compositeHeight)")
+                        print("Dual capture started: Display1=\(originalDualWidth1)x\(originalDualHeight1) -> \(scaled1.width)x\(scaled1.height), Display2=\(originalDualWidth2)x\(originalDualHeight2) -> \(scaled2.width)x\(scaled2.height), Composite=\(compositeWidth)x\(compositeHeight)")
+                    }
                 } else {
-                    await captureManager.setVideoHandler { [videoEncoder] sampleBuffer in
-                        videoEncoder.encode(sampleBuffer: sampleBuffer)
-                    }
-                    await captureManager.setAudioHandler { [systemAudioCapture] sampleBuffer in
-                        if AppSettings.captureSystemAudio {
-                            systemAudioCapture.process(sampleBuffer: sampleBuffer)
-                        }
-                    }
-
-                    let config = try await captureManager.start(
-                        interactivePermissionPrompt: userInitiated,
-                        captureDisplayID: AppSettings.captureDisplayID.isEmpty ? nil : AppSettings.captureDisplayID,
-                        fps: fps,
-                        queueDepth: queueDepth,
-                        excludeOwnAppAudio: excludeOwn
-                    )
-
-                    originalDisplayWidth = config.sourceWidth
-                    originalDisplayHeight = config.sourceHeight
-
-                    let scaled = AppSettings.scaledDimensions(displayWidth: originalDisplayWidth, displayHeight: originalDisplayHeight)
-
-                    try await captureManager.updateStreamConfiguration(
+                    try await startSingleDisplayCapture(
+                        userInitiated: userInitiated,
                         fps: fps,
                         queueDepth: queueDepth,
                         excludeOwnAppAudio: excludeOwn,
-                        resolution: CaptureResolutionConfig(width: scaled.width, height: scaled.height)
-                    )
-
-                    try videoEncoder.start(
-                        width: scaled.width,
-                        height: scaled.height,
-                        fps: fps,
                         codec: codec,
                         bitrate: bitrate
                     )
-
-                    isDualMode = false
-                    syncMemoryCapsToSettings()
-
-                    print("Single capture started: Display=\(originalDisplayWidth)x\(originalDisplayHeight) -> \(scaled.width)x\(scaled.height)")
                 }
 
                 currentFPS = fps
@@ -437,6 +423,57 @@ class AppDelegate: NSObject, NSApplicationDelegate, @unchecked Sendable {
             NotificationManager.shared.showOperationalNotification(title: message.title, body: message.body)
             print("Failed to start capture: \(error)")
         }
+    }
+
+    private func startSingleDisplayCapture(
+        userInitiated: Bool,
+        fps: Int,
+        queueDepth: Int,
+        excludeOwnAppAudio: Bool,
+        codec: Encode.VideoCodec,
+        bitrate: Int
+    ) async throws {
+        await captureManager.setVideoHandler { [videoEncoder] sampleBuffer in
+            videoEncoder.encode(sampleBuffer: sampleBuffer)
+        }
+        await captureManager.setAudioHandler { [systemAudioCapture] sampleBuffer in
+            if AppSettings.captureSystemAudio {
+                systemAudioCapture.process(sampleBuffer: sampleBuffer)
+            }
+        }
+
+        let config = try await captureManager.start(
+            interactivePermissionPrompt: userInitiated,
+            captureDisplayID: AppSettings.captureDisplayID.isEmpty ? nil : AppSettings.captureDisplayID,
+            fps: fps,
+            queueDepth: queueDepth,
+            excludeOwnAppAudio: excludeOwnAppAudio
+        )
+
+        originalDisplayWidth = config.sourceWidth
+        originalDisplayHeight = config.sourceHeight
+
+        let scaled = AppSettings.scaledDimensions(displayWidth: originalDisplayWidth, displayHeight: originalDisplayHeight)
+
+        try await captureManager.updateStreamConfiguration(
+            fps: fps,
+            queueDepth: queueDepth,
+            excludeOwnAppAudio: excludeOwnAppAudio,
+            resolution: CaptureResolutionConfig(width: scaled.width, height: scaled.height)
+        )
+
+        try videoEncoder.start(
+            width: scaled.width,
+            height: scaled.height,
+            fps: fps,
+            codec: codec,
+            bitrate: bitrate
+        )
+
+        isDualMode = false
+        syncMemoryCapsToSettings()
+
+        print("Single capture started: Display=\(originalDisplayWidth)x\(originalDisplayHeight) -> \(scaled.width)x\(scaled.height)")
     }
 
     private func stopCapturePipeline() {
