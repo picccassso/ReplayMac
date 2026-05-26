@@ -11,10 +11,11 @@ It continuously buffers recent screen/audio capture and saves the last N seconds
 - **Instant replay** — Continuously buffers the last N seconds (15–300) of your screen and audio. Save retroactively with a click or hotkey.
 - **Dual display support** — Capture one or two monitors, saved as a side-by-side composite or as separate files.
 - **Hardware-accelerated encoding** — HEVC or H.264 via VideoToolbox, with configurable resolution, frame rate (30/60/120 fps), and bitrate (10–50 Mbps).
-- **System audio + microphone** — Separate AAC tracks with independent volume controls; choose your mic input device in Settings.
+- **System audio modes + microphone** — Record all system audio, no system audio, or only one selected app; microphone is saved as a separate AAC track with its own device and volume controls.
 - **Ring buffer memory management** — Configurable total memory cap (256 MB–4 GB) shared across all replay buffers, evicting oldest footage as needed and trimming under system memory pressure.
+- **Opt-in extended replay buffer** — Save longer 5, 10, or 30 minute replay windows by rolling temporary segments to disk, with clear SSD write and disk usage warnings before enabling.
 - **Four configurable hotkeys** — Save clip, toggle recording, save last 15s, save last 60s — assign any key combination.
-- **Clip library** — Browse, preview, play, reveal in Finder, or delete saved clips from a built-in library window.
+- **Clip library + quick trim** — Browse, preview, trim/export, play, reveal in Finder, or delete saved clips from a built-in library window.
 - **Quality presets** — Performance, Quality, Ultra, and Custom modes that tune resolution, frame rate, and bitrate together.
 - **Live settings** — Capture, encoding, and audio changes apply automatically while recording; no restart required.
 - **Reliable save flow** — Preflight checks prevent saving when not recording or while the buffer is still filling; success feedback only appears after the clip is written.
@@ -46,6 +47,8 @@ This compiles the app and outputs `dist/ReplayMac.app`.
 Saved clips are written to:
 
 `~/Movies/ReplayMac/`
+
+When the extended replay buffer is enabled, ReplayMac also writes temporary rolling segments to a hidden `.ReplayMacLongBuffer` folder inside the output directory. Those segments are rotated automatically and removed when extended replay is disabled or recording stops.
 
 <details>
 <summary>Screenshots</summary>
