@@ -222,7 +222,8 @@ public actor CaptureManager {
         queueDepth: Int,
         outputWidth: Int? = nil,
         outputHeight: Int? = nil,
-        excludeOwnAppAudio: Bool = false
+        excludeOwnAppAudio: Bool = false,
+        captureAudio: Bool = true
     ) async throws -> CaptureConfig {
         let permissions = CapturePermissions()
         let content = try await permissions.requestAccess(interactive: interactivePermissionPrompt)
@@ -246,12 +247,14 @@ public actor CaptureManager {
         config.minimumFrameInterval = CMTime(value: 1, timescale: CMTimeScale(fps))
         config.queueDepth = queueDepth
         config.pixelFormat = Self.screenPixelFormat
-        config.capturesAudio = true
+        config.capturesAudio = captureAudio
         config.excludesCurrentProcessAudio = excludeOwnAppAudio
 
         let newStream = SCStream(filter: filter, configuration: config, delegate: delegate)
         try newStream.addStreamOutput(delegate, type: .screen, sampleHandlerQueue: videoQueue)
-        try newStream.addStreamOutput(delegate, type: .audio, sampleHandlerQueue: audioQueue)
+        if captureAudio {
+            try newStream.addStreamOutput(delegate, type: .audio, sampleHandlerQueue: audioQueue)
+        }
         try await newStream.startCapture()
 
         userInitiatedStop = false
@@ -283,7 +286,8 @@ public actor CaptureManager {
         outputHeight1: Int? = nil,
         outputWidth2: Int? = nil,
         outputHeight2: Int? = nil,
-        excludeOwnAppAudio: Bool = false
+        excludeOwnAppAudio: Bool = false,
+        captureAudio: Bool = true
     ) async throws -> (config1: CaptureConfig, config2: CaptureConfig) {
         let permissions = CapturePermissions()
         let content = try await permissions.requestAccess(interactive: interactivePermissionPrompt)
@@ -321,7 +325,7 @@ public actor CaptureManager {
         config1.minimumFrameInterval = CMTime(value: 1, timescale: CMTimeScale(fps))
         config1.queueDepth = queueDepth
         config1.pixelFormat = Self.screenPixelFormat
-        config1.capturesAudio = true
+        config1.capturesAudio = captureAudio
         config1.excludesCurrentProcessAudio = excludeOwnAppAudio
 
         let config2 = SCStreamConfiguration()
@@ -334,7 +338,9 @@ public actor CaptureManager {
 
         let newStream1 = SCStream(filter: filter1, configuration: config1, delegate: delegate1)
         try newStream1.addStreamOutput(delegate1, type: .screen, sampleHandlerQueue: videoQueue)
-        try newStream1.addStreamOutput(delegate1, type: .audio, sampleHandlerQueue: audioQueue)
+        if captureAudio {
+            try newStream1.addStreamOutput(delegate1, type: .audio, sampleHandlerQueue: audioQueue)
+        }
 
         let newStream2 = SCStream(filter: filter2, configuration: config2, delegate: delegate2)
         try newStream2.addStreamOutput(delegate2, type: .screen, sampleHandlerQueue: videoQueue)

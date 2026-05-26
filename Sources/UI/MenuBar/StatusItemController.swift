@@ -8,12 +8,14 @@ public final class StatusItemController: NSObject, NSMenuDelegate, @unchecked Se
     private var hostingView: NSHostingView<StatusBadgeView>?
     private var state = MenuBarState()
     private var saveItem: NSMenuItem?
+    private var saveLongBufferItem: NSMenuItem?
     private var toggleRecordingItem: NSMenuItem?
     private var libraryItem: NSMenuItem?
     private var bufferUsageItem: NSMenuItem?
     private var hotkeyHintItem: NSMenuItem?
 
     public var onSaveClip: (() -> Void)?
+    public var onSaveLongBuffer: (() -> Void)?
     public var onToggleRecording: (() -> Void)?
     public var onOpenClipLibrary: (() -> Void)?
     public var onOpenSettings: (() -> Void)?
@@ -74,6 +76,10 @@ public final class StatusItemController: NSObject, NSMenuDelegate, @unchecked Se
         saveItem.target = self
         menu.addItem(saveItem)
 
+        let saveLongBufferItem = NSMenuItem(title: "", action: #selector(saveLongBuffer), keyEquivalent: "")
+        saveLongBufferItem.target = self
+        menu.addItem(saveLongBufferItem)
+
         let hotkeyHintItem = NSMenuItem(title: "No hotkey set — configure in Settings", action: nil, keyEquivalent: "")
         hotkeyHintItem.isEnabled = false
         menu.addItem(hotkeyHintItem)
@@ -101,6 +107,7 @@ public final class StatusItemController: NSObject, NSMenuDelegate, @unchecked Se
         menu.addItem(quitItem)
 
         self.saveItem = saveItem
+        self.saveLongBufferItem = saveLongBufferItem
         self.toggleRecordingItem = toggleRecordingItem
         self.libraryItem = libraryItem
         self.bufferUsageItem = bufferUsageItem
@@ -117,6 +124,11 @@ public final class StatusItemController: NSObject, NSMenuDelegate, @unchecked Se
         let replaySeconds = AppSettings.bufferDurationSeconds
         saveItem?.title = "Save Last \(replaySeconds) Seconds"
         saveItem?.isEnabled = state.isRecording && state.bufferedSeconds >= SavePreflight.minimumBufferedSeconds
+
+        let longBufferSeconds = AppSettings.longBufferDurationSeconds
+        saveLongBufferItem?.title = "Save Last \(MenuBarState.formattedDuration(TimeInterval(longBufferSeconds)))"
+        saveLongBufferItem?.isHidden = !AppSettings.longBufferEnabled
+        saveLongBufferItem?.isEnabled = state.isRecording && !state.isSaveInProgress
 
         toggleRecordingItem?.title = state.isRecording ? "Stop Recording" : "Start Recording"
 
@@ -150,6 +162,10 @@ public final class StatusItemController: NSObject, NSMenuDelegate, @unchecked Se
 
     @objc private func saveClip() {
         onSaveClip?()
+    }
+
+    @objc private func saveLongBuffer() {
+        onSaveLongBuffer?()
     }
 
     @objc private func toggleRecording() {

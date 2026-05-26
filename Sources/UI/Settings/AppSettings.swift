@@ -90,6 +90,29 @@ public enum QualityPreset: String, CaseIterable, Identifiable {
     }
 }
 
+public enum LongBufferDuration: Int, CaseIterable, Identifiable {
+    case fiveMinutes = 5
+    case tenMinutes = 10
+    case thirtyMinutes = 30
+
+    public var id: Int { rawValue }
+
+    public var title: String {
+        switch self {
+        case .fiveMinutes:
+            return "5 minutes"
+        case .tenMinutes:
+            return "10 minutes"
+        case .thirtyMinutes:
+            return "30 minutes"
+        }
+    }
+
+    public var seconds: Int {
+        rawValue * 60
+    }
+}
+
 private enum AppDefaultValues {
     static var outputDirectoryPath: String {
         let moviesDirectory = FileManager.default.urls(for: .moviesDirectory, in: .userDomainMask).first
@@ -160,6 +183,13 @@ public enum AppSettings {
     public static var customCaptureHeight: Int { Defaults[.customCaptureHeight] }
     public static var excludeOwnAppAudio: Bool { Defaults[.excludeOwnAppAudio] }
     public static var microphoneID: String { Defaults[.microphoneID] }
+    public static var perAppAudioEnabled: Bool { Defaults[.perAppAudioEnabled] }
+    public static var perAppAudioBundleID: String { Defaults[.perAppAudioBundleID] }
+    public static var longBufferEnabled: Bool { Defaults[.longBufferEnabled] }
+    public static var longBufferDurationMinutes: Int { Defaults[.longBufferDurationMinutes] }
+    public static var longBufferDurationSeconds: Int {
+        LongBufferDuration(rawValue: longBufferDurationMinutes)?.seconds ?? LongBufferDuration.fiveMinutes.seconds
+    }
 
     public static func ringBufferMemoryCaps(
         isDualMode: Bool,
@@ -226,11 +256,16 @@ public extension Defaults.Keys {
     static let captureMicrophone = Key<Bool>("captureMicrophone", default: false)
     static let microphoneID = Key<String>("microphoneID", default: "")
     static let excludeOwnAppAudio = Key<Bool>("excludeOwnAppAudio", default: true)
+    static let perAppAudioEnabled = Key<Bool>("perAppAudioEnabled", default: false)
+    static let perAppAudioBundleID = Key<String>("perAppAudioBundleID", default: "")
 
     static let memoryCapMB = Key<Double>("memoryCapMB", default: 1536)
     static let queueDepth = Key<Int>("queueDepth", default: 5)
     static let playAudioCueOnSave = Key<Bool>("playAudioCueOnSave", default: true)
     static let showNotificationOnSave = Key<Bool>("showNotificationOnSave", default: true)
+    static let longBufferEnabled = Key<Bool>("longBufferEnabled", default: false)
+    static let longBufferDurationMinutes = Key<Int>("longBufferDurationMinutes", default: LongBufferDuration.fiveMinutes.rawValue)
+    static let longBufferWarningAccepted = Key<Bool>("longBufferWarningAccepted", default: false)
 
     static let systemAudioVolume = Key<Double>("systemAudioVolume", default: 1.0)
     static let microphoneVolume = Key<Double>("microphoneVolume", default: 1.0)

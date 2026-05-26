@@ -24,6 +24,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, @unchecked Sendable {
     let dualDisplay2VideoRingBuffer = VideoRingBuffer(timeCap: TimeInterval(AppSettings.bufferDurationSeconds))
 
     let systemAudioCapture = SystemAudioCapture()
+    let perAppAudioCapture = PerAppAudioCapture()
     let micAudioCapture = MicCapture()
     let systemAudioEncoder = AudioEncoder()
     let micAudioEncoder = AudioEncoder()
@@ -37,6 +38,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, @unchecked Sendable {
         systemAudioRingBuffer: systemAudioRingBuffer,
         micRingBuffer: micAudioRingBuffer
     )
+    let longBufferRecorder = LongBufferRecorder()
 
     let menuBarState = MenuBarState()
     let statusItemController = StatusItemController()
@@ -73,6 +75,9 @@ class AppDelegate: NSObject, NSApplicationDelegate, @unchecked Sendable {
 
         statusItemController.onSaveClip = { [weak self] in
             self?.saveClipFromUI()
+        }
+        statusItemController.onSaveLongBuffer = { [weak self] in
+            self?.saveLongBufferFromUI()
         }
         statusItemController.onToggleRecording = { [weak self] in
             self?.toggleCapturePipeline()
@@ -181,9 +186,22 @@ class AppDelegate: NSObject, NSApplicationDelegate, @unchecked Sendable {
         })
         settingsObservations.append(Defaults.observe(.captureSystemAudio) { [weak self] _ in
             self?.syncMemoryCapsToSettings()
+            self?.scheduleRuntimeSettingsReconcile(needsFullRestart: true)
+        })
+        settingsObservations.append(Defaults.observe(.perAppAudioEnabled) { [weak self] _ in
+            self?.scheduleRuntimeSettingsReconcile(needsFullRestart: true)
+        })
+        settingsObservations.append(Defaults.observe(.perAppAudioBundleID) { [weak self] _ in
+            self?.scheduleRuntimeSettingsReconcile(needsFullRestart: true)
         })
         settingsObservations.append(Defaults.observe(.dualCaptureSaveMode) { [weak self] _ in
             self?.scheduleRuntimeSettingsReconcile()
+        })
+        settingsObservations.append(Defaults.observe(.longBufferEnabled) { [weak self] _ in
+            self?.scheduleRuntimeSettingsReconcile(needsFullRestart: false)
+        })
+        settingsObservations.append(Defaults.observe(.longBufferDurationMinutes) { [weak self] _ in
+            self?.scheduleRuntimeSettingsReconcile(needsFullRestart: false)
         })
 
         // Capture mode and display selection trigger full pipeline restart
@@ -231,8 +249,13 @@ class AppDelegate: NSObject, NSApplicationDelegate, @unchecked Sendable {
     }
 
     private func configurePipelines() {
+        let longBufferRecorder = self.longBufferRecorder
         videoEncoder.outputHandler = { [videoRingBuffer] sampleBuffer in
             videoRingBuffer.append(encodedSample: sampleBuffer)
+            let longBufferSample = LongBufferSample(sampleBuffer)
+            Task {
+                await longBufferRecorder.appendVideo(longBufferSample)
+            }
         }
         dualDisplay1VideoEncoder.outputHandler = { [dualDisplay1VideoRingBuffer] sampleBuffer in
             dualDisplay1VideoRingBuffer.append(encodedSample: sampleBuffer)
@@ -245,15 +268,26 @@ class AppDelegate: NSObject, NSApplicationDelegate, @unchecked Sendable {
             videoEncoder.encode(sampleBuffer: sampleBuffer)
         }
 
-        systemAudioEncoder.outputHandler = { [systemAudioRingBuffer] sampleBuffer in
+        systemAudioEncoder.outputHandler = { [systemAudioRingBuffer, longBufferRecorder] sampleBuffer in
             systemAudioRingBuffer.append(sampleBuffer)
+            let longBufferSample = LongBufferSample(sampleBuffer)
+            Task {
+                await longBufferRecorder.appendSystemAudio(longBufferSample)
+            }
         }
         systemAudioCapture.setHandler { [systemAudioEncoder] sampleBuffer in
             systemAudioEncoder.encode(sampleBuffer: sampleBuffer)
         }
+        perAppAudioCapture.setHandler { [systemAudioCapture] sampleBuffer in
+            systemAudioCapture.process(sampleBuffer: sampleBuffer)
+        }
 
-        micAudioEncoder.outputHandler = { [micAudioRingBuffer] sampleBuffer in
+        micAudioEncoder.outputHandler = { [micAudioRingBuffer, longBufferRecorder] sampleBuffer in
             micAudioRingBuffer.append(sampleBuffer)
+            let longBufferSample = LongBufferSample(sampleBuffer)
+            Task {
+                await longBufferRecorder.appendMicrophone(longBufferSample)
+            }
         }
         micAudioCapture.setHandler { [micAudioEncoder] sampleBuffer in
             micAudioEncoder.encode(sampleBuffer: sampleBuffer)
@@ -277,6 +311,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, @unchecked Sendable {
             dualDisplay2VideoRingBuffer.clear()
             systemAudioRingBuffer.clear()
             micAudioRingBuffer.clear()
+            await configureLongBufferForCurrentSettings()
 
                 let shouldCaptureMic = AppSettings.captureMicrophone
                 let micPermissionGranted = shouldCaptureMic ? await requestMicrophonePermissionIfNeeded() : false
@@ -290,6 +325,27 @@ class AppDelegate: NSObject, NSApplicationDelegate, @unchecked Sendable {
                 let fps = AppSettings.frameRate
                 let queueDepth = AppSettings.queueDepth
                 let excludeOwn = AppSettings.excludeOwnAppAudio
+                var captureSystemAudioForSession = AppSettings.captureSystemAudio
+                var usePerAppAudio = captureSystemAudioForSession
+                    && AppSettings.perAppAudioEnabled
+                    && !AppSettings.perAppAudioBundleID.isEmpty
+
+                if usePerAppAudio {
+                    do {
+                        try await perAppAudioCapture.start(
+                            bundleID: AppSettings.perAppAudioBundleID,
+                            excludeOwnAppAudio: excludeOwn
+                        )
+                    } catch {
+                        NotificationManager.shared.showOperationalNotification(
+                            title: "Per-App Audio Unavailable",
+                            body: "No system audio will be captured for this session. \(error.localizedDescription)"
+                        )
+                        usePerAppAudio = false
+                        captureSystemAudioForSession = false
+                    }
+                }
+                let captureMainSystemAudio = captureSystemAudioForSession && !usePerAppAudio
 
             if isDual {
                     let dualSaveMode = AppSettings.dualCaptureSaveModeEnum
@@ -315,7 +371,8 @@ class AppDelegate: NSObject, NSApplicationDelegate, @unchecked Sendable {
                             outputHeight1: nil,
                             outputWidth2: nil,
                             outputHeight2: nil,
-                            excludeOwnAppAudio: excludeOwn
+                            excludeOwnAppAudio: excludeOwn,
+                            captureAudio: captureMainSystemAudio
                         )
                     } catch CaptureError.notEnoughDisplays {
                         Defaults[.captureMode] = CaptureMode.single.rawValue
@@ -327,7 +384,8 @@ class AppDelegate: NSObject, NSApplicationDelegate, @unchecked Sendable {
                             queueDepth: queueDepth,
                             excludeOwnAppAudio: excludeOwn,
                             codec: codec,
-                            bitrate: bitrate
+                            bitrate: bitrate,
+                            captureAudio: captureMainSystemAudio
                         )
                     }
 
@@ -384,7 +442,8 @@ class AppDelegate: NSObject, NSApplicationDelegate, @unchecked Sendable {
                         queueDepth: queueDepth,
                         excludeOwnAppAudio: excludeOwn,
                         codec: codec,
-                        bitrate: bitrate
+                        bitrate: bitrate,
+                        captureAudio: captureMainSystemAudio
                     )
                 }
 
@@ -417,6 +476,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, @unchecked Sendable {
             }
 
             isCaptureRunning = false
+            await perAppAudioCapture.stop()
             menuBarState.setRecording(false)
             statusItemController.refreshPresentation()
             let message = CaptureStartErrorMapper.userMessage(for: error)
@@ -431,7 +491,8 @@ class AppDelegate: NSObject, NSApplicationDelegate, @unchecked Sendable {
         queueDepth: Int,
         excludeOwnAppAudio: Bool,
         codec: Encode.VideoCodec,
-        bitrate: Int
+        bitrate: Int,
+        captureAudio: Bool
     ) async throws {
         await captureManager.setVideoHandler { [videoEncoder] sampleBuffer in
             videoEncoder.encode(sampleBuffer: sampleBuffer)
@@ -447,7 +508,8 @@ class AppDelegate: NSObject, NSApplicationDelegate, @unchecked Sendable {
             captureDisplayID: AppSettings.captureDisplayID.isEmpty ? nil : AppSettings.captureDisplayID,
             fps: fps,
             queueDepth: queueDepth,
-            excludeOwnAppAudio: excludeOwnAppAudio
+            excludeOwnAppAudio: excludeOwnAppAudio,
+            captureAudio: captureAudio
         )
 
         originalDisplayWidth = config.sourceWidth
@@ -491,6 +553,8 @@ class AppDelegate: NSObject, NSApplicationDelegate, @unchecked Sendable {
         monitoringTask = nil
 
         await captureManager.stop()
+        await perAppAudioCapture.stop()
+        await longBufferRecorder.stop(deleteSegments: true)
         micAudioCapture.stop()
         videoEncoder.stop()
         dualDisplay1VideoEncoder.stop()
@@ -503,6 +567,24 @@ class AppDelegate: NSObject, NSApplicationDelegate, @unchecked Sendable {
         menuBarState.setRecording(false)
         menuBarState.setBufferedSeconds(0)
         statusItemController.refreshPresentation()
+    }
+
+    private func configureLongBufferForCurrentSettings() async {
+        let separateDualSave = AppSettings.captureMode == CaptureMode.dualSideBySide.rawValue
+            && AppSettings.dualCaptureSaveMode == DualCaptureSaveMode.separateFiles.rawValue
+        let enabled = AppSettings.longBufferEnabled && !separateDualSave
+        await longBufferRecorder.configure(
+            enabled: enabled,
+            maxDurationSeconds: TimeInterval(AppSettings.longBufferDurationSeconds),
+            outputDirectory: AppSettings.outputDirectoryURL
+        )
+
+        if AppSettings.longBufferEnabled && separateDualSave {
+            NotificationManager.shared.showOperationalNotification(
+                title: "Long Buffer Disabled",
+                body: "Extended replay is not available while dual display clips are saved as separate files."
+            )
+        }
     }
 
     private func toggleCapturePipeline() {
@@ -567,6 +649,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, @unchecked Sendable {
             } else {
                 try await applyPipelineShapeChanges()
                 await applyMicSettingIfNeeded()
+                await configureLongBufferForCurrentSettings()
             }
         } catch {
             print("Failed to apply runtime settings: \(error)")
@@ -779,6 +862,10 @@ class AppDelegate: NSObject, NSApplicationDelegate, @unchecked Sendable {
         saveClip(lastSeconds: TimeInterval(AppSettings.bufferDurationSeconds))
     }
 
+    func saveLongBufferFromUI() {
+        saveLongBuffer(lastSeconds: TimeInterval(AppSettings.longBufferDurationSeconds))
+    }
+
     private func configureHotkeys() {
         hotkeyManager.onSaveClip = { [weak self] in
             self?.saveClipFromUI()
@@ -798,6 +885,12 @@ class AppDelegate: NSObject, NSApplicationDelegate, @unchecked Sendable {
     private func saveClip(lastSeconds: TimeInterval) {
         Task {
             await saveConfiguredClip(lastSeconds: lastSeconds)
+        }
+    }
+
+    private func saveLongBuffer(lastSeconds: TimeInterval) {
+        Task {
+            await saveConfiguredLongBufferClip(lastSeconds: lastSeconds)
         }
     }
 
@@ -879,6 +972,52 @@ class AppDelegate: NSObject, NSApplicationDelegate, @unchecked Sendable {
             statusItemController.refreshPresentation()
             NotificationManager.shared.showSaveFailedNotification(error: error.localizedDescription)
             print("Failed to save clip: \(error)")
+        }
+    }
+
+    private func saveConfiguredLongBufferClip(lastSeconds: TimeInterval) async {
+        guard AppSettings.longBufferEnabled else {
+            NotificationManager.shared.showOperationalNotification(
+                title: "Long Buffer Disabled",
+                body: "Enable Extended replay buffer in Settings > Video before saving a long clip."
+            )
+            return
+        }
+
+        guard isCaptureRunning else {
+            let message = SavePreflight.notificationMessage(for: .notRecording)
+            NotificationManager.shared.showOperationalNotification(title: message.title, body: message.body)
+            menuBarState.showSaveFailedBriefly()
+            return
+        }
+
+        guard menuBarState.beginSaving() else {
+            return
+        }
+        statusItemController.refreshPresentation()
+
+        do {
+            let savedURL = try await longBufferRecorder.saveClip(
+                lastSeconds: lastSeconds,
+                outputDirectory: AppSettings.outputDirectoryURL
+            )
+
+            menuBarState.finishSaving(success: true)
+            statusItemController.refreshPresentation()
+
+            if AppSettings.playAudioCueOnSave {
+                AudioCue.playSaveSuccess()
+            }
+
+            if AppSettings.showNotificationOnSave {
+                NotificationManager.shared.showClipSavedNotification(fileURL: savedURL, clipDuration: lastSeconds)
+            }
+            print("Long-buffer clip saved: \(savedURL.path)")
+        } catch {
+            menuBarState.finishSaving(success: false)
+            statusItemController.refreshPresentation()
+            NotificationManager.shared.showSaveFailedNotification(error: error.localizedDescription)
+            print("Failed to save long-buffer clip: \(error)")
         }
     }
 

@@ -32,6 +32,8 @@ public struct SettingsView: View {
     @Default(.captureMicrophone) private var captureMicrophone
     @Default(.microphoneID) private var microphoneID
     @Default(.excludeOwnAppAudio) private var excludeOwnAppAudio
+    @Default(.perAppAudioEnabled) private var perAppAudioEnabled
+    @Default(.perAppAudioBundleID) private var perAppAudioBundleID
     @Default(.systemAudioVolume) private var systemAudioVolume
     @Default(.microphoneVolume) private var microphoneVolume
 
@@ -39,8 +41,12 @@ public struct SettingsView: View {
     @Default(.queueDepth) private var queueDepth
     @Default(.playAudioCueOnSave) private var playAudioCueOnSave
     @Default(.showNotificationOnSave) private var showNotificationOnSave
+    @Default(.longBufferEnabled) private var longBufferEnabled
+    @Default(.longBufferDurationMinutes) private var longBufferDurationMinutes
+    @Default(.longBufferWarningAccepted) private var longBufferWarningAccepted
 
     @State private var displays: [DisplayOption] = []
+    @State private var audioApplications: [AudioApplicationOption] = []
     @State private var microphones: [MicrophoneOption] = []
     @State private var launchAtLoginError: String?
     @State private var displayLoadError: String?
@@ -51,6 +57,30 @@ public struct SettingsView: View {
 
     private var dualDisplayOptions: [DisplayOption] {
         displays.filter { $0.id != captureDisplayID }
+    }
+
+    private var systemAudioModeBinding: Binding<SystemAudioMode> {
+        Binding(
+            get: {
+                if !captureSystemAudio {
+                    return .off
+                }
+                return perAppAudioEnabled ? .selectedApp : .allApps
+            },
+            set: { mode in
+                switch mode {
+                case .off:
+                    captureSystemAudio = false
+                    perAppAudioEnabled = false
+                case .allApps:
+                    captureSystemAudio = true
+                    perAppAudioEnabled = false
+                case .selectedApp:
+                    captureSystemAudio = true
+                    perAppAudioEnabled = true
+                }
+            }
+        )
     }
 
     public init() {}
@@ -290,6 +320,23 @@ public struct SettingsView: View {
                     .foregroundStyle(AppTheme.textSecondary)
                     .font(.system(size: 12, design: .rounded))
             }
+
+            Section {
+                Toggle("Extended replay buffer", isOn: longBufferToggleBinding)
+
+                Picker("Long buffer duration", selection: $longBufferDurationMinutes) {
+                    ForEach(LongBufferDuration.allCases) { duration in
+                        Text(duration.title).tag(duration.rawValue)
+                    }
+                }
+                .disabled(!longBufferEnabled)
+
+                Label(longBufferWarningText, systemImage: "externaldrive.badge.timemachine")
+                    .foregroundStyle(longBufferEnabled ? .orange : AppTheme.textSecondary)
+                    .font(.system(size: 12, design: .rounded))
+            } header: {
+                sectionHeader(icon: "clock.badge.exclamationmark", title: "Long Buffer")
+            }
         }
         .formStyle(.grouped)
     }
@@ -297,9 +344,36 @@ public struct SettingsView: View {
     private var audioTab: some View {
         Form {
             Section {
-                Toggle("Capture system audio", isOn: $captureSystemAudio)
+                Picker("System audio", selection: systemAudioModeBinding) {
+                    ForEach(SystemAudioMode.allCases) { mode in
+                        Text(mode.title).tag(mode)
+                    }
+                }
+
+                if systemAudioModeBinding.wrappedValue == .selectedApp {
+                    if audioApplications.isEmpty {
+                        HStack {
+                            Text("Audio app")
+                            Spacer()
+                            Text("No capturable apps detected")
+                                .foregroundStyle(AppTheme.textSecondary)
+                        }
+                    } else {
+                        Picker("Audio app", selection: $perAppAudioBundleID) {
+                            ForEach(audioApplications) { app in
+                                Text(app.name).tag(app.bundleID)
+                            }
+                        }
+                    }
+
+                    Label(selectedAppAudioHelpText, systemImage: "info.circle")
+                        .foregroundStyle(AppTheme.textSecondary)
+                        .font(.system(size: 12, design: .rounded))
+                }
+
                 Toggle("Capture microphone", isOn: $captureMicrophone)
                 Toggle("Exclude ReplayMac audio", isOn: $excludeOwnAppAudio)
+                    .disabled(systemAudioModeBinding.wrappedValue == .off)
             } header: {
                 sectionHeader(icon: "waveform", title: "Sources")
             }
@@ -454,6 +528,37 @@ public struct SettingsView: View {
 
     private var recommendedBitrateLabel: String {
         "Recommended: \(Int(recommendedBitrateMbps())) Mbps"
+    }
+
+    private var selectedAppAudioHelpText: String {
+        let appName = audioApplications.first { $0.bundleID == perAppAudioBundleID }?.name ?? "the selected app"
+        return "Only \(appName) audio will be recorded. If \(appName) is unavailable, no system audio is captured."
+    }
+
+    private var longBufferToggleBinding: Binding<Bool> {
+        Binding(
+            get: { longBufferEnabled },
+            set: { newValue in
+                if newValue {
+                    longBufferWarningAccepted = true
+                }
+                longBufferEnabled = newValue
+            }
+        )
+    }
+
+    private var longBufferWarningText: String {
+        let duration = LongBufferDuration(rawValue: longBufferDurationMinutes) ?? .fiveMinutes
+        let estimatedGB = estimatedLongBufferDiskGB(minutes: duration.rawValue)
+        return "Opt-in only. Uses temporary disk space while recording, writes continuously to the SSD, and may use about \(estimatedGB) GB at your current bitrate before old segments rotate."
+    }
+
+    private func estimatedLongBufferDiskGB(minutes: Int) -> String {
+        let videoMbps = bitrateMbps
+        let audioMbps = (systemAudioModeBinding.wrappedValue == .off ? 0 : 0.2) + (captureMicrophone ? 0.2 : 0)
+        let totalMbps = videoMbps + audioMbps
+        let bytes = totalMbps * 1_000_000 / 8 * Double(minutes * 60)
+        return String(format: "%.1f", bytes / 1_000_000_000)
     }
 
     private func chooseOutputDirectory() {
@@ -695,6 +800,18 @@ public struct SettingsView: View {
             await MainActor.run {
                 displays = options
                 displayLoadError = nil
+                audioApplications = shareableContent.applications
+                    .compactMap { app in
+                        let bundleID = app.bundleIdentifier
+                        guard !bundleID.isEmpty else {
+                            return nil
+                        }
+                        return AudioApplicationOption(
+                            bundleID: bundleID,
+                            name: app.applicationName.isEmpty ? bundleID : app.applicationName
+                        )
+                    }
+                    .sorted { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending }
 
                 if options.isEmpty {
                     captureDisplayID = ""
@@ -709,10 +826,15 @@ public struct SettingsView: View {
                         captureDisplayID2 = remainingForDisplay2.first?.id ?? ""
                     }
                 }
+
+                if perAppAudioBundleID.isEmpty || !audioApplications.contains(where: { $0.bundleID == perAppAudioBundleID }) {
+                    perAppAudioBundleID = audioApplications.first?.bundleID ?? ""
+                }
             }
         } catch {
             await MainActor.run {
                 displays = []
+                audioApplications = []
                 displayLoadError = error.localizedDescription
             }
         }
@@ -727,6 +849,25 @@ private enum SettingsTab: Hashable {
     case advanced
 }
 
+private enum SystemAudioMode: String, CaseIterable, Identifiable {
+    case off
+    case allApps
+    case selectedApp
+
+    var id: String { rawValue }
+
+    var title: String {
+        switch self {
+        case .off:
+            return "Off"
+        case .allApps:
+            return "All apps"
+        case .selectedApp:
+            return "Selected app only"
+        }
+    }
+}
+
 private struct DisplayOption: Identifiable, Hashable {
     let id: String
     let name: String
@@ -737,4 +878,11 @@ private struct DisplayOption: Identifiable, Hashable {
 private struct MicrophoneOption: Identifiable, Hashable {
     let id: String
     let name: String
+}
+
+private struct AudioApplicationOption: Identifiable, Hashable {
+    let bundleID: String
+    let name: String
+
+    var id: String { bundleID }
 }

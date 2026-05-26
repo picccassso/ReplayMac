@@ -10,6 +10,7 @@ public struct ClipLibraryView: View {
     @State private var sortMode: ClipSortMode = .date
     @State private var deleteCandidate: ClipRow?
     @State private var previewURL: URL?
+    @State private var trimURL: URL?
 
     public init() {}
 
@@ -64,6 +65,13 @@ public struct ClipLibraryView: View {
         .sheet(isPresented: previewSheetBinding) {
             if let previewURL {
                 ClipPreviewView(url: previewURL)
+            }
+        }
+        .sheet(isPresented: trimSheetBinding) {
+            if let trimURL {
+                ClipTrimView(url: trimURL) {
+                    Task { await model.reload() }
+                }
             }
         }
     }
@@ -170,6 +178,10 @@ public struct ClipLibraryView: View {
                         NSWorkspace.shared.open(row.info.fileURL)
                     }
 
+                    IconActionButton(icon: "scissors", color: AppTheme.accentSecondary) {
+                        trimURL = row.info.fileURL
+                    }
+
                     IconActionButton(icon: "folder", color: AppTheme.textSecondary) {
                         NSWorkspace.shared.activateFileViewerSelecting([row.info.fileURL])
                     }
@@ -197,6 +209,18 @@ public struct ClipLibraryView: View {
             }
             .buttonStyle(.borderedProminent)
             .tint(AppTheme.accent)
+            .controlSize(.small)
+
+            Button {
+                trimURL = row.info.fileURL
+            } label: {
+                HStack(spacing: 6) {
+                    Image(systemName: "scissors")
+                    Text("Trim")
+                }
+                .font(.system(size: 12, weight: .semibold, design: .rounded))
+            }
+            .buttonStyle(.bordered)
             .controlSize(.small)
 
             Text(row.info.fileURL.lastPathComponent)
@@ -230,6 +254,17 @@ public struct ClipLibraryView: View {
             set: { isPresented in
                 if !isPresented {
                     previewURL = nil
+                }
+            }
+        )
+    }
+
+    private var trimSheetBinding: Binding<Bool> {
+        Binding(
+            get: { trimURL != nil },
+            set: { isPresented in
+                if !isPresented {
+                    trimURL = nil
                 }
             }
         )
@@ -422,6 +457,189 @@ private struct ClipPreviewView: View {
         .onDisappear {
             player?.pause()
             player = nil
+        }
+    }
+}
+
+private struct ClipTrimView: View {
+    let url: URL
+    let onExport: () -> Void
+
+    @Environment(\.dismiss) private var dismiss
+    @State private var player: AVPlayer?
+    @State private var duration: Double = 0
+    @State private var trimStart: Double = 0
+    @State private var trimEnd: Double = 0
+    @State private var isExporting = false
+    @State private var errorMessage: String?
+
+    var body: some View {
+        VStack(spacing: 14) {
+            if let player {
+                AVPlayerViewRepresentable(player: player)
+                    .frame(minWidth: 720, minHeight: 405)
+                    .clipShape(RoundedRectangle(cornerRadius: AppTheme.cornerRadiusMedium, style: .continuous))
+                    .shadow(color: .black.opacity(0.12), radius: 12, x: 0, y: 6)
+            } else {
+                ZStack {
+                    AppTheme.backgroundSecondary
+                    ProgressView("Loading clip…")
+                }
+                .frame(minWidth: 720, minHeight: 405)
+                .clipShape(RoundedRectangle(cornerRadius: AppTheme.cornerRadiusMedium, style: .continuous))
+            }
+
+            VStack(spacing: 10) {
+                HStack {
+                    Text("Start")
+                    Slider(value: $trimStart, in: 0...max(duration, 0.1), step: 0.1)
+                        .onChange(of: trimStart) { _, newValue in
+                            if newValue >= trimEnd {
+                                trimEnd = min(duration, newValue + 0.1)
+                            }
+                            seek(to: newValue)
+                        }
+                    Text(timeLabel(trimStart))
+                        .frame(width: 52, alignment: .trailing)
+                }
+
+                HStack {
+                    Text("End")
+                    Slider(value: $trimEnd, in: 0...max(duration, 0.1), step: 0.1)
+                        .onChange(of: trimEnd) { _, newValue in
+                            if newValue <= trimStart {
+                                trimStart = max(0, newValue - 0.1)
+                            }
+                            seek(to: newValue)
+                        }
+                    Text(timeLabel(trimEnd))
+                        .frame(width: 52, alignment: .trailing)
+                }
+            }
+            .font(.system(size: 12, weight: .medium, design: .rounded))
+
+            if let errorMessage {
+                Label(errorMessage, systemImage: "exclamationmark.triangle.fill")
+                    .foregroundStyle(.orange)
+                    .font(.system(size: 12, design: .rounded))
+            }
+
+            HStack {
+                Text(url.lastPathComponent)
+                    .font(.system(size: 12, weight: .medium, design: .rounded))
+                    .foregroundStyle(AppTheme.textSecondary)
+                    .lineLimit(1)
+
+                Spacer()
+
+                Button("Cancel") {
+                    dismiss()
+                }
+                .disabled(isExporting)
+
+                Button {
+                    Task { await exportTrimmedClip() }
+                } label: {
+                    if isExporting {
+                        ProgressView()
+                            .controlSize(.small)
+                    } else {
+                        Label("Export Trim", systemImage: "square.and.arrow.down")
+                    }
+                }
+                .buttonStyle(.borderedProminent)
+                .tint(AppTheme.accent)
+                .disabled(isExporting || trimEnd <= trimStart)
+            }
+        }
+        .padding(16)
+        .task {
+            await loadClip()
+        }
+        .onDisappear {
+            player?.pause()
+            player = nil
+        }
+    }
+
+    private func loadClip() async {
+        let asset = AVURLAsset(url: url)
+        let loadedDuration = (try? await asset.load(.duration)) ?? .zero
+        let seconds = max(CMTimeGetSeconds(loadedDuration), 0)
+
+        await MainActor.run {
+            duration = seconds
+            trimStart = 0
+            trimEnd = seconds
+            let newPlayer = AVPlayer(url: url)
+            player = newPlayer
+            newPlayer.play()
+        }
+    }
+
+    private func exportTrimmedClip() async {
+        isExporting = true
+        errorMessage = nil
+
+        do {
+            let asset = AVURLAsset(url: url)
+            let outputURL = try ClipMetadata.generateUniqueFileURL(
+                in: url.deletingLastPathComponent(),
+                suffix: "Trimmed"
+            )
+            let start = CMTime(seconds: trimStart, preferredTimescale: 600)
+            let end = CMTime(seconds: trimEnd, preferredTimescale: 600)
+            let range = CMTimeRangeFromTimeToTime(start: start, end: end)
+
+            let preset: String
+            if await AVAssetExportSession.compatibility(
+                ofExportPreset: AVAssetExportPresetPassthrough,
+                with: asset,
+                outputFileType: .mp4
+            ) {
+                preset = AVAssetExportPresetPassthrough
+            } else {
+                preset = AVAssetExportPresetHighestQuality
+            }
+
+            guard let exportSession = AVAssetExportSession(asset: asset, presetName: preset) else {
+                throw TrimExportError.cannotCreateSession
+            }
+
+            exportSession.timeRange = range
+            exportSession.shouldOptimizeForNetworkUse = true
+            try await exportSession.export(to: outputURL, as: .mp4)
+
+            onExport()
+            dismiss()
+        } catch {
+            errorMessage = error.localizedDescription
+        }
+
+        isExporting = false
+    }
+
+    private func seek(to seconds: Double) {
+        let time = CMTime(seconds: seconds, preferredTimescale: 600)
+        player?.seek(to: time, toleranceBefore: .zero, toleranceAfter: .zero)
+    }
+
+    private func timeLabel(_ seconds: Double) -> String {
+        let total = Int(seconds.rounded(.down))
+        return String(format: "%02d:%02d", total / 60, total % 60)
+    }
+}
+
+private enum TrimExportError: LocalizedError {
+    case cannotCreateSession
+    case exportFailed
+
+    var errorDescription: String? {
+        switch self {
+        case .cannotCreateSession:
+            return "Unable to create a trim export session."
+        case .exportFailed:
+            return "Trim export did not complete."
         }
     }
 }
