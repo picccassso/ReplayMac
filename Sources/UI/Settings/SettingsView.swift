@@ -1,5 +1,6 @@
 import SwiftUI
 import AVFoundation
+import AppKit
 import Defaults
 import Hotkeys
 import KeyboardShortcuts
@@ -114,6 +115,12 @@ public struct SettingsView: View {
         }
         .onReceive(NotificationCenter.default.publisher(for: .replayMacSettingsShouldOpenGeneral)) { _ in
             selectedTab = .general
+        }
+        .onReceive(NSWorkspace.shared.notificationCenter.publisher(for: NSWorkspace.didLaunchApplicationNotification)) { _ in
+            refreshAudioApplicationsAfterWorkspaceChange()
+        }
+        .onReceive(NSWorkspace.shared.notificationCenter.publisher(for: NSWorkspace.didTerminateApplicationNotification)) { _ in
+            refreshAudioApplicationsAfterWorkspaceChange()
         }
         .task {
             loadMicrophones()
@@ -481,6 +488,10 @@ public struct SettingsView: View {
                 Stepper(value: $queueDepth, in: 3...10) {
                     Text("SCK queue depth: \(queueDepth)")
                 }
+
+                Label("Number of frames ScreenCaptureKit can queue before ReplayMac processes them. Higher values may smooth capture but use more memory and add latency.", systemImage: "info.circle")
+                    .foregroundStyle(AppTheme.textSecondary)
+                    .font(.system(size: 12, design: .rounded))
             } header: {
                 sectionHeader(icon: "cpu", title: "Performance")
             }
@@ -785,6 +796,14 @@ public struct SettingsView: View {
         }
     }
 
+    private func refreshAudioApplicationsAfterWorkspaceChange() {
+        Task {
+            await loadAudioApplications()
+            try? await Task.sleep(for: .milliseconds(700))
+            await loadAudioApplications()
+        }
+    }
+
     private func loadDisplays() async {
         do {
             let shareableContent = try await SCShareableContent.excludingDesktopWindows(false, onScreenWindowsOnly: true)
@@ -800,18 +819,7 @@ public struct SettingsView: View {
             await MainActor.run {
                 displays = options
                 displayLoadError = nil
-                audioApplications = shareableContent.applications
-                    .compactMap { app in
-                        let bundleID = app.bundleIdentifier
-                        guard !bundleID.isEmpty else {
-                            return nil
-                        }
-                        return AudioApplicationOption(
-                            bundleID: bundleID,
-                            name: app.applicationName.isEmpty ? bundleID : app.applicationName
-                        )
-                    }
-                    .sorted { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending }
+                updateAudioApplications(from: shareableContent.applications)
 
                 if options.isEmpty {
                     captureDisplayID = ""
@@ -826,10 +834,6 @@ public struct SettingsView: View {
                         captureDisplayID2 = remainingForDisplay2.first?.id ?? ""
                     }
                 }
-
-                if perAppAudioBundleID.isEmpty || !audioApplications.contains(where: { $0.bundleID == perAppAudioBundleID }) {
-                    perAppAudioBundleID = audioApplications.first?.bundleID ?? ""
-                }
             }
         } catch {
             await MainActor.run {
@@ -837,6 +841,39 @@ public struct SettingsView: View {
                 audioApplications = []
                 displayLoadError = error.localizedDescription
             }
+        }
+    }
+
+    private func loadAudioApplications() async {
+        do {
+            let shareableContent = try await SCShareableContent.excludingDesktopWindows(false, onScreenWindowsOnly: true)
+            await MainActor.run {
+                updateAudioApplications(from: shareableContent.applications)
+            }
+        } catch {
+            await MainActor.run {
+                audioApplications = []
+            }
+        }
+    }
+
+    private func updateAudioApplications(from applications: [SCRunningApplication]) {
+        let currentSelection = perAppAudioBundleID
+        audioApplications = applications
+            .compactMap { app in
+                let bundleID = app.bundleIdentifier
+                guard !bundleID.isEmpty else {
+                    return nil
+                }
+                return AudioApplicationOption(
+                    bundleID: bundleID,
+                    name: app.applicationName.isEmpty ? bundleID : app.applicationName
+                )
+            }
+            .sorted { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending }
+
+        if currentSelection.isEmpty || !audioApplications.contains(where: { $0.bundleID == currentSelection }) {
+            perAppAudioBundleID = audioApplications.first?.bundleID ?? ""
         }
     }
 }

@@ -53,11 +53,13 @@ When the extended replay buffer is enabled, ReplayMac also writes temporary roll
 <details>
 <summary>Screenshots</summary>
 
-![General settings](app_photos/1_general_settings.png?v=1.1)
-![Video settings](app_photos/2_video_settings.png?v=1.1)
-![Audio settings](app_photos/3_audio_settings.png?v=1.1)
-![Hotkey settings](app_photos/4_hotkey_settings.png?v=1.1)
-![Advanced settings](app_photos/5_advanced_settings.png?v=1.1)
-![Clip library](app_photos/6_library.png?v=1.1)
+![General settings](app_photos/1_general_settings.png?v=1.2)
+![Video settings](app_photos/2_video_settings_1.png?v=1.2)
+![Video settings extended replay](app_photos/2_video_settings_2.png?v=1.2)
+![Audio settings](app_photos/3_audio_settings.png?v=1.2)
+![Hotkey settings](app_photos/4_hotkey_settings.png?v=1.2)
+![Advanced settings](app_photos/5_advanced_settings.png?v=1.2)
+![Clip library](app_photos/6_library_1.png?v=1.2)
+![Clip trim](app_photos/6_library_2.png?v=1.2)
 
 </details>

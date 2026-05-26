@@ -1,5 +1,18 @@
 # Changelog
 
+## 1.2
+
+- Add selected-app system audio capture with a clearer System audio mode picker: Off, All apps, or Selected app only
+- Refresh the selected-app audio picker while Settings is open when apps launch or quit
+- Avoid surprising audio fallback: selected-app mode captures no system audio for the session if the selected app is unavailable
+- Add quick trim/export controls to the clip library, using passthrough MP4 export when available
+- Add an opt-in extended replay buffer with 5, 10, and 30 minute durations
+- Show explicit disk usage and SSD write warnings before enabling the extended replay buffer
+- Add a menu action for saving the extended replay window
+- Open Settings on the General tab by default whenever the settings window is opened
+- Update README feature notes for per-app audio, quick trim, and extended replay
+- Add an explanatory note for SCK queue depth in Advanced settings
+
 ## 1.1
 
 - Fix buffer duration not being applied to ring buffers
