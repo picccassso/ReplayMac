@@ -805,9 +805,11 @@ class AppDelegate: NSObject, NSApplicationDelegate, @unchecked Sendable {
         NSApp.setActivationPolicy(.regular)
         NSApp.activate(ignoringOtherApps: true)
         NSApp.sendAction(Selector(("showSettingsWindow:")), to: nil, from: nil)
+        NotificationCenter.default.post(name: .replayMacSettingsShouldOpenGeneral, object: nil)
 
         bringSettingsWindowToFront()
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) { [weak self] in
+            NotificationCenter.default.post(name: .replayMacSettingsShouldOpenGeneral, object: nil)
             self?.bringSettingsWindowToFront()
         }
     }

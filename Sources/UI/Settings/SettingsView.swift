@@ -6,6 +6,10 @@ import KeyboardShortcuts
 import ScreenCaptureKit
 import ServiceManagement
 
+public extension Notification.Name {
+    static let replayMacSettingsShouldOpenGeneral = Notification.Name("replayMacSettingsShouldOpenGeneral")
+}
+
 public struct SettingsView: View {
     @Default(.bufferDurationSeconds) private var bufferDurationSeconds
     @Default(.outputDirectoryPath) private var outputDirectoryPath
@@ -43,6 +47,7 @@ public struct SettingsView: View {
     @State private var bitrateSliderValue = Defaults[.bitrateMbps]
     @State private var bitrateSliderIsEditing = false
     @State private var isApplyingQualityPreset = false
+    @State private var selectedTab = SettingsTab.general
 
     private var dualDisplayOptions: [DisplayOption] {
         displays.filter { $0.id != captureDisplayID }
@@ -51,24 +56,35 @@ public struct SettingsView: View {
     public init() {}
 
     public var body: some View {
-        TabView {
+        TabView(selection: $selectedTab) {
             generalTab
                 .tabItem { Label("General", systemImage: "gearshape") }
+                .tag(SettingsTab.general)
 
             videoTab
                 .tabItem { Label("Video", systemImage: "video") }
+                .tag(SettingsTab.video)
 
             audioTab
                 .tabItem { Label("Audio", systemImage: "speaker.wave.2") }
+                .tag(SettingsTab.audio)
 
             hotkeysTab
                 .tabItem { Label("Hotkeys", systemImage: "keyboard") }
+                .tag(SettingsTab.hotkeys)
 
             advancedTab
                 .tabItem { Label("Advanced", systemImage: "slider.horizontal.3") }
+                .tag(SettingsTab.advanced)
         }
         .padding(20)
         .frame(width: 760, height: 560)
+        .onAppear {
+            selectedTab = .general
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .replayMacSettingsShouldOpenGeneral)) { _ in
+            selectedTab = .general
+        }
         .task {
             loadMicrophones()
             await loadDisplays()
@@ -701,6 +717,14 @@ public struct SettingsView: View {
             }
         }
     }
+}
+
+private enum SettingsTab: Hashable {
+    case general
+    case video
+    case audio
+    case hotkeys
+    case advanced
 }
 
 private struct DisplayOption: Identifiable, Hashable {
