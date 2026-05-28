@@ -8,9 +8,14 @@ public struct ClipLibraryView: View {
     @StateObject private var model = ClipLibraryViewModel()
     @State private var selection: String?
     @State private var sortMode: ClipSortMode = .date
+    @State private var searchText = ""
+    @State private var favoritesOnly = false
     @State private var deleteCandidate: ClipRow?
+    @State private var cleanupSheetPresented = false
     @State private var previewURL: URL?
     @State private var trimURL: URL?
+    @State private var metadataDraft = ClipUserMetadata.empty
+    @State private var renameDraft = ""
 
     public init() {}
 
@@ -20,10 +25,14 @@ public struct ClipLibraryView: View {
                 .padding(.horizontal, 20)
                 .padding(.vertical, 14)
 
+            storageSummaryView
+                .padding(.horizontal, 20)
+                .padding(.bottom, 10)
+
             Divider()
                 .padding(.horizontal, 20)
 
-            if model.rows.isEmpty {
+            if visibleRows.isEmpty {
                 emptyStateView
                     .frame(maxHeight: .infinity)
             } else {
@@ -42,6 +51,9 @@ public struct ClipLibraryView: View {
         .frame(minWidth: 900, minHeight: 520)
         .task {
             await model.reload()
+        }
+        .onChange(of: selection) { _, _ in
+            syncDraftFromSelection()
         }
         .onReceive(NotificationCenter.default.publisher(for: .replayMacClipSaved)) { _ in
             Task { await model.reload() }
@@ -74,10 +86,32 @@ public struct ClipLibraryView: View {
                 }
             }
         }
+        .sheet(isPresented: $cleanupSheetPresented) {
+            ClipCleanupView(summary: model.storageSummary) { action in
+                Task {
+                    await model.cleanup(action)
+                    if let selection, !model.rows.contains(where: { $0.id == selection }) {
+                        self.selection = nil
+                    }
+                    cleanupSheetPresented = false
+                }
+            }
+        }
     }
 
     private var toolbarView: some View {
         HStack(spacing: 12) {
+            TextField("Search clips, tags, notes", text: $searchText)
+                .textFieldStyle(.roundedBorder)
+                .frame(maxWidth: 240)
+
+            Toggle(isOn: $favoritesOnly) {
+                Image(systemName: "star.fill")
+                    .foregroundStyle(favoritesOnly ? .yellow : AppTheme.textSecondary)
+            }
+            .toggleStyle(.button)
+            .help("Show favorites only")
+
             HStack(spacing: 6) {
                 Image(systemName: "arrow.up.arrow.down.circle.fill")
                     .foregroundStyle(AppTheme.accent)
@@ -94,6 +128,19 @@ public struct ClipLibraryView: View {
             Spacer()
 
             Button {
+                cleanupSheetPresented = true
+            } label: {
+                HStack(spacing: 6) {
+                    Image(systemName: "externaldrive.badge.minus")
+                    Text("Clean Up")
+                }
+                .font(.system(size: 12, weight: .semibold, design: .rounded))
+            }
+            .buttonStyle(.bordered)
+            .controlSize(.small)
+            .disabled(model.rows.isEmpty)
+
+            Button {
                 Task { await model.reload() }
             } label: {
                 HStack(spacing: 6) {
@@ -106,6 +153,19 @@ public struct ClipLibraryView: View {
             .tint(AppTheme.accent)
             .controlSize(.small)
         }
+    }
+
+    private var storageSummaryView: some View {
+        HStack(spacing: 14) {
+            Label("\(model.storageSummary.clipCount) clips", systemImage: "film.stack")
+            Label(ByteCountFormatter.string(fromByteCount: model.storageSummary.totalBytes, countStyle: .file), systemImage: "internaldrive")
+            if let oldest = model.storageSummary.oldestClipDate {
+                Label("Oldest \(DateFormatter.clipLibraryDate.string(from: oldest))", systemImage: "clock")
+            }
+            Spacer()
+        }
+        .font(.system(size: 12, weight: .medium, design: .rounded))
+        .foregroundStyle(AppTheme.textSecondary)
     }
 
     @ViewBuilder
@@ -140,16 +200,45 @@ public struct ClipLibraryView: View {
     }
 
     private var tableView: some View {
-        Table(model.sortedRows(by: sortMode), selection: $selection) {
+        Table(visibleRows, selection: $selection) {
+            TableColumn("") { row in
+                Button {
+                    model.toggleFavorite(row)
+                    if selection == row.id {
+                        syncDraftFromSelection()
+                    }
+                } label: {
+                    Image(systemName: row.userMetadata.isFavorite ? "star.fill" : "star")
+                        .foregroundStyle(row.userMetadata.isFavorite ? .yellow : AppTheme.textSecondary)
+                }
+                .buttonStyle(.plain)
+                .help(row.userMetadata.isFavorite ? "Remove favorite" : "Mark favorite")
+            }
+            .width(32)
+
             TableColumn("Clip") { row in
                 HStack(spacing: 12) {
                     ClipThumbnailView(image: row.thumbnail)
-                    Text(row.fileName)
-                        .lineLimit(1)
-                        .font(.system(size: 13, weight: .medium, design: .rounded))
+                    VStack(alignment: .leading, spacing: 3) {
+                        Text(row.displayTitle)
+                            .lineLimit(1)
+                            .font(.system(size: 13, weight: .medium, design: .rounded))
+                        Text(row.fileName)
+                            .lineLimit(1)
+                            .foregroundStyle(AppTheme.textSecondary)
+                            .font(.system(size: 11, weight: .regular, design: .rounded))
+                    }
                 }
             }
-            .width(min: 280, ideal: 380)
+            .width(min: 280, ideal: 360)
+
+            TableColumn("Tags") { row in
+                Text(row.tagsLabel)
+                    .lineLimit(1)
+                    .font(.system(size: 12, weight: .medium, design: .rounded))
+                    .foregroundStyle(row.userMetadata.tags.isEmpty ? AppTheme.textSecondary : AppTheme.accent)
+            }
+            .width(min: 110, ideal: 150)
 
             TableColumn("Duration") { row in
                 Text(row.durationLabel)
@@ -197,44 +286,128 @@ public struct ClipLibraryView: View {
     }
 
     private func bottomBarView(for row: ClipRow) -> some View {
-        HStack(spacing: 12) {
-            Button {
-                previewURL = row.info.fileURL
-            } label: {
-                HStack(spacing: 6) {
-                    Image(systemName: "play.circle.fill")
-                    Text("Quick Preview")
+        VStack(spacing: 10) {
+            HStack(spacing: 12) {
+                Button {
+                    previewURL = row.info.fileURL
+                } label: {
+                    HStack(spacing: 6) {
+                        Image(systemName: "play.circle.fill")
+                        Text("Quick Preview")
+                    }
+                    .font(.system(size: 12, weight: .semibold, design: .rounded))
                 }
-                .font(.system(size: 12, weight: .semibold, design: .rounded))
-            }
-            .buttonStyle(.borderedProminent)
-            .tint(AppTheme.accent)
-            .controlSize(.small)
+                .buttonStyle(.borderedProminent)
+                .tint(AppTheme.accent)
+                .controlSize(.small)
 
-            Button {
-                trimURL = row.info.fileURL
-            } label: {
-                HStack(spacing: 6) {
-                    Image(systemName: "scissors")
-                    Text("Trim")
+                Button {
+                    trimURL = row.info.fileURL
+                } label: {
+                    HStack(spacing: 6) {
+                        Image(systemName: "scissors")
+                        Text("Trim")
+                    }
+                    .font(.system(size: 12, weight: .semibold, design: .rounded))
                 }
-                .font(.system(size: 12, weight: .semibold, design: .rounded))
+                .buttonStyle(.bordered)
+                .controlSize(.small)
+
+                Text(row.info.fileURL.lastPathComponent)
+                    .font(.system(size: 12, weight: .medium, design: .rounded))
+                    .foregroundStyle(AppTheme.textSecondary)
+                    .lineLimit(1)
+
+                Spacer()
             }
-            .buttonStyle(.bordered)
-            .controlSize(.small)
 
-            Text(row.info.fileURL.lastPathComponent)
-                .font(.system(size: 12, weight: .medium, design: .rounded))
-                .foregroundStyle(AppTheme.textSecondary)
-                .lineLimit(1)
+            HStack(alignment: .top, spacing: 12) {
+                Toggle("Favorite", isOn: Binding(
+                    get: { metadataDraft.isFavorite },
+                    set: { metadataDraft.isFavorite = $0 }
+                ))
+                .toggleStyle(.checkbox)
+                .frame(width: 90, alignment: .leading)
 
-            Spacer()
+                TextField("Display name", text: $metadataDraft.displayName)
+                    .textFieldStyle(.roundedBorder)
+
+                TextField("File name", text: $renameDraft)
+                    .textFieldStyle(.roundedBorder)
+
+                Button("Rename File") {
+                    applyRename(for: row)
+                }
+                .disabled(renameDraft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+
+                Button("Save Details") {
+                    saveDraft(for: row)
+                }
+                .buttonStyle(.borderedProminent)
+                .tint(AppTheme.accent)
+            }
+
+            HStack(spacing: 12) {
+                TextField("Tags, comma separated", text: Binding(
+                    get: { metadataDraft.tags.joined(separator: ", ") },
+                    set: { metadataDraft.tags = Self.parseTags($0) }
+                ))
+                .textFieldStyle(.roundedBorder)
+
+                TextField("Notes", text: $metadataDraft.notes, axis: .vertical)
+                    .textFieldStyle(.roundedBorder)
+                    .lineLimit(1...3)
+            }
+            .font(.system(size: 12, weight: .regular, design: .rounded))
         }
     }
 
     private var selectedRow: ClipRow? {
         guard let selection else { return nil }
         return model.rows.first(where: { $0.id == selection })
+    }
+
+    private var visibleRows: [ClipRow] {
+        model.sortedRows(by: sortMode).filter { row in
+            let matchesFavorite = !favoritesOnly || row.userMetadata.isFavorite
+            let query = searchText.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard matchesFavorite, !query.isEmpty else {
+                return matchesFavorite
+            }
+            return row.searchText.localizedCaseInsensitiveContains(query)
+        }
+    }
+
+    private func syncDraftFromSelection() {
+        guard let selectedRow else {
+            metadataDraft = .empty
+            renameDraft = ""
+            return
+        }
+        metadataDraft = selectedRow.userMetadata
+        renameDraft = selectedRow.fileNameWithoutExtension
+    }
+
+    private func saveDraft(for row: ClipRow) {
+        model.updateMetadata(for: row, metadata: metadataDraft)
+    }
+
+    private func applyRename(for row: ClipRow) {
+        let oldID = row.id
+        if let newID = model.rename(row, to: renameDraft, metadata: metadataDraft) {
+            selection = newID
+        } else {
+            selection = oldID
+        }
+        syncDraftFromSelection()
+    }
+
+    private static func parseTags(_ text: String) -> [String] {
+        text
+            .split(separator: ",")
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty }
+            .uniquedCaseInsensitive()
     }
 
     private var deleteAlertBinding: Binding<Bool> {
@@ -292,9 +465,22 @@ private enum ClipSortMode: String, CaseIterable, Identifiable {
 private struct ClipRow: Identifiable {
     let info: ClipInfo
     let thumbnail: NSImage?
+    var userMetadata: ClipUserMetadata
 
     var id: String { info.fileURL.path }
     var fileName: String { info.fileURL.lastPathComponent }
+    var fileNameWithoutExtension: String { info.fileURL.deletingPathExtension().lastPathComponent }
+    var displayTitle: String {
+        userMetadata.displayName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            ? fileNameWithoutExtension
+            : userMetadata.displayName
+    }
+    var tagsLabel: String {
+        userMetadata.tags.isEmpty ? "No tags" : userMetadata.tags.joined(separator: ", ")
+    }
+    var searchText: String {
+        ([displayTitle, fileName, userMetadata.notes] + userMetadata.tags).joined(separator: " ")
+    }
 
     var durationLabel: String {
         guard info.duration.isFinite, info.duration > 0 else { return "--:--" }
@@ -316,9 +502,12 @@ private struct ClipRow: Identifiable {
 @MainActor
 private final class ClipLibraryViewModel: ObservableObject {
     @Published var rows: [ClipRow] = []
+    @Published var storageSummary = ClipLibraryStorageSummary(clipCount: 0, totalBytes: 0, oldestClipDate: nil)
+    private var metadataByPath: [String: ClipUserMetadata] = [:]
 
     func reload() async {
         let base = ClipMetadata.scanClips(in: AppSettings.outputDirectoryURL)
+        metadataByPath = ClipLibraryMetadataStore.load(in: AppSettings.outputDirectoryURL)
         var loadedRows: [ClipRow] = []
         loadedRows.reserveCapacity(base.count)
 
@@ -326,19 +515,95 @@ private final class ClipLibraryViewModel: ObservableObject {
             if Task.isCancelled { return }
             let enriched = await ClipMetadata.enrichClipInfo(info)
             let thumbnail = await Self.thumbnail(for: enriched.fileURL)
-            loadedRows.append(ClipRow(info: enriched, thumbnail: thumbnail))
+            let key = ClipLibraryMetadataStore.key(for: enriched.fileURL)
+            loadedRows.append(ClipRow(info: enriched, thumbnail: thumbnail, userMetadata: metadataByPath[key] ?? .empty))
         }
 
         rows = loadedRows
+        pruneMissingMetadata()
+        updateStorageSummary()
     }
 
     func delete(_ row: ClipRow) async {
         do {
             try FileManager.default.trashItem(at: row.info.fileURL, resultingItemURL: nil)
             rows.removeAll(where: { $0.id == row.id })
+            metadataByPath.removeValue(forKey: ClipLibraryMetadataStore.key(for: row.info.fileURL))
+            persistMetadata()
+            updateStorageSummary()
         } catch {
             print("Failed to delete clip: \(error)")
         }
+    }
+
+    func updateMetadata(for row: ClipRow, metadata: ClipUserMetadata) {
+        let key = ClipLibraryMetadataStore.key(for: row.info.fileURL)
+        metadataByPath[key] = metadata
+        if let index = rows.firstIndex(where: { $0.id == row.id }) {
+            rows[index].userMetadata = metadata
+        }
+        persistMetadata()
+    }
+
+    func toggleFavorite(_ row: ClipRow) {
+        var metadata = row.userMetadata
+        metadata.isFavorite.toggle()
+        updateMetadata(for: row, metadata: metadata)
+    }
+
+    func rename(_ row: ClipRow, to requestedName: String, metadata: ClipUserMetadata) -> String? {
+        let cleanName = sanitizedFileBaseName(requestedName)
+        guard !cleanName.isEmpty else { return nil }
+
+        let oldURL = row.info.fileURL
+        if cleanName == oldURL.deletingPathExtension().lastPathComponent {
+            updateMetadata(for: row, metadata: metadata)
+            return row.id
+        }
+
+        let newURL = uniqueURL(
+            directory: oldURL.deletingLastPathComponent(),
+            baseName: cleanName,
+            extensionName: oldURL.pathExtension
+        )
+
+        guard oldURL.standardizedFileURL != newURL.standardizedFileURL else {
+            updateMetadata(for: row, metadata: metadata)
+            return row.id
+        }
+
+        do {
+            try FileManager.default.moveItem(at: oldURL, to: newURL)
+            let oldKey = ClipLibraryMetadataStore.key(for: oldURL)
+            metadataByPath.removeValue(forKey: oldKey)
+            metadataByPath[ClipLibraryMetadataStore.key(for: newURL)] = metadata
+            persistMetadata()
+            Task { await reload() }
+            return newURL.path(percentEncoded: false)
+        } catch {
+            print("Failed to rename clip: \(error)")
+            return nil
+        }
+    }
+
+    func cleanup(_ action: ClipCleanupAction) async {
+        let now = Date()
+        let candidates: [ClipRow]
+        switch action {
+        case .nonFavoritesOlderThanDays(let days):
+            let cutoff = Calendar.current.date(byAdding: .day, value: -days, to: now) ?? now
+            candidates = rows.filter { !$0.userMetadata.isFavorite && $0.info.creationDate < cutoff }
+        case .allNonFavorites:
+            candidates = rows.filter { !$0.userMetadata.isFavorite }
+        }
+
+        for row in candidates {
+            try? FileManager.default.trashItem(at: row.info.fileURL, resultingItemURL: nil)
+            metadataByPath.removeValue(forKey: ClipLibraryMetadataStore.key(for: row.info.fileURL))
+        }
+
+        persistMetadata()
+        await reload()
     }
 
     func sortedRows(by mode: ClipSortMode) -> [ClipRow] {
@@ -352,6 +617,42 @@ private final class ClipLibraryViewModel: ObservableObject {
         case .size:
             return rows.sorted { $0.info.fileSize > $1.info.fileSize }
         }
+    }
+
+    private func updateStorageSummary() {
+        storageSummary = ClipLibraryStorageSummary(
+            clipCount: rows.count,
+            totalBytes: rows.reduce(0) { $0 + $1.info.fileSize },
+            oldestClipDate: rows.map(\.info.creationDate).min()
+        )
+    }
+
+    private func pruneMissingMetadata() {
+        let liveKeys = Set(rows.map { ClipLibraryMetadataStore.key(for: $0.info.fileURL) })
+        metadataByPath = metadataByPath.filter { liveKeys.contains($0.key) }
+        persistMetadata()
+    }
+
+    private func persistMetadata() {
+        ClipLibraryMetadataStore.save(metadataByPath, in: AppSettings.outputDirectoryURL)
+    }
+
+    private func sanitizedFileBaseName(_ requestedName: String) -> String {
+        let illegal = CharacterSet(charactersIn: "/\\:?%*|\"<>")
+        return requestedName
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .components(separatedBy: illegal)
+            .joined(separator: "-")
+    }
+
+    private func uniqueURL(directory: URL, baseName: String, extensionName: String) -> URL {
+        var candidate = directory.appendingPathComponent(baseName).appendingPathExtension(extensionName)
+        var counter = 1
+        while FileManager.default.fileExists(atPath: candidate.path) {
+            candidate = directory.appendingPathComponent("\(baseName)_\(counter)").appendingPathExtension(extensionName)
+            counter += 1
+        }
+        return candidate
     }
 
     private static func thumbnail(for url: URL) async -> NSImage? {
@@ -369,6 +670,79 @@ private final class ClipLibraryViewModel: ObservableObject {
                 continuation.resume(returning: NSImage(cgImage: image, size: NSSize(width: image.width, height: image.height)))
             }
         }
+    }
+}
+
+private enum ClipCleanupAction {
+    case nonFavoritesOlderThanDays(Int)
+    case allNonFavorites
+}
+
+private struct ClipCleanupView: View {
+    let summary: ClipLibraryStorageSummary
+    let onRun: (ClipCleanupAction) -> Void
+
+    @Environment(\.dismiss) private var dismiss
+    @State private var days = 30
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 16) {
+            HStack {
+                Label("Storage Cleanup", systemImage: "externaldrive.badge.minus")
+                    .font(.system(size: 18, weight: .bold, design: .rounded))
+                Spacer()
+            }
+
+            HStack(spacing: 14) {
+                Label("\(summary.clipCount) clips", systemImage: "film.stack")
+                Label(ByteCountFormatter.string(fromByteCount: summary.totalBytes, countStyle: .file), systemImage: "internaldrive")
+            }
+            .foregroundStyle(AppTheme.textSecondary)
+
+            Stepper(value: $days, in: 1...365) {
+                Text("Delete non-favorites older than \(days) days")
+            }
+
+            Text("Cleanup moves matching clips to Trash and keeps favorites. Clip notes and tags for deleted files are removed.")
+                .font(.system(size: 12, design: .rounded))
+                .foregroundStyle(AppTheme.textSecondary)
+
+            HStack {
+                Button("Cancel") {
+                    dismiss()
+                }
+
+                Spacer()
+
+                Button("Delete All Non-Favorites", role: .destructive) {
+                    onRun(.allNonFavorites)
+                }
+                .disabled(summary.clipCount == 0)
+
+                Button("Run Cleanup") {
+                    onRun(.nonFavoritesOlderThanDays(days))
+                }
+                .buttonStyle(.borderedProminent)
+                .tint(AppTheme.danger)
+                .disabled(summary.clipCount == 0)
+            }
+        }
+        .padding(20)
+        .frame(width: 460)
+    }
+}
+
+private extension Array where Element == String {
+    func uniquedCaseInsensitive() -> [String] {
+        var seen: Set<String> = []
+        var result: [String] = []
+        for value in self {
+            let key = value.lowercased()
+            guard !seen.contains(key) else { continue }
+            seen.insert(key)
+            result.append(value)
+        }
+        return result
     }
 }
 

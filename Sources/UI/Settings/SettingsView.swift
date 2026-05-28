@@ -40,10 +40,15 @@ public struct SettingsView: View {
     @Default(.longBufferEnabled) var longBufferEnabled
     @Default(.longBufferDurationMinutes) var longBufferDurationMinutes
     @Default(.longBufferWarningAccepted) var longBufferWarningAccepted
+    @Default(.captureProfilesJSON) var captureProfilesJSON
 
     @State var displays: [DisplayOption] = []
     @State var audioApplications: [AudioApplicationOption] = []
     @State var microphones: [MicrophoneOption] = []
+    @State var captureProfiles: [CaptureProfile] = []
+    @State var selectedProfileID: UUID?
+    @State var newProfileName = ""
+    @State var profileErrorMessage: String?
     @State var launchAtLoginError: String?
     @State var displayLoadError: String?
     @State var bitrateSliderValue = Defaults[.bitrateMbps]
@@ -66,6 +71,10 @@ public struct SettingsView: View {
             audioTab
                 .tabItem { Label("Audio", systemImage: "speaker.wave.2") }
                 .tag(SettingsTab.audio)
+
+            profilesTab
+                .tabItem { Label("Profiles", systemImage: "rectangle.stack.badge.play") }
+                .tag(SettingsTab.profiles)
 
             hotkeysTab
                 .tabItem { Label("Hotkeys", systemImage: "keyboard") }
@@ -90,6 +99,7 @@ public struct SettingsView: View {
             refreshAudioApplicationsAfterWorkspaceChange()
         }
         .task {
+            loadCaptureProfiles()
             loadMicrophones()
             await loadDisplays()
             syncLaunchAtLoginState()
