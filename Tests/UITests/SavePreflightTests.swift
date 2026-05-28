@@ -41,4 +41,42 @@ final class SavePreflightTests: XCTestCase {
 
         XCTAssertNil(failure)
     }
+
+    func testBufferedSecondsUsesPrimaryVideoForNormalSave() {
+        let bufferedSeconds = SavePreflight.bufferedSeconds(
+            primaryVideo: 8,
+            dualDisplay1: 3,
+            dualDisplay2: 4,
+            isSeparateDualSave: false
+        )
+
+        XCTAssertEqual(bufferedSeconds, 8)
+    }
+
+    func testBufferedSecondsUsesShortestDualBufferForSeparateDualSave() {
+        let bufferedSeconds = SavePreflight.bufferedSeconds(
+            primaryVideo: 0,
+            dualDisplay1: 6,
+            dualDisplay2: 4,
+            isSeparateDualSave: true
+        )
+
+        XCTAssertEqual(bufferedSeconds, 4)
+    }
+
+    func testSeparateDualSaveCanPassPreflightWhenPrimaryBufferIsEmpty() {
+        let bufferedSeconds = SavePreflight.bufferedSeconds(
+            primaryVideo: 0,
+            dualDisplay1: 2,
+            dualDisplay2: 2.5,
+            isSeparateDualSave: true
+        )
+        let failure = SavePreflight.failure(
+            isRecording: true,
+            bufferedSeconds: bufferedSeconds,
+            saveInProgress: false
+        )
+
+        XCTAssertNil(failure)
+    }
 }

@@ -888,6 +888,20 @@ class AppDelegate: NSObject, NSApplicationDelegate, @unchecked Sendable {
         }
     }
 
+    private func currentBufferedVideoSeconds() -> TimeInterval {
+        SavePreflight.bufferedSeconds(
+            primaryVideo: videoRingBuffer.duration,
+            dualDisplay1: dualDisplay1VideoRingBuffer.duration,
+            dualDisplay2: dualDisplay2VideoRingBuffer.duration,
+            isSeparateDualSave: isSeparateDualSaveMode
+        )
+    }
+
+    private var isSeparateDualSaveMode: Bool {
+        AppSettings.captureMode == CaptureMode.dualSideBySide.rawValue
+            && AppSettings.dualCaptureSaveMode == DualCaptureSaveMode.separateFiles.rawValue
+    }
+
     private func saveLongBuffer(lastSeconds: TimeInterval) {
         Task {
             await saveConfiguredLongBufferClip(lastSeconds: lastSeconds)
@@ -920,7 +934,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, @unchecked Sendable {
     private func saveConfiguredClip(lastSeconds: TimeInterval) async {
         if let failure = SavePreflight.failure(
             isRecording: isCaptureRunning,
-            bufferedSeconds: menuBarState.bufferedSeconds,
+            bufferedSeconds: currentBufferedVideoSeconds(),
             saveInProgress: menuBarState.isSaveInProgress
         ) {
             if failure != .saveInProgress {
@@ -937,13 +951,11 @@ class AppDelegate: NSObject, NSApplicationDelegate, @unchecked Sendable {
         statusItemController.refreshPresentation()
 
         do {
-            let isSeparateDualSave = AppSettings.captureMode == CaptureMode.dualSideBySide.rawValue
-                && AppSettings.dualCaptureSaveMode == DualCaptureSaveMode.separateFiles.rawValue
             let outputDirectory = AppSettings.outputDirectoryURL
             print("Saving clip to output directory: \(outputDirectory.path(percentEncoded: false))")
 
             let finalURLs: [URL]
-            if isSeparateDualSave {
+            if isSeparateDualSaveMode {
                 finalURLs = try await clipSaver.saveDualDisplayClips(
                     lastSeconds: lastSeconds,
                     outputDirectory: outputDirectory
@@ -1069,7 +1081,15 @@ class AppDelegate: NSObject, NSApplicationDelegate, @unchecked Sendable {
                 self.micAudioCapture.setVolume(AppSettings.microphoneVolume)
 
                 let videoDuration = self.videoRingBuffer.duration
-                self.menuBarState.setBufferedSeconds(videoDuration)
+                let dualDisplay1Duration = self.dualDisplay1VideoRingBuffer.duration
+                let dualDisplay2Duration = self.dualDisplay2VideoRingBuffer.duration
+                let bufferedSeconds = SavePreflight.bufferedSeconds(
+                    primaryVideo: videoDuration,
+                    dualDisplay1: dualDisplay1Duration,
+                    dualDisplay2: dualDisplay2Duration,
+                    isSeparateDualSave: self.isSeparateDualSaveMode
+                )
+                self.menuBarState.setBufferedSeconds(bufferedSeconds)
                 self.statusItemController.refreshPresentation()
 
                 guard tick % 5 == 0 else {
@@ -1087,7 +1107,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, @unchecked Sendable {
                 let micDuration = self.micAudioRingBuffer.duration
                 let micMemory = self.micAudioRingBuffer.currentMemoryBytes
                 let micSamples = self.micAudioRingBuffer.totalSampleCount
-                print("RingBuffer | Video: \(String(format: "%.1f", videoDuration))s \(videoMemory / (1024 * 1024))MB keyframes=\(videoKeyframes) samples=\(videoSamples) | SystemAudio: \(audioSamples) samples \(audioMemory / 1024)KB \(String(format: "%.1f", systemAudioDuration))s | Mic: \(micSamples) samples \(String(format: "%.1f", micDuration))s")
+                print("RingBuffer | Video: \(String(format: "%.1f", videoDuration))s \(videoMemory / (1024 * 1024))MB keyframes=\(videoKeyframes) samples=\(videoSamples) | Dual1: \(String(format: "%.1f", dualDisplay1Duration))s \(dualDisplay1Memory / (1024 * 1024))MB | Dual2: \(String(format: "%.1f", dualDisplay2Duration))s \(dualDisplay2Memory / (1024 * 1024))MB | SystemAudio: \(audioSamples) samples \(audioMemory / 1024)KB \(String(format: "%.1f", systemAudioDuration))s | Mic: \(micSamples) samples \(String(format: "%.1f", micDuration))s")
 
                 let totalRingMemory = videoMemory + dualDisplay1Memory + dualDisplay2Memory + audioMemory + micMemory
                 self.menuBarState.setBufferMemoryBytes(totalRingMemory)

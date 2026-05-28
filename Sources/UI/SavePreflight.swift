@@ -9,6 +9,19 @@ public enum SavePreflightFailure: Equatable {
 public enum SavePreflight {
     public static let minimumBufferedSeconds: TimeInterval = 1
 
+    public static func bufferedSeconds(
+        primaryVideo: TimeInterval,
+        dualDisplay1: TimeInterval,
+        dualDisplay2: TimeInterval,
+        isSeparateDualSave: Bool
+    ) -> TimeInterval {
+        guard isSeparateDualSave else {
+            return primaryVideo
+        }
+
+        return min(dualDisplay1, dualDisplay2)
+    }
+
     public static func failure(
         isRecording: Bool,
         bufferedSeconds: TimeInterval,
