@@ -58,13 +58,24 @@ Clip library notes, tags, display names, and favorite state are stored in a hidd
 <details>
 <summary>Screenshots</summary>
 
-![General settings](app_photos/1_general_settings.png?v=1.2)
-![Video settings](app_photos/2_video_settings_1.png?v=1.2)
-![Video settings extended replay](app_photos/2_video_settings_2.png?v=1.2)
-![Audio settings](app_photos/3_audio_settings.png?v=1.2)
-![Hotkey settings](app_photos/4_hotkey_settings.png?v=1.2)
-![Advanced settings](app_photos/5_advanced_settings.png?v=1.2)
-![Clip library](app_photos/6_library_1.png?v=1.2)
-![Clip trim](app_photos/6_library_2.png?v=1.2)
+| General | Audio |
+| --- | --- |
+| ![General settings](app_photos/1_general_settings.png?v=1.3) | ![Audio settings](app_photos/3_audio_settings.png?v=1.3) |
+
+| Video | Video extended replay |
+| --- | --- |
+| ![Video settings](app_photos/2_video_settings_1.png?v=1.3) | ![Video settings extended replay](app_photos/2_video_settings_2.png?v=1.3) |
+
+| Profiles | Profile details |
+| --- | --- |
+| ![Profile settings](app_photos/4_profile_settings_1.png?v=1.3) | ![Profile settings details](app_photos/4_profile_settings_2.png?v=1.3) |
+
+| Advanced | Hotkeys |
+| --- | --- |
+| ![Advanced settings](app_photos/6_advanced_settings.png?v=1.3) | ![Hotkey settings](app_photos/5_hotkey_settings.png?v=1.3) |
+
+| Clip library | Clip details | Storage cleanup |
+| --- | --- | --- |
+| ![Clip library](app_photos/7_library_view_1.png?v=1.3) | ![Clip library details](app_photos/7_library_view_2.png?v=1.3) | ![Clip library cleanup](app_photos/7_library_view_3.png?v=1.3) |
 
 </details>
