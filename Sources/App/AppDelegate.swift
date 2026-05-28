@@ -36,6 +36,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, @unchecked Sendable {
         micRingBuffer: micAudioRingBuffer
     )
     let longBufferRecorder = LongBufferRecorder()
+    lazy var longBufferAppendPump = LongBufferAppendPump(recorder: longBufferRecorder)
 
     let menuBarState = MenuBarState()
     let statusItemController = StatusItemController()

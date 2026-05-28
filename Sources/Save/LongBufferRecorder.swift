@@ -50,6 +50,9 @@ public actor LongBufferRecorder {
     private var activeSegmentURL: URL?
     private var activeSegmentStartPTS: Double?
     private var activeSegmentEndPTS: Double?
+    private var droppedVideoSamples = 0
+    private var droppedSystemAudioSamples = 0
+    private var droppedMicSamples = 0
 
     public init() {}
 
@@ -62,6 +65,9 @@ public actor LongBufferRecorder {
         self.maxDurationSeconds = maxDurationSeconds
         segmentDirectory = outputDirectory
             .appendingPathComponent(".ReplayMacLongBuffer", isDirectory: true)
+        droppedVideoSamples = 0
+        droppedSystemAudioSamples = 0
+        droppedMicSamples = 0
 
         if !enabled {
             await stop(deleteSegments: true)
@@ -86,7 +92,10 @@ public actor LongBufferRecorder {
                 try startSegment(at: pts, videoSample: sample)
             }
 
-            append(sample, to: videoInput)
+            if !append(sample, to: videoInput) {
+                droppedVideoSamples += 1
+                logDropIfNeeded(label: "video", count: droppedVideoSamples)
+            }
             activeSegmentEndPTS = max(activeSegmentEndPTS ?? pts, pts)
             pruneSegments(keepingNewestPTS: pts)
         } catch {
@@ -96,12 +105,18 @@ public actor LongBufferRecorder {
 
     public func appendSystemAudio(_ sample: LongBufferSample) async {
         let sample = sample.buffer
-        appendAudio(sample, to: systemAudioInput)
+        if !appendAudio(sample, to: systemAudioInput) {
+            droppedSystemAudioSamples += 1
+            logDropIfNeeded(label: "system audio", count: droppedSystemAudioSamples)
+        }
     }
 
     public func appendMicrophone(_ sample: LongBufferSample) async {
         let sample = sample.buffer
-        appendAudio(sample, to: micInput)
+        if !appendAudio(sample, to: micInput) {
+            droppedMicSamples += 1
+            logDropIfNeeded(label: "microphone", count: droppedMicSamples)
+        }
     }
 
     public func stop(deleteSegments: Bool = false) async {
@@ -232,19 +247,29 @@ public actor LongBufferRecorder {
         activeSegmentEndPTS = pts
     }
 
-    private func appendAudio(_ sample: CMSampleBuffer, to input: AVAssetWriterInput?) {
-        guard isEnabled, sample.isValid else { return }
-        append(sample, to: input)
+    private func appendAudio(_ sample: CMSampleBuffer, to input: AVAssetWriterInput?) -> Bool {
+        guard isEnabled, sample.isValid else { return true }
+        guard writer != nil else { return true }
+        let appended = append(sample, to: input)
         let pts = presentationTimeStamp(sample)
         activeSegmentEndPTS = max(activeSegmentEndPTS ?? pts, pts)
+        return appended
     }
 
-    private func append(_ sample: CMSampleBuffer, to input: AVAssetWriterInput?) {
+    private func append(_ sample: CMSampleBuffer, to input: AVAssetWriterInput?) -> Bool {
         guard let writer, writer.status == .writing, let input, input.isReadyForMoreMediaData else {
-            return
+            return false
         }
         if !input.append(sample) {
             print("Long buffer append failed: \(String(describing: writer.error))")
+            return false
+        }
+        return true
+    }
+
+    private func logDropIfNeeded(label: String, count: Int) {
+        if count == 1 || count % 300 == 0 {
+            print("Long buffer dropped \(label) samples: \(count)")
         }
     }
 

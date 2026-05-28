@@ -12,7 +12,7 @@ extension AppDelegate {
     func configurePipelines() {
         videoEncoder.outputHandler = replayMacPrimaryVideoOutputHandler(
             videoRingBuffer: videoRingBuffer,
-            longBufferRecorder: longBufferRecorder
+            longBufferAppendPump: longBufferAppendPump
         )
         dualDisplay1VideoEncoder.outputHandler = replayMacDualVideoOutputHandler(dualDisplay1VideoRingBuffer)
         dualDisplay2VideoEncoder.outputHandler = replayMacDualVideoOutputHandler(dualDisplay2VideoRingBuffer)
@@ -21,14 +21,14 @@ extension AppDelegate {
 
         systemAudioEncoder.outputHandler = replayMacSystemAudioOutputHandler(
             systemAudioRingBuffer: systemAudioRingBuffer,
-            longBufferRecorder: longBufferRecorder
+            longBufferAppendPump: longBufferAppendPump
         )
         systemAudioCapture.setHandler(replayMacAudioEncodeHandler(systemAudioEncoder))
         perAppAudioCapture.setHandler(replayMacPerAppAudioHandler(systemAudioCapture))
 
         micAudioEncoder.outputHandler = replayMacMicrophoneOutputHandler(
             micAudioRingBuffer: micAudioRingBuffer,
-            longBufferRecorder: longBufferRecorder
+            longBufferAppendPump: longBufferAppendPump
         )
         micAudioCapture.setHandler(replayMacAudioEncodeHandler(micAudioEncoder))
     }
@@ -50,6 +50,7 @@ extension AppDelegate {
             dualDisplay2VideoRingBuffer.clear()
             systemAudioRingBuffer.clear()
             micAudioRingBuffer.clear()
+            longBufferAppendPump.reset()
             await configureLongBufferForCurrentSettings()
 
                 let shouldCaptureMic = AppSettings.captureMicrophone
@@ -283,6 +284,7 @@ extension AppDelegate {
 
         await captureManager.stop()
         await perAppAudioCapture.stop()
+        longBufferAppendPump.reset()
         await longBufferRecorder.stop(deleteSegments: true)
         micAudioCapture.stop()
         videoEncoder.stop()

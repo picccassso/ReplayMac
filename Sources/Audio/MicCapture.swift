@@ -18,6 +18,7 @@ public enum MicCaptureError: Error {
 /// a burst of samples then stops — so we use AVAudioEngine instead.
 public final class MicCapture: @unchecked Sendable {
     private let engine = AVAudioEngine()
+    private let processingQueue = DispatchQueue(label: "com.replaymac.microphone.processing", qos: .userInitiated)
     private let lock = NSLock()
     private var handler: ((CMSampleBuffer) -> Void)?
     private var firstBufferHostTime: CMTime?
@@ -27,6 +28,7 @@ public final class MicCapture: @unchecked Sendable {
     private var outputFormat: AVAudioFormat?
     private var outputFormatDescription: CMAudioFormatDescription?
     private var isRunning = false
+    private var captureGeneration = 0
     private var volume: Double = 1.0
 
     public init() {}
@@ -87,8 +89,17 @@ public final class MicCapture: @unchecked Sendable {
             print("[MIC] selected device UID: \(deviceID)")
         }
 
+        lock.lock()
+        captureGeneration += 1
+        let generation = captureGeneration
+        lock.unlock()
+
         input.installTap(onBus: 0, bufferSize: 1024, format: inputFormat) { [weak self] buffer, time in
-            self?.handleInput(buffer: buffer, time: time)
+            guard let self, let copiedBuffer = Self.copyPCMBuffer(buffer) else { return }
+            self.processingQueue.async { [weak self] in
+                guard let self, self.shouldProcessTapBuffer(generation: generation) else { return }
+                self.handleInput(buffer: copiedBuffer, time: time)
+            }
         }
 
         engine.prepare()
@@ -108,9 +119,38 @@ public final class MicCapture: @unchecked Sendable {
         isRunning = false
 
         lock.lock()
+        captureGeneration += 1
         firstBufferHostTime = nil
         totalOutputFrames = 0
         lock.unlock()
+    }
+
+    private func shouldProcessTapBuffer(generation: Int) -> Bool {
+        lock.lock()
+        defer { lock.unlock() }
+        return isRunning && captureGeneration == generation
+    }
+
+    private static func copyPCMBuffer(_ buffer: AVAudioPCMBuffer) -> AVAudioPCMBuffer? {
+        guard let copy = AVAudioPCMBuffer(pcmFormat: buffer.format, frameCapacity: buffer.frameLength) else {
+            return nil
+        }
+        copy.frameLength = buffer.frameLength
+
+        let source = UnsafeMutableAudioBufferListPointer(buffer.mutableAudioBufferList)
+        let destination = UnsafeMutableAudioBufferListPointer(copy.mutableAudioBufferList)
+        guard source.count == destination.count else { return nil }
+
+        for index in source.indices {
+            guard let sourceData = source[index].mData,
+                  let destinationData = destination[index].mData else {
+                continue
+            }
+            memcpy(destinationData, sourceData, Int(source[index].mDataByteSize))
+            destination[index].mDataByteSize = source[index].mDataByteSize
+        }
+
+        return copy
     }
 
     private func setInputDevice(uid: String) throws {
@@ -209,14 +249,14 @@ public final class MicCapture: @unchecked Sendable {
             return
         }
 
-        var didReturnInput = false
+        let inputState = AudioConversionInputState()
         var conversionError: NSError?
         let status = converter.convert(to: outputBuffer, error: &conversionError) { _, outStatus in
-            if didReturnInput {
+            if inputState.didReturnInput {
                 outStatus.pointee = .noDataNow
                 return nil
             }
-            didReturnInput = true
+            inputState.didReturnInput = true
             outStatus.pointee = .haveData
             return buffer
         }
@@ -319,4 +359,8 @@ public final class MicCapture: @unchecked Sendable {
         guard status == noErr else { return nil }
         return sampleBuffer
     }
+}
+
+private final class AudioConversionInputState: @unchecked Sendable {
+    var didReturnInput = false
 }

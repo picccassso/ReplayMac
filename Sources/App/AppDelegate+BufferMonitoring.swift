@@ -79,7 +79,8 @@ extension AppDelegate {
                 let micDuration = self.micAudioRingBuffer.duration
                 let micMemory = self.micAudioRingBuffer.currentMemoryBytes
                 let micSamples = self.micAudioRingBuffer.totalSampleCount
-                print("RingBuffer | Video: \(String(format: "%.1f", videoDuration))s \(videoMemory / (1024 * 1024))MB keyframes=\(videoKeyframes) samples=\(videoSamples) | Dual1: \(String(format: "%.1f", dualDisplay1Duration))s \(dualDisplay1Memory / (1024 * 1024))MB | Dual2: \(String(format: "%.1f", dualDisplay2Duration))s \(dualDisplay2Memory / (1024 * 1024))MB | SystemAudio: \(audioSamples) samples \(audioMemory / 1024)KB \(String(format: "%.1f", systemAudioDuration))s | Mic: \(micSamples) samples \(String(format: "%.1f", micDuration))s")
+                let longBufferStats = self.longBufferAppendPump.snapshot()
+                print("RingBuffer | Video: \(String(format: "%.1f", videoDuration))s \(videoMemory / (1024 * 1024))MB keyframes=\(videoKeyframes) samples=\(videoSamples) | Dual1: \(String(format: "%.1f", dualDisplay1Duration))s \(dualDisplay1Memory / (1024 * 1024))MB | Dual2: \(String(format: "%.1f", dualDisplay2Duration))s \(dualDisplay2Memory / (1024 * 1024))MB | SystemAudio: \(audioSamples) samples \(audioMemory / 1024)KB \(String(format: "%.1f", systemAudioDuration))s | Mic: \(micSamples) samples \(String(format: "%.1f", micDuration))s | LongBuffer pending=\(longBufferStats.pendingSamples) pumpDropped=\(longBufferStats.droppedSamples)")
 
                 let totalRingMemory = videoMemory + dualDisplay1Memory + dualDisplay2Memory + audioMemory + micMemory
                 self.menuBarState.setBufferMemoryBytes(totalRingMemory)

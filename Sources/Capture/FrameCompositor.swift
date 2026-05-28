@@ -137,19 +137,20 @@ public final class FrameCompositor: @unchecked Sendable {
                 return
             }
             let pts = reserveOutputPTS(preferred: frame.sampleBuffer, fallback: primary!.sampleBuffer)
-            let compositeBuffer = composite(
-                primary: primary!,
-                secondary: secondary!,
-                presentationTimeStamp: pts,
-                pool: pool
-            )
+            let primaryFrame = primary!
+            let secondaryFrame = secondary!
             compositeFrameCount += 1
             if compositeFrameCount <= 5 || compositeFrameCount % 60 == 0 {
-                let pts = compositeBuffer.map { CMSampleBufferGetPresentationTimeStamp($0) }
-                print("FrameCompositor: composite #\(compositeFrameCount) PTS=\(pts?.seconds ?? -1) valid=\(pts?.isValid ?? false)")
+                print("FrameCompositor: composite #\(compositeFrameCount) PTS=\(pts.seconds) valid=\(pts.isValid)")
             }
             lock.unlock()
 
+            let compositeBuffer = composite(
+                primary: primaryFrame,
+                secondary: secondaryFrame,
+                presentationTimeStamp: pts,
+                pool: pool
+            )
             if let buffer = compositeBuffer {
                 handler?(buffer)
             }

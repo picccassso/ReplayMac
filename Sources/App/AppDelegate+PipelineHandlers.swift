@@ -41,14 +41,11 @@ func replayMacPerAppAudioHandler(_ systemAudioCapture: SystemAudioCapture) -> @S
 
 func replayMacPrimaryVideoOutputHandler(
     videoRingBuffer: VideoRingBuffer,
-    longBufferRecorder: LongBufferRecorder
+    longBufferAppendPump: LongBufferAppendPump
 ) -> VideoEncoder.OutputHandler {
     { sampleBuffer in
         videoRingBuffer.append(encodedSample: sampleBuffer)
-        let longBufferSample = LongBufferSample(sampleBuffer)
-        Task {
-            await longBufferRecorder.appendVideo(longBufferSample)
-        }
+        longBufferAppendPump.enqueueVideo(LongBufferSample(sampleBuffer))
     }
 }
 
@@ -70,26 +67,20 @@ func replayMacAudioEncodeHandler(_ audioEncoder: AudioEncoder) -> @Sendable (CMS
 
 func replayMacSystemAudioOutputHandler(
     systemAudioRingBuffer: AudioRingBuffer,
-    longBufferRecorder: LongBufferRecorder
+    longBufferAppendPump: LongBufferAppendPump
 ) -> AudioEncoder.OutputHandler {
     { sampleBuffer in
         systemAudioRingBuffer.append(sampleBuffer)
-        let longBufferSample = LongBufferSample(sampleBuffer)
-        Task {
-            await longBufferRecorder.appendSystemAudio(longBufferSample)
-        }
+        longBufferAppendPump.enqueueSystemAudio(LongBufferSample(sampleBuffer))
     }
 }
 
 func replayMacMicrophoneOutputHandler(
     micAudioRingBuffer: AudioRingBuffer,
-    longBufferRecorder: LongBufferRecorder
+    longBufferAppendPump: LongBufferAppendPump
 ) -> AudioEncoder.OutputHandler {
     { sampleBuffer in
         micAudioRingBuffer.append(sampleBuffer)
-        let longBufferSample = LongBufferSample(sampleBuffer)
-        Task {
-            await longBufferRecorder.appendMicrophone(longBufferSample)
-        }
+        longBufferAppendPump.enqueueMicrophone(LongBufferSample(sampleBuffer))
     }
 }

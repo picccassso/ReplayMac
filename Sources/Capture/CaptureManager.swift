@@ -35,6 +35,7 @@ public actor CaptureManager {
     private nonisolated let delegate2 = CaptureDelegate()
 
     private let videoQueue = DispatchQueue(label: "com.replaymac.video", qos: .userInteractive)
+    private let secondaryVideoQueue = DispatchQueue(label: "com.replaymac.video.secondary", qos: .userInteractive)
     private let audioQueue = DispatchQueue(label: "com.replaymac.audio", qos: .userInitiated)
     private let logger = Logger(subsystem: "com.replaymac", category: "Capture")
 
@@ -343,7 +344,7 @@ public actor CaptureManager {
         }
 
         let newStream2 = SCStream(filter: filter2, configuration: config2, delegate: delegate2)
-        try newStream2.addStreamOutput(delegate2, type: .screen, sampleHandlerQueue: videoQueue)
+        try newStream2.addStreamOutput(delegate2, type: .screen, sampleHandlerQueue: secondaryVideoQueue)
 
         try await newStream1.startCapture()
         try await newStream2.startCapture()
@@ -480,7 +481,7 @@ public actor CaptureManager {
             try replacement1.addStreamOutput(delegate1, type: .audio, sampleHandlerQueue: audioQueue)
 
             let replacement2 = SCStream(filter: filter2, configuration: config2, delegate: delegate2)
-            try replacement2.addStreamOutput(delegate2, type: .screen, sampleHandlerQueue: videoQueue)
+            try replacement2.addStreamOutput(delegate2, type: .screen, sampleHandlerQueue: secondaryVideoQueue)
 
             try await replacement1.startCapture()
             try await replacement2.startCapture()
