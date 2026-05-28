@@ -10,49 +10,27 @@ import UI
 @MainActor
 extension AppDelegate {
     func configurePipelines() {
-        let longBufferRecorder = self.longBufferRecorder
-        videoEncoder.outputHandler = { [videoRingBuffer] sampleBuffer in
-            videoRingBuffer.append(encodedSample: sampleBuffer)
-            let longBufferSample = LongBufferSample(sampleBuffer)
-            Task {
-                await longBufferRecorder.appendVideo(longBufferSample)
-            }
-        }
-        dualDisplay1VideoEncoder.outputHandler = { [dualDisplay1VideoRingBuffer] sampleBuffer in
-            dualDisplay1VideoRingBuffer.append(encodedSample: sampleBuffer)
-        }
-        dualDisplay2VideoEncoder.outputHandler = { [dualDisplay2VideoRingBuffer] sampleBuffer in
-            dualDisplay2VideoRingBuffer.append(encodedSample: sampleBuffer)
-        }
+        videoEncoder.outputHandler = replayMacPrimaryVideoOutputHandler(
+            videoRingBuffer: videoRingBuffer,
+            longBufferRecorder: longBufferRecorder
+        )
+        dualDisplay1VideoEncoder.outputHandler = replayMacDualVideoOutputHandler(dualDisplay1VideoRingBuffer)
+        dualDisplay2VideoEncoder.outputHandler = replayMacDualVideoOutputHandler(dualDisplay2VideoRingBuffer)
 
-        frameCompositor.outputHandler = { [videoEncoder] sampleBuffer in
-            videoEncoder.encode(sampleBuffer: sampleBuffer)
-        }
+        frameCompositor.outputHandler = replayMacFrameCompositorOutputHandler(videoEncoder)
 
-        systemAudioEncoder.outputHandler = { [systemAudioRingBuffer, longBufferRecorder] sampleBuffer in
-            systemAudioRingBuffer.append(sampleBuffer)
-            let longBufferSample = LongBufferSample(sampleBuffer)
-            Task {
-                await longBufferRecorder.appendSystemAudio(longBufferSample)
-            }
-        }
-        systemAudioCapture.setHandler { [systemAudioEncoder] sampleBuffer in
-            systemAudioEncoder.encode(sampleBuffer: sampleBuffer)
-        }
-        perAppAudioCapture.setHandler { [systemAudioCapture] sampleBuffer in
-            systemAudioCapture.process(sampleBuffer: sampleBuffer)
-        }
+        systemAudioEncoder.outputHandler = replayMacSystemAudioOutputHandler(
+            systemAudioRingBuffer: systemAudioRingBuffer,
+            longBufferRecorder: longBufferRecorder
+        )
+        systemAudioCapture.setHandler(replayMacAudioEncodeHandler(systemAudioEncoder))
+        perAppAudioCapture.setHandler(replayMacPerAppAudioHandler(systemAudioCapture))
 
-        micAudioEncoder.outputHandler = { [micAudioRingBuffer, longBufferRecorder] sampleBuffer in
-            micAudioRingBuffer.append(sampleBuffer)
-            let longBufferSample = LongBufferSample(sampleBuffer)
-            Task {
-                await longBufferRecorder.appendMicrophone(longBufferSample)
-            }
-        }
-        micAudioCapture.setHandler { [micAudioEncoder] sampleBuffer in
-            micAudioEncoder.encode(sampleBuffer: sampleBuffer)
-        }
+        micAudioEncoder.outputHandler = replayMacMicrophoneOutputHandler(
+            micAudioRingBuffer: micAudioRingBuffer,
+            longBufferRecorder: longBufferRecorder
+        )
+        micAudioCapture.setHandler(replayMacAudioEncodeHandler(micAudioEncoder))
     }
 
     func startCapturePipeline(userInitiated: Bool = true) {
@@ -111,11 +89,7 @@ extension AppDelegate {
             if isDual {
                     let dualSaveMode = AppSettings.dualCaptureSaveModeEnum
                     await configureDualVideoHandlers(saveMode: dualSaveMode)
-                    await captureManager.setAudioHandler1 { [systemAudioCapture] sampleBuffer in
-                        if AppSettings.captureSystemAudio {
-                            systemAudioCapture.process(sampleBuffer: sampleBuffer)
-                        }
-                    }
+                    await captureManager.setAudioHandler1(replayMacSystemAudioProcessHandler(systemAudioCapture))
 
                     let captureDisplayID1 = AppSettings.captureDisplayID.isEmpty ? nil : AppSettings.captureDisplayID
                     let captureDisplayID2 = AppSettings.captureDisplayID2.isEmpty ? nil : AppSettings.captureDisplayID2
@@ -255,14 +229,8 @@ extension AppDelegate {
         bitrate: Int,
         captureAudio: Bool
     ) async throws {
-        await captureManager.setVideoHandler { [videoEncoder] sampleBuffer in
-            videoEncoder.encode(sampleBuffer: sampleBuffer)
-        }
-        await captureManager.setAudioHandler { [systemAudioCapture] sampleBuffer in
-            if AppSettings.captureSystemAudio {
-                systemAudioCapture.process(sampleBuffer: sampleBuffer)
-            }
-        }
+        await captureManager.setVideoHandler(replayMacVideoEncodeHandler(videoEncoder))
+        await captureManager.setAudioHandler(replayMacSystemAudioProcessHandler(systemAudioCapture))
 
         let config = try await captureManager.start(
             interactivePermissionPrompt: userInitiated,

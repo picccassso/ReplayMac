@@ -225,19 +225,11 @@ extension AppDelegate {
     func configureDualVideoHandlers(saveMode: DualCaptureSaveMode) async {
         switch saveMode {
         case .sideBySide:
-            await captureManager.setVideoHandler1 { [frameCompositor] sampleBuffer in
-                frameCompositor.pushPrimaryFrame(sampleBuffer)
-            }
-            await captureManager.setVideoHandler2 { [frameCompositor] sampleBuffer in
-                frameCompositor.pushSecondaryFrame(sampleBuffer)
-            }
+            await captureManager.setVideoHandler1(replayMacPrimaryFrameCompositorHandler(frameCompositor))
+            await captureManager.setVideoHandler2(replayMacSecondaryFrameCompositorHandler(frameCompositor))
         case .separateFiles:
-            await captureManager.setVideoHandler1 { [dualDisplay1VideoEncoder] sampleBuffer in
-                dualDisplay1VideoEncoder.encode(sampleBuffer: sampleBuffer)
-            }
-            await captureManager.setVideoHandler2 { [dualDisplay2VideoEncoder] sampleBuffer in
-                dualDisplay2VideoEncoder.encode(sampleBuffer: sampleBuffer)
-            }
+            await captureManager.setVideoHandler1(replayMacVideoEncodeHandler(dualDisplay1VideoEncoder))
+            await captureManager.setVideoHandler2(replayMacVideoEncodeHandler(dualDisplay2VideoEncoder))
         }
     }
 
