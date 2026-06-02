@@ -1,6 +1,6 @@
 import AVFoundation
 import Defaults
-import ScreenCaptureKit
+@preconcurrency import ScreenCaptureKit
 
 extension SettingsView {
     func loadMicrophones() {
