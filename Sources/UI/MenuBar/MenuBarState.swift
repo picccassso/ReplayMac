@@ -14,6 +14,7 @@ public final class MenuBarState: ObservableObject {
     @Published public private(set) var saveStatus: SaveStatus = .idle
     @Published public private(set) var bufferedSeconds: TimeInterval = 0
     @Published public private(set) var bufferMemoryBytes: Int = 0
+    @Published public private(set) var availableUpdate: AvailableUpdate?
 
     private var saveStatusResetTask: Task<Void, Never>?
 
@@ -33,6 +34,10 @@ public final class MenuBarState: ObservableObject {
 
     public func setBufferMemoryBytes(_ bytes: Int) {
         bufferMemoryBytes = max(0, bytes)
+    }
+
+    public func setAvailableUpdate(_ update: AvailableUpdate?) {
+        availableUpdate = update
     }
 
     @discardableResult

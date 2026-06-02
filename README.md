@@ -16,6 +16,7 @@ It continuously buffers recent screen/audio capture and saves the last N seconds
 - **Opt-in extended replay buffer** — Save longer 5, 10, or 30 minute replay windows by rolling temporary segments to disk, with clear SSD write and disk usage warnings before enabling.
 - **Four configurable hotkeys** — Save clip, toggle recording, save last 15s, save last 60s — assign any key combination.
 - **Clip library + quick trim** — Browse, preview, trim/export, play, reveal in Finder, rename, or delete saved clips from a built-in library window.
+- **Clip sharing** — Open the macOS share sheet or copy a saved clip file for pasting into another app.
 - **Clip organization** — Search clips, mark favorites, add display names, tags, and notes, and filter the library down to favorites.
 - **Storage cleanup** — See total library size and move non-favorite clips to Trash by age or in bulk.
 - **Capture profiles** — Save named video/audio/buffer configurations and apply them later when switching games, displays, or workflows.
@@ -25,6 +26,7 @@ It continuously buffers recent screen/audio capture and saves the last N seconds
 - **Clear menu bar status** — Live badge shows recording state, buffered time, and save progress (Saving / Saved / Failed). Menu includes Start/Stop Recording, buffer usage, and save actions that disable until footage is ready.
 - **Audio cue & notifications** — Optional sound and notification when a clip saves successfully; operational notifications for save failures and when recording stops or fails to start (permissions, display disconnect, GPU pressure).
 - **Launch at login & auto-start** — Optionally begin recording automatically on login.
+- **Update availability check** — Check GitHub Releases on launch and show a download link in the menu when a newer version is available.
 
 ## Requirements
 

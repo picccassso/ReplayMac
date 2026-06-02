@@ -16,6 +16,7 @@ public struct ClipLibraryView: View {
     @State private var trimURL: URL?
     @State private var metadataDraft = ClipUserMetadata.empty
     @State private var renameDraft = ""
+    @State private var copiedFilePath: String?
 
     public init() {}
 
@@ -271,6 +272,15 @@ public struct ClipLibraryView: View {
                         trimURL = row.info.fileURL
                     }
 
+                    ClipShareLink(url: row.info.fileURL)
+
+                    IconActionButton(
+                        icon: copiedFilePath == row.info.fileURL.path ? "checkmark" : "doc.on.doc",
+                        color: copiedFilePath == row.info.fileURL.path ? AppTheme.success : AppTheme.textSecondary
+                    ) {
+                        copyFile(row.info.fileURL)
+                    }
+
                     IconActionButton(icon: "folder", color: AppTheme.textSecondary) {
                         NSWorkspace.shared.activateFileViewerSelecting([row.info.fileURL])
                     }
@@ -280,7 +290,7 @@ public struct ClipLibraryView: View {
                     }
                 }
             }
-            .width(min: 140, ideal: 180)
+            .width(min: 210, ideal: 240)
         }
         .tableStyle(.inset(alternatesRowBackgrounds: true))
     }
@@ -308,6 +318,25 @@ public struct ClipLibraryView: View {
                         Image(systemName: "scissors")
                         Text("Trim")
                     }
+                    .font(.system(size: 12, weight: .semibold, design: .rounded))
+                }
+                .buttonStyle(.bordered)
+                .controlSize(.small)
+
+                ShareLink(item: row.info.fileURL) {
+                    Label("Share", systemImage: "square.and.arrow.up")
+                        .font(.system(size: 12, weight: .semibold, design: .rounded))
+                }
+                .buttonStyle(.bordered)
+                .controlSize(.small)
+
+                Button {
+                    copyFile(row.info.fileURL)
+                } label: {
+                    Label(
+                        copiedFilePath == row.info.fileURL.path ? "Copied" : "Copy File",
+                        systemImage: copiedFilePath == row.info.fileURL.path ? "checkmark" : "doc.on.doc"
+                    )
                     .font(.system(size: 12, weight: .semibold, design: .rounded))
                 }
                 .buttonStyle(.bordered)
@@ -400,6 +429,20 @@ public struct ClipLibraryView: View {
             selection = oldID
         }
         syncDraftFromSelection()
+    }
+
+    private func copyFile(_ url: URL) {
+        guard ClipSharing.copyFileToPasteboard(url) else {
+            return
+        }
+
+        let copiedPath = url.path
+        copiedFilePath = copiedPath
+        Task {
+            try? await Task.sleep(for: .seconds(2))
+            guard copiedFilePath == copiedPath else { return }
+            copiedFilePath = nil
+        }
     }
 
     private static func parseTags(_ text: String) -> [String] {
@@ -777,22 +820,51 @@ private struct IconActionButton: View {
     let color: Color
     let action: () -> Void
 
+    var body: some View {
+        Button(action: action) {
+            IconActionLabel(icon: icon, color: color)
+        }
+        .buttonStyle(.plain)
+    }
+}
+
+private struct ClipShareLink: View {
+    let url: URL
+
+    var body: some View {
+        ShareLink(item: url) {
+            IconActionLabel(icon: "square.and.arrow.up", color: AppTheme.accent)
+        }
+        .buttonStyle(.plain)
+        .help("Share clip")
+    }
+}
+
+private struct IconActionLabel: View {
+    let icon: String
+    let color: Color
+
     @State private var isHovering = false
 
     var body: some View {
-        Button(action: action) {
-            Image(systemName: icon)
-                .font(.system(size: 12, weight: .semibold))
-                .foregroundStyle(color)
-                .frame(width: 28, height: 28)
-                .background(
-                    RoundedRectangle(cornerRadius: 6, style: .continuous)
-                        .fill(color.opacity(isHovering ? 0.15 : 0.08))
-                )
-                .contentShape(Rectangle())
-        }
-        .buttonStyle(.plain)
+        Image(systemName: icon)
+            .font(.system(size: 12, weight: .semibold))
+            .foregroundStyle(color)
+            .frame(width: 28, height: 28)
+            .background(
+                RoundedRectangle(cornerRadius: 6, style: .continuous)
+                    .fill(color.opacity(isHovering ? 0.15 : 0.08))
+            )
+            .contentShape(Rectangle())
         .onHover { isHovering = $0 }
+    }
+}
+
+private enum ClipSharing {
+    static func copyFileToPasteboard(_ url: URL) -> Bool {
+        let pasteboard = NSPasteboard.general
+        pasteboard.clearContents()
+        return pasteboard.writeObjects([url as NSURL])
     }
 }
 

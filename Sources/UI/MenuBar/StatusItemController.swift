@@ -13,6 +13,7 @@ public final class StatusItemController: NSObject, NSMenuDelegate, @unchecked Se
     private var libraryItem: NSMenuItem?
     private var bufferUsageItem: NSMenuItem?
     private var hotkeyHintItem: NSMenuItem?
+    private var updateItem: NSMenuItem?
 
     public var onSaveClip: (() -> Void)?
     public var onSaveLongBuffer: (() -> Void)?
@@ -100,6 +101,11 @@ public final class StatusItemController: NSObject, NSMenuDelegate, @unchecked Se
         settingsItem.target = self
         menu.addItem(settingsItem)
 
+        let updateItem = NSMenuItem(title: "", action: #selector(openAvailableUpdate), keyEquivalent: "")
+        updateItem.target = self
+        updateItem.image = NSImage(systemSymbolName: "arrow.down.circle.fill", accessibilityDescription: "Update available")
+        menu.addItem(updateItem)
+
         menu.addItem(NSMenuItem.separator())
 
         let quitItem = NSMenuItem(title: "Quit ReplayMac", action: #selector(quitApp), keyEquivalent: "")
@@ -112,6 +118,7 @@ public final class StatusItemController: NSObject, NSMenuDelegate, @unchecked Se
         self.libraryItem = libraryItem
         self.bufferUsageItem = bufferUsageItem
         self.hotkeyHintItem = hotkeyHintItem
+        self.updateItem = updateItem
         refreshMenuItems()
         item.menu = menu
     }
@@ -142,6 +149,13 @@ public final class StatusItemController: NSObject, NSMenuDelegate, @unchecked Se
         bufferUsageItem?.title = bufferLine
 
         hotkeyHintItem?.isHidden = hasSaveHotkeyConfigured
+
+        if let availableUpdate = state.availableUpdate {
+            updateItem?.title = "Update Available: \(availableUpdate.version)"
+            updateItem?.isHidden = false
+        } else {
+            updateItem?.isHidden = true
+        }
     }
 
     private func updateTooltip() {
@@ -192,6 +206,13 @@ public final class StatusItemController: NSObject, NSMenuDelegate, @unchecked Se
         if let onOpenClipLibrary {
             onOpenClipLibrary()
         }
+    }
+
+    @objc private func openAvailableUpdate() {
+        guard let releaseURL = state.availableUpdate?.releaseURL else {
+            return
+        }
+        NSWorkspace.shared.open(releaseURL)
     }
 
     @objc private func quitApp() {

@@ -1,5 +1,10 @@
 # Changelog
 
+## Unreleased
+
+- Add macOS share sheet and copy-file actions to the clip library
+- Check GitHub Releases on launch and show an update link in the menu when a newer version is available
+
 ## 1.3
 
 - Fix separate dual-display save preflight so saves succeed when both display ring buffers are ready but the primary buffer is empty in separate-file mode

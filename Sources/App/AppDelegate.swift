@@ -87,6 +87,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, @unchecked Sendable {
             self?.openSettingsWindow()
         }
         statusItemController.setup(state: menuBarState)
+        checkForAvailableUpdate()
         configureHotkeys()
         Task {
             await captureManager.activateDelegateCallbacks()
