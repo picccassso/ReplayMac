@@ -7,6 +7,7 @@ public final class HotkeyManager: @unchecked Sendable {
     public var onToggleRecording: (() -> Void)?
     public var onSaveLast15Seconds: (() -> Void)?
     public var onSaveLast60Seconds: (() -> Void)?
+    public var onSaveLongBuffer: (() -> Void)?
 
     private var isStarted = false
 
@@ -17,6 +18,7 @@ public final class HotkeyManager: @unchecked Sendable {
         KeyboardShortcuts.removeHandler(for: .toggleRecording)
         KeyboardShortcuts.removeHandler(for: .saveLast15Seconds)
         KeyboardShortcuts.removeHandler(for: .saveLast60Seconds)
+        KeyboardShortcuts.removeHandler(for: .saveLongBuffer)
     }
 
     public func start() {
@@ -36,6 +38,9 @@ public final class HotkeyManager: @unchecked Sendable {
         }
         KeyboardShortcuts.onKeyUp(for: .saveLast60Seconds) { [weak self] in
             self?.onSaveLast60Seconds?()
+        }
+        KeyboardShortcuts.onKeyUp(for: .saveLongBuffer) { [weak self] in
+            self?.onSaveLongBuffer?()
         }
     }
 }

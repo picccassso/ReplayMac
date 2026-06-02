@@ -113,6 +113,7 @@ public final class MicCapture: @unchecked Sendable {
     }
 
     public func stop() {
+        AudioLevelMonitor.shared.resetMicrophone()
         guard isRunning else { return }
         engine.inputNode.removeTap(onBus: 0)
         engine.stop()
@@ -281,6 +282,7 @@ public final class MicCapture: @unchecked Sendable {
         }
 
         guard let sampleBuffer = makeSampleBuffer(from: outputBuffer, at: time) else { return }
+        AudioLevelMonitor.shared.recordMicrophone(sampleBuffer)
 
         lock.lock()
         let h = handler

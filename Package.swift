@@ -70,6 +70,7 @@ let package = Package(
         .target(
             name: "UI",
             dependencies: [
+                "Audio",
                 "Save",
                 "Hotkeys",
                 .product(name: "KeyboardShortcuts", package: "KeyboardShortcuts"),

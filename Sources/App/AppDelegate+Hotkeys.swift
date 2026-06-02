@@ -15,6 +15,9 @@ extension AppDelegate {
         hotkeyManager.onSaveLast60Seconds = { [weak self] in
             self?.saveClip(lastSeconds: 60)
         }
+        hotkeyManager.onSaveLongBuffer = { [weak self] in
+            self?.saveLongBufferFromUI()
+        }
         hotkeyManager.start()
     }
 

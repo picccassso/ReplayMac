@@ -15,6 +15,7 @@ extension SettingsView {
             Section {
                 KeyboardShortcuts.Recorder("Save last 15 seconds", name: .saveLast15Seconds)
                 KeyboardShortcuts.Recorder("Save last 60 seconds", name: .saveLast60Seconds)
+                KeyboardShortcuts.Recorder("Save extended replay", name: .saveLongBuffer)
             } header: {
                 sectionHeader(icon: "stopwatch", title: "Quick Presets")
             }

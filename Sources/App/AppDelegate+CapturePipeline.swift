@@ -1,5 +1,6 @@
 import Foundation
 
+import Audio
 import Capture
 import Defaults
 import Encode
@@ -50,6 +51,7 @@ extension AppDelegate {
             dualDisplay2VideoRingBuffer.clear()
             systemAudioRingBuffer.clear()
             micAudioRingBuffer.clear()
+            AudioLevelMonitor.shared.reset()
             longBufferAppendPump.reset()
             await configureLongBufferForCurrentSettings()
 
@@ -293,6 +295,7 @@ extension AppDelegate {
         systemAudioEncoder.stop()
         micAudioEncoder.stop()
         frameCompositor.reset()
+        AudioLevelMonitor.shared.reset()
 
         isCaptureRunning = false
         menuBarState.setRecording(false)

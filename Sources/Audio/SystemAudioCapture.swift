@@ -35,6 +35,7 @@ public final class SystemAudioCapture: @unchecked Sendable {
         lock.unlock()
 
         Self.scaleVolume(of: copied, volume: currentVolume)
+        AudioLevelMonitor.shared.recordSystemAudio(copied)
 
         let pts = CMSampleBufferGetPresentationTimeStamp(copied)
         let duration = CMSampleBufferGetDuration(copied)
