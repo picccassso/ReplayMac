@@ -63,9 +63,16 @@ Clip library notes, tags, display names, and favorite state are stored in a hidd
 <details>
 <summary>Screenshots</summary>
 
-| General | Audio |
-| --- | --- |
-| ![General settings](app_photos/1_general_settings.png?v=1.5) | ![Audio settings](app_photos/3_audio_setting.png?v=1.5) |
+<table>
+  <tr>
+    <th width="50%">General</th>
+    <th width="50%">Audio</th>
+  </tr>
+  <tr>
+    <td width="50%"><img src="app_photos/1_general_settings.png?v=1.5" alt="General settings" width="100%"></td>
+    <td width="50%"><img src="app_photos/3_audio_setting.png?v=1.5" alt="Audio settings" width="100%"></td>
+  </tr>
+</table>
 
 | Video | Video extended replay |
 | --- | --- |
