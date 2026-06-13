@@ -1,5 +1,12 @@
 # Changelog
 
+## 1.5
+
+- Merge system and microphone audio by default so shared clips keep mic audio on services that ignore secondary audio tracks
+- Add a setting to keep system and microphone audio as separate tracks inside the MP4 for editing workflows
+- Resume recording after system wake when recording was active before sleep, with a default-on setting to control the behavior
+- Clarify the README audio wording: ReplayMac exports MP4 clips and does not create separate `.aac` sidecar files
+
 ## 1.4
 
 - Add native macOS share sheet actions to the clip library

@@ -11,7 +11,7 @@ It continuously buffers recent screen/audio capture and saves the last N seconds
 - **Instant replay** — Continuously buffers the last N seconds (15–300) of your screen and audio. Save retroactively with a click or hotkey.
 - **Dual display support** — Capture one or two monitors, saved as a side-by-side composite or as separate files.
 - **Hardware-accelerated encoding** — HEVC or H.264 via VideoToolbox, with configurable resolution, frame rate (30/60/120 fps), and bitrate (10–50 Mbps).
-- **System audio modes + microphone** — Record all system audio, no system audio, or only one selected app; microphone audio is merged with system audio by default for easier sharing, with an option to keep separate AAC tracks for editing.
+- **System audio modes + microphone** — Record all system audio, no system audio, or only one selected app; microphone audio is merged with system audio by default for easier sharing, with an option to keep system and mic audio as separate tracks inside the MP4 for editing.
 - **Live audio level meters** — Real-time system audio and microphone level meters in audio settings, with RMS-based measurement and auto-reset when capture stops.
 - **Ring buffer memory management** — Configurable total memory cap (256 MB–4 GB) shared across all replay buffers, evicting oldest footage as needed and trimming under system memory pressure.
 - **Opt-in extended replay buffer** — Save longer 5, 10, or 30 minute replay windows by rolling temporary segments to disk, with clear SSD write and disk usage warnings before enabling.
@@ -54,6 +54,8 @@ Saved clips are written to:
 
 `~/Movies/ReplayMac/`
 
+ReplayMac exports MP4 clips. It does not create a separate `.aac` sidecar file; when audio merging is turned off, the system and microphone audio are stored as separate audio tracks inside the saved MP4.
+
 When the extended replay buffer is enabled, ReplayMac also writes temporary rolling segments to a hidden `.ReplayMacLongBuffer` folder inside the output directory. Those segments are rotated automatically and removed when extended replay is disabled or recording stops.
 
 Clip library notes, tags, display names, and favorite state are stored in a hidden `.ReplayMacClipLibrary.json` file inside the output directory.
@@ -63,7 +65,7 @@ Clip library notes, tags, display names, and favorite state are stored in a hidd
 
 | General | Audio |
 | --- | --- |
-| ![General settings](app_photos/1_general_settings.png?v=1.4) | ![Audio settings](app_photos/3_audio_settings.png?v=1.4) |
+| ![General settings](app_photos/1_general_settings.png?v=1.5) | ![Audio settings](app_photos/3_audio_setting.png?v=1.5) |
 
 | Video | Video extended replay |
 | --- | --- |
