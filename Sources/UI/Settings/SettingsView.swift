@@ -26,6 +26,7 @@ public struct SettingsView: View {
 
     @Default(.captureSystemAudio) var captureSystemAudio
     @Default(.captureMicrophone) var captureMicrophone
+    @Default(.mergeAudioTracks) var mergeAudioTracks
     @Default(.microphoneID) var microphoneID
     @Default(.excludeOwnAppAudio) var excludeOwnAppAudio
     @Default(.perAppAudioEnabled) var perAppAudioEnabled

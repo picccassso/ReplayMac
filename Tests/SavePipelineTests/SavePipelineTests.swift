@@ -110,4 +110,154 @@ final class SavePipelineTests: XCTestCase {
 
         XCTAssertEqual(offset.seconds, systemAudioStart.seconds, accuracy: 0.0001)
     }
+
+    func testAudioTrackMixerCombinesOverlappingTracks() throws {
+        let system = try makePCMSampleBuffer(
+            samples: [0.25, 0.25, 0.25, 0.25],
+            channels: 2,
+            startFrame: 0
+        )
+        let mic = try makePCMSampleBuffer(
+            samples: [0.5, 0.5],
+            channels: 1,
+            startFrame: 0
+        )
+
+        let merged = try AudioTrackMixer.merge(systemAudioSamples: [system], micAudioSamples: [mic])
+
+        XCTAssertEqual(merged.count, 1)
+        XCTAssertEqual(CMSampleBufferGetNumSamples(merged[0]), 2)
+        XCTAssertEqual(channelCount(for: merged[0]), 2)
+        XCTAssertEqual(floatSamples(in: merged[0]), [0.75, 0.75, 0.75, 0.75])
+    }
+
+    func testAudioTrackMixerPreservesMicOffset() throws {
+        let system = try makePCMSampleBuffer(
+            samples: [0.25, 0.25, 0.25, 0.25],
+            channels: 2,
+            startFrame: 0
+        )
+        let mic = try makePCMSampleBuffer(
+            samples: [0.5],
+            channels: 1,
+            startFrame: 1
+        )
+
+        let merged = try AudioTrackMixer.merge(systemAudioSamples: [system], micAudioSamples: [mic])
+
+        XCTAssertEqual(floatSamples(in: merged[0]), [0.25, 0.25, 0.75, 0.75])
+    }
+
+    private func makePCMSampleBuffer(
+        samples: [Float],
+        channels: Int,
+        startFrame: Int64,
+        sampleRate: Int32 = 48_000
+    ) throws -> CMSampleBuffer {
+        var asbd = AudioStreamBasicDescription(
+            mSampleRate: Float64(sampleRate),
+            mFormatID: kAudioFormatLinearPCM,
+            mFormatFlags: kAudioFormatFlagIsFloat | kAudioFormatFlagIsPacked,
+            mBytesPerPacket: UInt32(channels * MemoryLayout<Float>.size),
+            mFramesPerPacket: 1,
+            mBytesPerFrame: UInt32(channels * MemoryLayout<Float>.size),
+            mChannelsPerFrame: UInt32(channels),
+            mBitsPerChannel: UInt32(MemoryLayout<Float>.size * 8),
+            mReserved: 0
+        )
+
+        var formatDescription: CMAudioFormatDescription?
+        XCTAssertEqual(CMAudioFormatDescriptionCreate(
+            allocator: kCFAllocatorDefault,
+            asbd: &asbd,
+            layoutSize: 0,
+            layout: nil,
+            magicCookieSize: 0,
+            magicCookie: nil,
+            extensions: nil,
+            formatDescriptionOut: &formatDescription
+        ), noErr)
+        guard let formatDescription else {
+            throw AudioTrackMixError.unsupportedFormat
+        }
+
+        let byteCount = samples.count * MemoryLayout<Float>.size
+        var blockBuffer: CMBlockBuffer?
+        XCTAssertEqual(CMBlockBufferCreateWithMemoryBlock(
+            allocator: kCFAllocatorDefault,
+            memoryBlock: nil,
+            blockLength: byteCount,
+            blockAllocator: kCFAllocatorDefault,
+            customBlockSource: nil,
+            offsetToData: 0,
+            dataLength: byteCount,
+            flags: kCMBlockBufferAssureMemoryNowFlag,
+            blockBufferOut: &blockBuffer
+        ), noErr)
+        guard let blockBuffer else {
+            throw AudioTrackMixError.cannotCreateBlockBuffer(-1)
+        }
+
+        let copyStatus = samples.withUnsafeBytes { rawBuffer in
+            CMBlockBufferReplaceDataBytes(
+                with: rawBuffer.baseAddress!,
+                blockBuffer: blockBuffer,
+                offsetIntoDestination: 0,
+                dataLength: byteCount
+            )
+        }
+        XCTAssertEqual(copyStatus, noErr)
+
+        var timing = CMSampleTimingInfo(
+            duration: CMTime(value: 1, timescale: CMTimeScale(sampleRate)),
+            presentationTimeStamp: CMTime(value: startFrame, timescale: CMTimeScale(sampleRate)),
+            decodeTimeStamp: .invalid
+        )
+        var sampleBuffer: CMSampleBuffer?
+        let createStatus = CMSampleBufferCreate(
+            allocator: kCFAllocatorDefault,
+            dataBuffer: blockBuffer,
+            dataReady: true,
+            makeDataReadyCallback: nil,
+            refcon: nil,
+            formatDescription: formatDescription,
+            sampleCount: CMItemCount(samples.count / channels),
+            sampleTimingEntryCount: 1,
+            sampleTimingArray: &timing,
+            sampleSizeEntryCount: 0,
+            sampleSizeArray: nil,
+            sampleBufferOut: &sampleBuffer
+        )
+        XCTAssertEqual(createStatus, noErr)
+        guard let sampleBuffer else {
+            throw AudioTrackMixError.cannotCreateSampleBuffer(createStatus)
+        }
+        return sampleBuffer
+    }
+
+    private func channelCount(for sampleBuffer: CMSampleBuffer) -> Int {
+        guard let formatDescription = sampleBuffer.formatDescription,
+              let asbd = CMAudioFormatDescriptionGetStreamBasicDescription(formatDescription) else {
+            return 0
+        }
+        return Int(asbd.pointee.mChannelsPerFrame)
+    }
+
+    private func floatSamples(in sampleBuffer: CMSampleBuffer) -> [Float] {
+        guard let dataBuffer = sampleBuffer.dataBuffer else { return [] }
+        let byteCount = CMBlockBufferGetDataLength(dataBuffer)
+        var bytes = [UInt8](repeating: 0, count: byteCount)
+        let status = bytes.withUnsafeMutableBytes { rawBuffer in
+            CMBlockBufferCopyDataBytes(
+                dataBuffer,
+                atOffset: 0,
+                dataLength: byteCount,
+                destination: rawBuffer.baseAddress!
+            )
+        }
+        guard status == noErr else { return [] }
+        return bytes.withUnsafeBytes { rawBuffer in
+            Array(rawBuffer.bindMemory(to: Float.self))
+        }
+    }
 }

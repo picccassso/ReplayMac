@@ -11,7 +11,7 @@ It continuously buffers recent screen/audio capture and saves the last N seconds
 - **Instant replay** — Continuously buffers the last N seconds (15–300) of your screen and audio. Save retroactively with a click or hotkey.
 - **Dual display support** — Capture one or two monitors, saved as a side-by-side composite or as separate files.
 - **Hardware-accelerated encoding** — HEVC or H.264 via VideoToolbox, with configurable resolution, frame rate (30/60/120 fps), and bitrate (10–50 Mbps).
-- **System audio modes + microphone** — Record all system audio, no system audio, or only one selected app; microphone is saved as a separate AAC track with its own device and volume controls.
+- **System audio modes + microphone** — Record all system audio, no system audio, or only one selected app; microphone audio is merged with system audio by default for easier sharing, with an option to keep separate AAC tracks for editing.
 - **Live audio level meters** — Real-time system audio and microphone level meters in audio settings, with RMS-based measurement and auto-reset when capture stops.
 - **Ring buffer memory management** — Configurable total memory cap (256 MB–4 GB) shared across all replay buffers, evicting oldest footage as needed and trimming under system memory pressure.
 - **Opt-in extended replay buffer** — Save longer 5, 10, or 30 minute replay windows by rolling temporary segments to disk, with clear SSD write and disk usage warnings before enabling.

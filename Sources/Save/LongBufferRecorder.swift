@@ -129,7 +129,11 @@ public actor LongBufferRecorder {
         }
     }
 
-    public func saveClip(lastSeconds: TimeInterval, outputDirectory: URL) async throws -> URL {
+    public func saveClip(
+        lastSeconds: TimeInterval,
+        outputDirectory: URL,
+        mergeAudioTracks: Bool = true
+    ) async throws -> URL {
         try await finishCurrentSegment()
 
         let newestPTS = segments.map(\.endPTS).max() ?? 0
@@ -183,14 +187,28 @@ public actor LongBufferRecorder {
         }
 
         let outputURL = try ClipMetadata.generateUniqueFileURL(in: outputDirectory, suffix: "LongBuffer")
-        let preset = await AVAssetExportSession.compatibility(
-            ofExportPreset: AVAssetExportPresetPassthrough,
-            with: composition,
-            outputFileType: .mp4
-        ) ? AVAssetExportPresetPassthrough : AVAssetExportPresetHighestQuality
+        let preset: String
+        if mergeAudioTracks, compositionAudioTracks.count > 1 {
+            preset = AVAssetExportPresetHighestQuality
+        } else {
+            preset = await AVAssetExportSession.compatibility(
+                ofExportPreset: AVAssetExportPresetPassthrough,
+                with: composition,
+                outputFileType: .mp4
+            ) ? AVAssetExportPresetPassthrough : AVAssetExportPresetHighestQuality
+        }
 
         guard let exportSession = AVAssetExportSession(asset: composition, presetName: preset) else {
             throw LongBufferRecorderError.cannotCreateExportSession
+        }
+        if mergeAudioTracks, compositionAudioTracks.count > 1 {
+            let audioMix = AVMutableAudioMix()
+            audioMix.inputParameters = compositionAudioTracks.map { track in
+                let parameters = AVMutableAudioMixInputParameters(track: track)
+                parameters.setVolume(1, at: .zero)
+                return parameters
+            }
+            exportSession.audioMix = audioMix
         }
         exportSession.shouldOptimizeForNetworkUse = true
         try await exportSession.export(to: outputURL, as: .mp4)

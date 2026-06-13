@@ -54,19 +54,22 @@ public actor ClipSaver {
 
     public func saveClip(
         lastSeconds: TimeInterval,
-        outputDirectory: URL
+        outputDirectory: URL,
+        mergeAudioTracks: Bool = true
     ) async throws -> URL {
         try await saveClip(
             from: videoRingBuffer,
             lastSeconds: lastSeconds,
             outputDirectory: outputDirectory,
-            fileNameSuffix: nil
+            fileNameSuffix: nil,
+            mergeAudioTracks: mergeAudioTracks
         )
     }
 
     public func saveDualDisplayClips(
         lastSeconds: TimeInterval,
-        outputDirectory: URL
+        outputDirectory: URL,
+        mergeAudioTracks: Bool = true
     ) async throws -> [URL] {
         guard let dualDisplay1VideoRingBuffer, let dualDisplay2VideoRingBuffer else {
             throw ClipSaveError.noSamples
@@ -76,13 +79,15 @@ public actor ClipSaver {
             from: dualDisplay1VideoRingBuffer,
             lastSeconds: lastSeconds,
             outputDirectory: outputDirectory,
-            fileNameSuffix: "Display_1"
+            fileNameSuffix: "Display_1",
+            mergeAudioTracks: mergeAudioTracks
         )
         let display2URL = try await saveClip(
             from: dualDisplay2VideoRingBuffer,
             lastSeconds: lastSeconds,
             outputDirectory: outputDirectory,
-            fileNameSuffix: "Display_2"
+            fileNameSuffix: "Display_2",
+            mergeAudioTracks: mergeAudioTracks
         )
 
         return [display1URL, display2URL]
@@ -92,7 +97,8 @@ public actor ClipSaver {
         from videoRingBuffer: VideoRingBuffer,
         lastSeconds: TimeInterval,
         outputDirectory: URL,
-        fileNameSuffix: String?
+        fileNameSuffix: String?,
+        mergeAudioTracks: Bool
     ) async throws -> URL {
         let videoSamples = videoRingBuffer.samples(last: lastSeconds)
 
@@ -141,50 +147,6 @@ public actor ClipSaver {
         }
         writer.add(videoInput)
 
-        // System audio input — encode to AAC on write
-        var systemAudioInput: AVAssetWriterInput?
-        if !systemAudioSamples.isEmpty {
-            let channelCount = channelCountForSamples(systemAudioSamples)
-            let audioSettings: [String: Any] = [
-                AVFormatIDKey: Int(kAudioFormatMPEG4AAC),
-                AVSampleRateKey: 48000,
-                AVNumberOfChannelsKey: channelCount,
-                AVEncoderBitRateKey: channelCount == 2 ? 192000 : 96000
-            ]
-            let input = AVAssetWriterInput(mediaType: .audio, outputSettings: audioSettings)
-            input.expectsMediaDataInRealTime = false
-            guard writer.canAdd(input) else {
-                throw ClipSaveError.cannotAddInput
-            }
-            writer.add(input)
-            systemAudioInput = input
-        }
-
-        // Mic audio input — encode to AAC on write
-        var micAudioInput: AVAssetWriterInput?
-        if !micAudioSamples.isEmpty {
-            let channelCount = channelCountForSamples(micAudioSamples)
-            let audioSettings: [String: Any] = [
-                AVFormatIDKey: Int(kAudioFormatMPEG4AAC),
-                AVSampleRateKey: 48000,
-                AVNumberOfChannelsKey: channelCount,
-                AVEncoderBitRateKey: channelCount == 2 ? 192000 : 96000
-            ]
-            let input = AVAssetWriterInput(mediaType: .audio, outputSettings: audioSettings)
-            input.expectsMediaDataInRealTime = false
-            guard writer.canAdd(input) else {
-                throw ClipSaveError.cannotAddInput
-            }
-            writer.add(input)
-            micAudioInput = input
-        }
-
-        guard writer.startWriting() else {
-            throw ClipSaveError.cannotStartWriting
-        }
-
-        writer.startSession(atSourceTime: .zero)
-
         let videoStartPTS = CMSampleBufferGetPresentationTimeStamp(firstVideoSample)
         let systemAudioStartPTS = systemAudioSamples.first.map { CMSampleBufferGetPresentationTimeStamp($0) }
         let micAudioStartPTS = micAudioSamples.first.map { CMSampleBufferGetPresentationTimeStamp($0) }
@@ -218,6 +180,23 @@ public actor ClipSaver {
             print("[SAVE] retimed mic PTS: \(CMSampleBufferGetPresentationTimeStamp(firstM).seconds) ... \(CMSampleBufferGetPresentationTimeStamp(lastM).seconds)")
         }
 
+        let audioPlans = try makeAudioAppendPlans(
+            systemAudioSamples: retimedSystemAudio,
+            micAudioSamples: retimedMicAudio,
+            mergeAudioTracks: mergeAudioTracks
+        )
+        var audioJobs: [TrackAppendJob] = []
+        for plan in audioPlans {
+            let input = try makeAudioInput(for: plan.samples, writer: writer)
+            audioJobs.append(TrackAppendJob(label: plan.label, samples: plan.samples, input: input, writer: writer))
+        }
+
+        guard writer.startWriting() else {
+            throw ClipSaveError.cannotStartWriting
+        }
+
+        writer.startSession(atSourceTime: .zero)
+
         // Append all tracks concurrently. AVAssetWriter stalls one input if
         // another input's timeline falls too far behind, so a purely sequential
         // per-track append deadlocks as soon as video runs past the first audio
@@ -226,12 +205,7 @@ public actor ClipSaver {
         var tracks: [TrackAppendJob] = [
             TrackAppendJob(label: "video", samples: retimedVideo, input: videoInput, writer: writer)
         ]
-        if let systemAudioInput, !retimedSystemAudio.isEmpty {
-            tracks.append(TrackAppendJob(label: "sysAudio", samples: retimedSystemAudio, input: systemAudioInput, writer: writer))
-        }
-        if let micAudioInput, !retimedMicAudio.isEmpty {
-            tracks.append(TrackAppendJob(label: "mic", samples: retimedMicAudio, input: micAudioInput, writer: writer))
-        }
+        tracks.append(contentsOf: audioJobs)
         try await withThrowingTaskGroup(of: Void.self) { group in
             for track in tracks {
                 group.addTask {
@@ -276,6 +250,51 @@ public actor ClipSaver {
             return 2 // default to stereo
         }
         return Int(asbd.pointee.mChannelsPerFrame)
+    }
+
+    private struct AudioAppendPlan {
+        let label: String
+        let samples: [CMSampleBuffer]
+    }
+
+    private func makeAudioAppendPlans(
+        systemAudioSamples: [CMSampleBuffer],
+        micAudioSamples: [CMSampleBuffer],
+        mergeAudioTracks: Bool
+    ) throws -> [AudioAppendPlan] {
+        if mergeAudioTracks, !systemAudioSamples.isEmpty, !micAudioSamples.isEmpty {
+            let mergedSamples = try AudioTrackMixer.merge(
+                systemAudioSamples: systemAudioSamples,
+                micAudioSamples: micAudioSamples
+            )
+            return [AudioAppendPlan(label: "mergedAudio", samples: mergedSamples)]
+        }
+
+        var plans: [AudioAppendPlan] = []
+        if !systemAudioSamples.isEmpty {
+            plans.append(AudioAppendPlan(label: "sysAudio", samples: systemAudioSamples))
+        }
+        if !micAudioSamples.isEmpty {
+            plans.append(AudioAppendPlan(label: "mic", samples: micAudioSamples))
+        }
+        return plans
+    }
+
+    private func makeAudioInput(for samples: [CMSampleBuffer], writer: AVAssetWriter) throws -> AVAssetWriterInput {
+        let channelCount = channelCountForSamples(samples)
+        let audioSettings: [String: Any] = [
+            AVFormatIDKey: Int(kAudioFormatMPEG4AAC),
+            AVSampleRateKey: 48000,
+            AVNumberOfChannelsKey: channelCount,
+            AVEncoderBitRateKey: channelCount == 2 ? 192000 : 96000
+        ]
+        let input = AVAssetWriterInput(mediaType: .audio, outputSettings: audioSettings)
+        input.expectsMediaDataInRealTime = false
+        guard writer.canAdd(input) else {
+            throw ClipSaveError.cannotAddInput
+        }
+        writer.add(input)
+        return input
     }
 
     private func retimeSample(_ sample: CMSampleBuffer, offset: CMTime) -> CMSampleBuffer? {

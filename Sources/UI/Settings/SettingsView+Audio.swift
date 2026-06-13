@@ -58,6 +58,10 @@ extension SettingsView {
                 }
 
                 Toggle("Capture microphone", isOn: $captureMicrophone)
+                Toggle("Merge audio tracks", isOn: $mergeAudioTracks)
+                Label("Combines system audio and microphone into one track for sharing. Turn off for separate tracks in editors.", systemImage: "info.circle")
+                    .foregroundStyle(AppTheme.textSecondary)
+                    .font(.system(size: 12, design: .rounded))
                 Toggle("Exclude ReplayMac audio", isOn: $excludeOwnAppAudio)
                     .disabled(systemAudioModeBinding.wrappedValue == .off)
             } header: {

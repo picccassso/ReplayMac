@@ -66,12 +66,14 @@ extension AppDelegate {
             if isSeparateDualSaveMode {
                 finalURLs = try await clipSaver.saveDualDisplayClips(
                     lastSeconds: lastSeconds,
-                    outputDirectory: outputDirectory
+                    outputDirectory: outputDirectory,
+                    mergeAudioTracks: AppSettings.mergeAudioTracks
                 )
             } else {
                 let savedURL = try await clipSaver.saveClip(
                     lastSeconds: lastSeconds,
-                    outputDirectory: outputDirectory
+                    outputDirectory: outputDirectory,
+                    mergeAudioTracks: AppSettings.mergeAudioTracks
                 )
                 finalURLs = [savedURL]
             }
@@ -119,7 +121,8 @@ extension AppDelegate {
         do {
             let savedURL = try await longBufferRecorder.saveClip(
                 lastSeconds: lastSeconds,
-                outputDirectory: AppSettings.outputDirectoryURL
+                outputDirectory: AppSettings.outputDirectoryURL,
+                mergeAudioTracks: AppSettings.mergeAudioTracks
             )
 
             menuBarState.finishSaving(success: true)

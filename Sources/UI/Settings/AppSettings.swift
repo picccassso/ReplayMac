@@ -140,6 +140,7 @@ public enum AppSettings {
     public static var autoStartRecordingOnLaunch: Bool { Defaults[.autoStartRecordingOnLaunch] }
     public static var captureSystemAudio: Bool { Defaults[.captureSystemAudio] }
     public static var captureMicrophone: Bool { Defaults[.captureMicrophone] }
+    public static var mergeAudioTracks: Bool { Defaults[.mergeAudioTracks] }
     public static var playAudioCueOnSave: Bool { Defaults[.playAudioCueOnSave] }
     public static var showNotificationOnSave: Bool { Defaults[.showNotificationOnSave] }
     public static var memoryCapMB: Double { Defaults[.memoryCapMB] }
@@ -254,6 +255,7 @@ public extension Defaults.Keys {
 
     static let captureSystemAudio = Key<Bool>("captureSystemAudio", default: true)
     static let captureMicrophone = Key<Bool>("captureMicrophone", default: false)
+    static let mergeAudioTracks = Key<Bool>("mergeAudioTracks", default: true)
     static let microphoneID = Key<String>("microphoneID", default: "")
     static let excludeOwnAppAudio = Key<Bool>("excludeOwnAppAudio", default: true)
     static let perAppAudioEnabled = Key<Bool>("perAppAudioEnabled", default: false)

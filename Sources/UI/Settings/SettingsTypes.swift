@@ -67,6 +67,7 @@ struct CaptureProfile: Identifiable, Codable, Equatable {
 
     var captureSystemAudio: Bool
     var captureMicrophone: Bool
+    var mergeAudioTracks: Bool? = true
     var microphoneID: String
     var excludeOwnAppAudio: Bool
     var perAppAudioEnabled: Bool
@@ -90,6 +91,7 @@ struct CaptureProfile: Identifiable, Codable, Equatable {
             audioLabel = "All app audio"
         }
         let micLabel = captureMicrophone ? "Mic on" : "Mic off"
-        return "\(fpsLabel) · \(Int(bitrateMbps)) Mbps · \(audioLabel) · \(micLabel)"
+        let mergeLabel = (mergeAudioTracks ?? true) ? "Merged audio" : "Separate audio"
+        return "\(fpsLabel) · \(Int(bitrateMbps)) Mbps · \(audioLabel) · \(micLabel) · \(mergeLabel)"
     }
 }

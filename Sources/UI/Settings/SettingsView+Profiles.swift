@@ -210,6 +210,7 @@ extension SettingsView {
 
         captureSystemAudio = profile.captureSystemAudio
         captureMicrophone = profile.captureMicrophone
+        mergeAudioTracks = profile.mergeAudioTracks ?? true
         microphoneID = profile.microphoneID
         excludeOwnAppAudio = profile.excludeOwnAppAudio
         perAppAudioEnabled = profile.perAppAudioEnabled
@@ -244,6 +245,7 @@ extension SettingsView {
             qualityPresetRawValue: qualityPresetRawValue,
             captureSystemAudio: captureSystemAudio,
             captureMicrophone: captureMicrophone,
+            mergeAudioTracks: mergeAudioTracks,
             microphoneID: microphoneID,
             excludeOwnAppAudio: excludeOwnAppAudio,
             perAppAudioEnabled: perAppAudioEnabled,
@@ -293,7 +295,8 @@ private extension CaptureProfile {
     var audioDetail: String {
         let system = !captureSystemAudio ? "Off" : (perAppAudioEnabled ? "Selected app" : "All apps")
         let mic = captureMicrophone ? "Mic on" : "Mic off"
-        return "\(system) · \(mic)"
+        let merge = (mergeAudioTracks ?? true) ? "Merged" : "Separate tracks"
+        return "\(system) · \(mic) · \(merge)"
     }
 
     var bufferDetail: String {
