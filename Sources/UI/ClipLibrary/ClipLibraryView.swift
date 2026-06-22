@@ -548,23 +548,75 @@ private final class ClipLibraryViewModel: ObservableObject {
     @Published var storageSummary = ClipLibraryStorageSummary(clipCount: 0, totalBytes: 0, oldestClipDate: nil)
     private var metadataByPath: [String: ClipUserMetadata] = [:]
 
+    /// Enriched info + thumbnail for a clip, keyed by ``cacheKey(for:)``.
+    /// Lets repeated reloads (which fire on every save and on Refresh) skip
+    /// re-reading AV assets and regenerating thumbnails for unchanged files.
+    private struct CachedClip {
+        let info: ClipInfo
+        let thumbnail: NSImage?
+    }
+    private var clipCache: [String: CachedClip] = [:]
+
     func reload() async {
         let base = ClipMetadata.scanClips(in: AppSettings.outputDirectoryURL)
         metadataByPath = ClipLibraryMetadataStore.load(in: AppSettings.outputDirectoryURL)
-        var loadedRows: [ClipRow] = []
-        loadedRows.reserveCapacity(base.count)
 
-        for info in base {
-            if Task.isCancelled { return }
-            let enriched = await ClipMetadata.enrichClipInfo(info)
-            let thumbnail = await Self.thumbnail(for: enriched.fileURL)
-            let key = ClipLibraryMetadataStore.key(for: enriched.fileURL)
-            loadedRows.append(ClipRow(info: enriched, thumbnail: thumbnail, userMetadata: metadataByPath[key] ?? .empty))
+        let cache = clipCache
+        let misses = base.filter { cache[Self.cacheKey(for: $0)] == nil }
+
+        // Enrich + generate thumbnails for new/changed clips in parallel.
+        // Thumbnails cross the task boundary as PNG `Data` (Sendable) and are
+        // decoded back into `NSImage` on the main actor below.
+        let computed: [(key: String, info: ClipInfo, thumbnail: Data?)] = await withTaskGroup(
+            of: (key: String, info: ClipInfo, thumbnail: Data?).self
+        ) { group in
+            for info in misses {
+                let key = Self.cacheKey(for: info)
+                group.addTask {
+                    let enriched = await ClipMetadata.enrichClipInfo(info)
+                    let thumbnail = await Self.thumbnailData(for: enriched.fileURL)
+                    return (key: key, info: enriched, thumbnail: thumbnail)
+                }
+            }
+
+            var collected: [(key: String, info: ClipInfo, thumbnail: Data?)] = []
+            for await result in group {
+                collected.append(result)
+            }
+            return collected
         }
 
-        rows = loadedRows
+        if Task.isCancelled { return }
+
+        // Rebuild the cache to current files only (reusing hits, prunes stale).
+        var refreshedCache: [String: CachedClip] = [:]
+        for info in base {
+            let key = Self.cacheKey(for: info)
+            if let hit = cache[key] {
+                refreshedCache[key] = hit
+            }
+        }
+        for entry in computed {
+            refreshedCache[entry.key] = CachedClip(
+                info: entry.info,
+                thumbnail: entry.thumbnail.flatMap { NSImage(data: $0) }
+            )
+        }
+        clipCache = refreshedCache
+
+        rows = base.compactMap { info in
+            guard let cached = refreshedCache[Self.cacheKey(for: info)] else { return nil }
+            let key = ClipLibraryMetadataStore.key(for: cached.info.fileURL)
+            return ClipRow(info: cached.info, thumbnail: cached.thumbnail, userMetadata: metadataByPath[key] ?? .empty)
+        }
         pruneMissingMetadata()
         updateStorageSummary()
+    }
+
+    /// Identifies a clip's cached render by path, size, and creation date so a
+    /// moved, replaced, or re-encoded file misses the cache and regenerates.
+    private static func cacheKey(for info: ClipInfo) -> String {
+        "\(info.fileURL.path)|\(info.fileSize)|\(info.creationDate.timeIntervalSince1970)"
     }
 
     func delete(_ row: ClipRow) async {
@@ -698,19 +750,22 @@ private final class ClipLibraryViewModel: ObservableObject {
         return candidate
     }
 
-    private static func thumbnail(for url: URL) async -> NSImage? {
+    private static func thumbnailData(for url: URL) async -> Data? {
         let asset = AVURLAsset(url: url)
         let generator = AVAssetImageGenerator(asset: asset)
         generator.appliesPreferredTrackTransform = true
         generator.maximumSize = CGSize(width: 220, height: 124)
 
+        // Encode to PNG inside the callback so only `Data` (Sendable) crosses
+        // the continuation and task-group boundaries.
         return await withCheckedContinuation { continuation in
             generator.generateCGImageAsynchronously(for: .zero) { image, _, _ in
                 guard let image else {
                     continuation.resume(returning: nil)
                     return
                 }
-                continuation.resume(returning: NSImage(cgImage: image, size: NSSize(width: image.width, height: image.height)))
+                let rep = NSBitmapImageRep(cgImage: image)
+                continuation.resume(returning: rep.representation(using: .png, properties: [:]))
             }
         }
     }
