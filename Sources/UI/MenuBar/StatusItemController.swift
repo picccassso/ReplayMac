@@ -11,9 +11,13 @@ public final class StatusItemController: NSObject, NSMenuDelegate, @unchecked Se
     private var saveLongBufferItem: NSMenuItem?
     private var toggleRecordingItem: NSMenuItem?
     private var libraryItem: NSMenuItem?
+    private var revealLastClipItem: NSMenuItem?
+    private var openLastClipItem: NSMenuItem?
     private var bufferUsageItem: NSMenuItem?
     private var hotkeyHintItem: NSMenuItem?
     private var updateItem: NSMenuItem?
+
+    private var lastClipURL: URL?
 
     public var onSaveClip: (() -> Void)?
     public var onSaveLongBuffer: (() -> Void)?
@@ -39,6 +43,13 @@ public final class StatusItemController: NSObject, NSMenuDelegate, @unchecked Se
     public func refreshPresentation() {
         refreshMenuItems()
         updateTooltip()
+    }
+
+    /// Records the most recently saved clip so the menu can offer quick access
+    /// to it. Pass `nil` to clear (e.g. when the file no longer exists).
+    public func setLastClip(_ url: URL?) {
+        lastClipURL = url
+        refreshMenuItems()
     }
 
     private func configureButton(for item: NSStatusItem) {
@@ -93,6 +104,14 @@ public final class StatusItemController: NSObject, NSMenuDelegate, @unchecked Se
         libraryItem.target = self
         menu.addItem(libraryItem)
 
+        let openLastClipItem = NSMenuItem(title: "Open Last Clip", action: #selector(openLastClip), keyEquivalent: "")
+        openLastClipItem.target = self
+        menu.addItem(openLastClipItem)
+
+        let revealLastClipItem = NSMenuItem(title: "Reveal Last Clip in Finder", action: #selector(revealLastClip), keyEquivalent: "")
+        revealLastClipItem.target = self
+        menu.addItem(revealLastClipItem)
+
         let bufferUsageItem = NSMenuItem(title: "", action: nil, keyEquivalent: "")
         bufferUsageItem.isEnabled = false
         menu.addItem(bufferUsageItem)
@@ -116,6 +135,8 @@ public final class StatusItemController: NSObject, NSMenuDelegate, @unchecked Se
         self.saveLongBufferItem = saveLongBufferItem
         self.toggleRecordingItem = toggleRecordingItem
         self.libraryItem = libraryItem
+        self.openLastClipItem = openLastClipItem
+        self.revealLastClipItem = revealLastClipItem
         self.bufferUsageItem = bufferUsageItem
         self.hotkeyHintItem = hotkeyHintItem
         self.updateItem = updateItem
@@ -140,6 +161,14 @@ public final class StatusItemController: NSObject, NSMenuDelegate, @unchecked Se
         toggleRecordingItem?.title = state.isRecording ? "Stop Recording" : "Start Recording"
 
         libraryItem?.title = "Clip Library"
+
+        // Drop the reference if the clip has since been moved, renamed, or deleted.
+        if let url = lastClipURL, !FileManager.default.fileExists(atPath: url.path) {
+            lastClipURL = nil
+        }
+        let hasLastClip = lastClipURL != nil
+        openLastClipItem?.isHidden = !hasLastClip
+        revealLastClipItem?.isHidden = !hasLastClip
 
         let capLabel = MenuBarState.formattedDuration(TimeInterval(replaySeconds))
         var bufferLine = "Buffer: \(state.formattedBufferDuration) / \(capLabel) · \(state.formattedBufferMemory)"
@@ -206,6 +235,22 @@ public final class StatusItemController: NSObject, NSMenuDelegate, @unchecked Se
         if let onOpenClipLibrary {
             onOpenClipLibrary()
         }
+    }
+
+    @objc private func openLastClip() {
+        guard let lastClipURL, FileManager.default.fileExists(atPath: lastClipURL.path) else {
+            setLastClip(nil)
+            return
+        }
+        NSWorkspace.shared.open(lastClipURL)
+    }
+
+    @objc private func revealLastClip() {
+        guard let lastClipURL, FileManager.default.fileExists(atPath: lastClipURL.path) else {
+            setLastClip(nil)
+            return
+        }
+        NSWorkspace.shared.activateFileViewerSelecting([lastClipURL])
     }
 
     @objc private func openAvailableUpdate() {

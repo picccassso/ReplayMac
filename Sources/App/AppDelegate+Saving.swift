@@ -79,6 +79,7 @@ extension AppDelegate {
             }
 
             menuBarState.finishSaving(success: true)
+            statusItemController.setLastClip(finalURLs.first)
             statusItemController.refreshPresentation()
 
             if AppSettings.playAudioCueOnSave {
@@ -126,6 +127,7 @@ extension AppDelegate {
             )
 
             menuBarState.finishSaving(success: true)
+            statusItemController.setLastClip(savedURL)
             statusItemController.refreshPresentation()
 
             if AppSettings.playAudioCueOnSave {
