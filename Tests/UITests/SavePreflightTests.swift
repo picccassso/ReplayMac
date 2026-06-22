@@ -79,4 +79,57 @@ final class SavePreflightTests: XCTestCase {
 
         XCTAssertNil(failure)
     }
+
+    func testEstimatedClipBytesScalesWithBitrateDurationAndStreams() {
+        // 25 Mbps for 30s ≈ 93.75 MB before overhead/streams.
+        let single = SavePreflight.estimatedClipBytes(
+            bitrateMbps: 25,
+            durationSeconds: 30,
+            streamCount: 1,
+            overhead: 1.0
+        )
+        XCTAssertEqual(single, Int64(25 * 1_000_000 / 8 * 30))
+
+        let dual = SavePreflight.estimatedClipBytes(
+            bitrateMbps: 25,
+            durationSeconds: 30,
+            streamCount: 2,
+            overhead: 1.0
+        )
+        XCTAssertEqual(dual, single * 2)
+    }
+
+    func testEstimatedClipBytesIsZeroForInvalidInput() {
+        XCTAssertEqual(SavePreflight.estimatedClipBytes(bitrateMbps: 0, durationSeconds: 30), 0)
+        XCTAssertEqual(SavePreflight.estimatedClipBytes(bitrateMbps: 25, durationSeconds: 0), 0)
+    }
+
+    func testDiskFailureWhenSpaceBelowEstimatePlusMargin() {
+        let failure = SavePreflight.diskFailure(
+            estimatedClipBytes: 100 * 1024 * 1024,
+            availableCapacityBytes: 150 * 1024 * 1024,
+            safetyMarginBytes: 200 * 1024 * 1024
+        )
+
+        XCTAssertEqual(failure, .insufficientDiskSpace)
+    }
+
+    func testDiskFailureNilWhenEnoughSpace() {
+        let failure = SavePreflight.diskFailure(
+            estimatedClipBytes: 100 * 1024 * 1024,
+            availableCapacityBytes: 5 * 1024 * 1024 * 1024,
+            safetyMarginBytes: 200 * 1024 * 1024
+        )
+
+        XCTAssertNil(failure)
+    }
+
+    func testDiskFailureNilWhenEstimateUnknown() {
+        let failure = SavePreflight.diskFailure(
+            estimatedClipBytes: 0,
+            availableCapacityBytes: 0
+        )
+
+        XCTAssertNil(failure)
+    }
 }

@@ -53,6 +53,16 @@ extension AppDelegate {
             return
         }
 
+        if let diskFailure = diskSpaceFailure(
+            lastSeconds: lastSeconds,
+            streamCount: isSeparateDualSaveMode ? 2 : 1
+        ) {
+            let message = SavePreflight.notificationMessage(for: diskFailure)
+            NotificationManager.shared.showOperationalNotification(title: message.title, body: message.body)
+            menuBarState.showSaveFailedBriefly()
+            return
+        }
+
         guard menuBarState.beginSaving() else {
             return
         }
@@ -114,6 +124,13 @@ extension AppDelegate {
             return
         }
 
+        if let diskFailure = diskSpaceFailure(lastSeconds: lastSeconds, streamCount: 1) {
+            let message = SavePreflight.notificationMessage(for: diskFailure)
+            NotificationManager.shared.showOperationalNotification(title: message.title, body: message.body)
+            menuBarState.showSaveFailedBriefly()
+            return
+        }
+
         guard menuBarState.beginSaving() else {
             return
         }
@@ -144,6 +161,36 @@ extension AppDelegate {
             NotificationManager.shared.showSaveFailedNotification(error: error.localizedDescription)
             print("Failed to save long-buffer clip: \(error)")
         }
+    }
+
+    /// Estimates the clip size from the configured bitrate and checks it against
+    /// free space on the output volume. Returns `nil` (allow the save) when
+    /// capacity can't be determined, so this never blocks on a query failure.
+    func diskSpaceFailure(lastSeconds: TimeInterval, streamCount: Int) -> SavePreflightFailure? {
+        guard let available = availableDiskCapacityBytes() else {
+            return nil
+        }
+        let estimate = SavePreflight.estimatedClipBytes(
+            bitrateMbps: AppSettings.bitrateMbps,
+            durationSeconds: lastSeconds,
+            streamCount: streamCount
+        )
+        return SavePreflight.diskFailure(
+            estimatedClipBytes: estimate,
+            availableCapacityBytes: available
+        )
+    }
+
+    private func availableDiskCapacityBytes() -> Int64? {
+        // Probe the output directory if it exists, otherwise the home directory
+        // (same volume), since the output folder is created lazily on first save.
+        let outputURL = AppSettings.outputDirectoryURL
+        let probeURL = FileManager.default.fileExists(atPath: outputURL.path)
+            ? outputURL
+            : FileManager.default.homeDirectoryForCurrentUser
+
+        let values = try? probeURL.resourceValues(forKeys: [.volumeAvailableCapacityForImportantUsageKey])
+        return values?.volumeAvailableCapacityForImportantUsage
     }
 
 }
