@@ -1,4 +1,5 @@
 import Foundation
+import AppKit
 import Save
 import UI
 import Feedback
@@ -72,18 +73,21 @@ extension AppDelegate {
             let outputDirectory = AppSettings.outputDirectoryURL
             print("Saving clip to output directory: \(outputDirectory.path(percentEncoded: false))")
 
+            let baseName = resolvedClipBaseName()
             let finalURLs: [URL]
             if isSeparateDualSaveMode {
                 finalURLs = try await clipSaver.saveDualDisplayClips(
                     lastSeconds: lastSeconds,
                     outputDirectory: outputDirectory,
-                    mergeAudioTracks: AppSettings.mergeAudioTracks
+                    mergeAudioTracks: AppSettings.mergeAudioTracks,
+                    baseName: baseName
                 )
             } else {
                 let savedURL = try await clipSaver.saveClip(
                     lastSeconds: lastSeconds,
                     outputDirectory: outputDirectory,
-                    mergeAudioTracks: AppSettings.mergeAudioTracks
+                    mergeAudioTracks: AppSettings.mergeAudioTracks,
+                    baseName: baseName
                 )
                 finalURLs = [savedURL]
             }
@@ -140,7 +144,8 @@ extension AppDelegate {
             let savedURL = try await longBufferRecorder.saveClip(
                 lastSeconds: lastSeconds,
                 outputDirectory: AppSettings.outputDirectoryURL,
-                mergeAudioTracks: AppSettings.mergeAudioTracks
+                mergeAudioTracks: AppSettings.mergeAudioTracks,
+                baseName: resolvedClipBaseName()
             )
 
             menuBarState.finishSaving(success: true)
@@ -179,6 +184,26 @@ extension AppDelegate {
             estimatedClipBytes: estimate,
             availableCapacityBytes: available
         )
+    }
+
+    /// Resolves the configured file-name template using the app that was
+    /// frontmost when the save was triggered (typically the game being clipped).
+    func resolvedClipBaseName() -> String {
+        FilenameTemplate.resolve(
+            template: AppSettings.clipFilenameTemplate,
+            appName: currentForegroundAppName()
+        )
+    }
+
+    private func currentForegroundAppName() -> String? {
+        guard let app = NSWorkspace.shared.frontmostApplication else {
+            return nil
+        }
+        // Don't name clips after ReplayMac itself when it happens to be frontmost.
+        if app.bundleIdentifier == Bundle.main.bundleIdentifier {
+            return nil
+        }
+        return app.localizedName
     }
 
     private func availableDiskCapacityBytes() -> Int64? {

@@ -35,23 +35,34 @@ public enum ClipMetadata {
                 .appendingPathComponent("Movies/ReplayMac", isDirectory: true)
     }
 
-    public static func generateUniqueFileURL(in directory: URL, suffix: String? = nil) throws -> URL {
-        try createOutputDirectoryIfNeeded(directory)
-
+    /// Default base name when no template is supplied, e.g.
+    /// `ReplayMac_2026-06-22_11-00-21`.
+    public static func defaultBaseName(date: Date = Date()) -> String {
         let formatter = DateFormatter()
         formatter.dateFormat = "yyyy-MM-dd_HH-mm-ss"
         formatter.locale = Locale(identifier: "en_US_POSIX")
         formatter.timeZone = TimeZone.current
+        return "ReplayMac_\(formatter.string(from: date))"
+    }
+
+    /// - Parameter baseName: The resolved file name without extension or
+    ///   suffix. When `nil`, falls back to ``defaultBaseName(date:)``.
+    public static func generateUniqueFileURL(
+        in directory: URL,
+        baseName: String? = nil,
+        suffix: String? = nil
+    ) throws -> URL {
+        try createOutputDirectoryIfNeeded(directory)
 
         let cleanSuffix = suffix.map { "_\($0)" } ?? ""
-        let baseName = "ReplayMac_\(formatter.string(from: Date()))\(cleanSuffix)"
+        let resolvedBase = "\(baseName ?? defaultBaseName())\(cleanSuffix)"
         let ext = "mp4"
 
-        var fileURL = directory.appendingPathComponent("\(baseName).\(ext)")
+        var fileURL = directory.appendingPathComponent("\(resolvedBase).\(ext)")
         var counter = 1
 
         while FileManager.default.fileExists(atPath: fileURL.path) {
-            fileURL = directory.appendingPathComponent("\(baseName)_\(counter).\(ext)")
+            fileURL = directory.appendingPathComponent("\(resolvedBase)_\(counter).\(ext)")
             counter += 1
         }
 

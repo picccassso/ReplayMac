@@ -1,5 +1,6 @@
 import Foundation
 import Defaults
+import Save
 
 public enum VideoCodec: String, CaseIterable, Identifiable {
     case hevc
@@ -144,6 +145,7 @@ public enum AppSettings {
     public static var mergeAudioTracks: Bool { Defaults[.mergeAudioTracks] }
     public static var playAudioCueOnSave: Bool { Defaults[.playAudioCueOnSave] }
     public static var showNotificationOnSave: Bool { Defaults[.showNotificationOnSave] }
+    public static var clipFilenameTemplate: String { Defaults[.clipFilenameTemplate] }
     public static var memoryCapMB: Double { Defaults[.memoryCapMB] }
 
     public static var frameRate: Int {
@@ -267,6 +269,7 @@ public extension Defaults.Keys {
     static let queueDepth = Key<Int>("queueDepth", default: 5)
     static let playAudioCueOnSave = Key<Bool>("playAudioCueOnSave", default: true)
     static let showNotificationOnSave = Key<Bool>("showNotificationOnSave", default: true)
+    static let clipFilenameTemplate = Key<String>("clipFilenameTemplate", default: FilenameTemplate.default)
     static let longBufferEnabled = Key<Bool>("longBufferEnabled", default: false)
     static let longBufferDurationMinutes = Key<Int>("longBufferDurationMinutes", default: LongBufferDuration.fiveMinutes.rawValue)
     static let longBufferWarningAccepted = Key<Bool>("longBufferWarningAccepted", default: false)

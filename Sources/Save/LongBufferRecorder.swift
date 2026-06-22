@@ -132,7 +132,8 @@ public actor LongBufferRecorder {
     public func saveClip(
         lastSeconds: TimeInterval,
         outputDirectory: URL,
-        mergeAudioTracks: Bool = true
+        mergeAudioTracks: Bool = true,
+        baseName: String? = nil
     ) async throws -> URL {
         try await finishCurrentSegment()
 
@@ -186,7 +187,7 @@ public actor LongBufferRecorder {
             cursor = CMTimeAdd(cursor, localDuration)
         }
 
-        let outputURL = try ClipMetadata.generateUniqueFileURL(in: outputDirectory, suffix: "LongBuffer")
+        let outputURL = try ClipMetadata.generateUniqueFileURL(in: outputDirectory, baseName: baseName, suffix: "LongBuffer")
         let preset: String
         if mergeAudioTracks, compositionAudioTracks.count > 1 {
             preset = AVAssetExportPresetHighestQuality

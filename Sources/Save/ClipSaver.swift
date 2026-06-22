@@ -55,21 +55,24 @@ public actor ClipSaver {
     public func saveClip(
         lastSeconds: TimeInterval,
         outputDirectory: URL,
-        mergeAudioTracks: Bool = true
+        mergeAudioTracks: Bool = true,
+        baseName: String? = nil
     ) async throws -> URL {
         try await saveClip(
             from: videoRingBuffer,
             lastSeconds: lastSeconds,
             outputDirectory: outputDirectory,
             fileNameSuffix: nil,
-            mergeAudioTracks: mergeAudioTracks
+            mergeAudioTracks: mergeAudioTracks,
+            baseName: baseName
         )
     }
 
     public func saveDualDisplayClips(
         lastSeconds: TimeInterval,
         outputDirectory: URL,
-        mergeAudioTracks: Bool = true
+        mergeAudioTracks: Bool = true,
+        baseName: String? = nil
     ) async throws -> [URL] {
         guard let dualDisplay1VideoRingBuffer, let dualDisplay2VideoRingBuffer else {
             throw ClipSaveError.noSamples
@@ -80,14 +83,16 @@ public actor ClipSaver {
             lastSeconds: lastSeconds,
             outputDirectory: outputDirectory,
             fileNameSuffix: "Display_1",
-            mergeAudioTracks: mergeAudioTracks
+            mergeAudioTracks: mergeAudioTracks,
+            baseName: baseName
         )
         let display2URL = try await saveClip(
             from: dualDisplay2VideoRingBuffer,
             lastSeconds: lastSeconds,
             outputDirectory: outputDirectory,
             fileNameSuffix: "Display_2",
-            mergeAudioTracks: mergeAudioTracks
+            mergeAudioTracks: mergeAudioTracks,
+            baseName: baseName
         )
 
         return [display1URL, display2URL]
@@ -98,7 +103,8 @@ public actor ClipSaver {
         lastSeconds: TimeInterval,
         outputDirectory: URL,
         fileNameSuffix: String?,
-        mergeAudioTracks: Bool
+        mergeAudioTracks: Bool,
+        baseName: String? = nil
     ) async throws -> URL {
         let videoSamples = videoRingBuffer.samples(last: lastSeconds)
 
@@ -124,7 +130,7 @@ public actor ClipSaver {
             print("[SAVE] mic PTS range: \(CMSampleBufferGetPresentationTimeStamp(firstMic).seconds) ... \(CMSampleBufferGetPresentationTimeStamp(lastMic).seconds)")
         }
 
-        let fileURL = try ClipMetadata.generateUniqueFileURL(in: outputDirectory, suffix: fileNameSuffix)
+        let fileURL = try ClipMetadata.generateUniqueFileURL(in: outputDirectory, baseName: baseName, suffix: fileNameSuffix)
 
         let writer = try AVAssetWriter(outputURL: fileURL, fileType: .mp4)
         writer.metadata = ClipMetadata.makeMetadataItems()

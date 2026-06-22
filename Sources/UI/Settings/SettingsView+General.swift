@@ -2,6 +2,7 @@ import SwiftUI
 import AppKit
 import Defaults
 import ServiceManagement
+import Save
 
 extension SettingsView {
     var generalTab: some View {
@@ -37,6 +38,47 @@ extension SettingsView {
             }
 
             Section {
+                TextField("File name template", text: $clipFilenameTemplate)
+                    .textFieldStyle(.roundedBorder)
+
+                HStack(alignment: .firstTextBaseline, spacing: 8) {
+                    Text("Preview")
+                        .foregroundStyle(AppTheme.textSecondary)
+                    Spacer()
+                    Text("\(filenamePreview).mp4")
+                        .lineLimit(1)
+                        .truncationMode(.middle)
+                        .foregroundStyle(AppTheme.textSecondary)
+                        .font(.system(.callout, design: .monospaced))
+                }
+
+                VStack(alignment: .leading, spacing: 4) {
+                    ForEach(FilenameTemplate.tokens, id: \.token) { entry in
+                        HStack(spacing: 8) {
+                            Text(entry.token)
+                                .font(.system(.caption, design: .monospaced))
+                                .foregroundStyle(AppTheme.accent)
+                            Text(entry.description)
+                                .font(.caption)
+                                .foregroundStyle(AppTheme.textSecondary)
+                        }
+                    }
+                }
+
+                Button("Reset to Default") {
+                    clipFilenameTemplate = FilenameTemplate.default
+                }
+                .buttonStyle(.link)
+                .disabled(clipFilenameTemplate == FilenameTemplate.default)
+            } header: {
+                sectionHeader(icon: "textformat", title: "Clip File Names")
+            } footer: {
+                Text("Applied to new clips. \"\(FilenameTemplate.tokens[0].token)\" uses the app that was in front when you saved.")
+                    .font(.caption)
+                    .foregroundStyle(AppTheme.textSecondary)
+            }
+
+            Section {
                 Toggle("Launch at login", isOn: $launchAtLogin)
                 Toggle("Auto-start recording on launch", isOn: $autoStartRecordingOnLaunch)
                 Toggle("Resume recording after wake", isOn: $resumeRecordingAfterWake)
@@ -52,6 +94,10 @@ extension SettingsView {
             }
         }
         .formStyle(.grouped)
+    }
+
+    private var filenamePreview: String {
+        FilenameTemplate.resolve(template: clipFilenameTemplate, appName: "Rocket League")
     }
 
     func chooseOutputDirectory() {
