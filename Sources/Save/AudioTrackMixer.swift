@@ -254,10 +254,12 @@ private struct PCMTrack {
             let asbd = asbdPointer.pointee
             let channels = Int(asbd.mChannelsPerFrame)
             let currentSampleRate = Int32(asbd.mSampleRate.rounded())
+            let isNonInterleaved = asbd.mFormatFlags & kAudioFormatFlagIsNonInterleaved != 0
             guard channels > 0,
                   currentSampleRate > 0,
                   asbd.mFormatID == kAudioFormatLinearPCM,
                   asbd.mFormatFlags & kAudioFormatFlagIsFloat != 0,
+                  asbd.mFormatFlags & kAudioFormatFlagIsPacked != 0,
                   asbd.mBitsPerChannel == 32 else {
                 throw AudioTrackMixError.unsupportedFormat
             }
@@ -292,8 +294,24 @@ private struct PCMTrack {
                 throw AudioTrackMixError.cannotCopyAudioData(status)
             }
 
-            let floats = bytes.withUnsafeBytes { rawBuffer in
+            let storedFloats = bytes.withUnsafeBytes { rawBuffer in
                 Array(rawBuffer.bindMemory(to: Float.self))
+            }
+            let floats: [Float]
+            if isNonInterleaved, channels > 1 {
+                // ScreenCaptureKit commonly delivers stereo as planar Float32:
+                // every frame for channel 0, followed by every frame for channel 1.
+                // The mixer consumes interleaved samples, so convert explicitly.
+                // Treating planar bytes as interleaved makes each channel advance
+                // at twice the intended rate, producing the high-pitched audio
+                // that prompted this conversion path.
+                floats = Self.interleave(
+                    storedFloats,
+                    frameCount: frameCount,
+                    channelCount: channels
+                )
+            } else {
+                floats = storedFloats
             }
 
             let pts = CMSampleBufferGetPresentationTimeStamp(sample)
@@ -312,6 +330,21 @@ private struct PCMTrack {
         self.chunks = chunks.sorted { $0.startFrame < $1.startFrame }
         self.sampleRate = sampleRate
         channelCount = maxChannelCount
+    }
+
+    private static func interleave(
+        _ planarSamples: [Float],
+        frameCount: Int,
+        channelCount: Int
+    ) -> [Float] {
+        var interleaved = [Float](repeating: 0, count: planarSamples.count)
+        for channel in 0..<channelCount {
+            let planeStart = channel * frameCount
+            for frame in 0..<frameCount {
+                interleaved[(frame * channelCount) + channel] = planarSamples[planeStart + frame]
+            }
+        }
+        return interleaved
     }
 }
 

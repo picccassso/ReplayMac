@@ -148,19 +148,44 @@ final class SavePipelineTests: XCTestCase {
         XCTAssertEqual(floatSamples(in: merged[0]), [0.25, 0.25, 0.75, 0.75])
     }
 
+    func testAudioTrackMixerInterleavesPlanarSystemAudio() throws {
+        let system = try makePCMSampleBuffer(
+            // Two planar frames: left [0.1, 0.2], right [0.3, 0.4].
+            samples: [0.1, 0.2, 0.3, 0.4],
+            channels: 2,
+            startFrame: 0,
+            nonInterleaved: true
+        )
+        let mic = try makePCMSampleBuffer(
+            samples: [0, 0],
+            channels: 1,
+            startFrame: 0
+        )
+
+        let merged = try AudioTrackMixer.merge(systemAudioSamples: [system], micAudioSamples: [mic])
+
+        XCTAssertEqual(floatSamples(in: merged[0]), [0.1, 0.3, 0.2, 0.4])
+    }
+
     private func makePCMSampleBuffer(
         samples: [Float],
         channels: Int,
         startFrame: Int64,
-        sampleRate: Int32 = 48_000
+        sampleRate: Int32 = 48_000,
+        nonInterleaved: Bool = false
     ) throws -> CMSampleBuffer {
+        let bytesPerFrame = nonInterleaved
+            ? MemoryLayout<Float>.size
+            : channels * MemoryLayout<Float>.size
         var asbd = AudioStreamBasicDescription(
             mSampleRate: Float64(sampleRate),
             mFormatID: kAudioFormatLinearPCM,
-            mFormatFlags: kAudioFormatFlagIsFloat | kAudioFormatFlagIsPacked,
-            mBytesPerPacket: UInt32(channels * MemoryLayout<Float>.size),
+            mFormatFlags: kAudioFormatFlagIsFloat
+                | kAudioFormatFlagIsPacked
+                | (nonInterleaved ? kAudioFormatFlagIsNonInterleaved : 0),
+            mBytesPerPacket: UInt32(bytesPerFrame),
             mFramesPerPacket: 1,
-            mBytesPerFrame: UInt32(channels * MemoryLayout<Float>.size),
+            mBytesPerFrame: UInt32(bytesPerFrame),
             mChannelsPerFrame: UInt32(channels),
             mBitsPerChannel: UInt32(MemoryLayout<Float>.size * 8),
             mReserved: 0
