@@ -1,5 +1,17 @@
 # Changelog
 
+## 1.6
+
+- Add "Open Last Clip" and "Reveal Last Clip in Finder" menu bar items, shown after the first successful save of the session and hidden if the clip is later moved or deleted
+- Add "Open" and "Reveal in Finder" action buttons to the clip-saved notification banner
+- Add a configurable hotkey to open the clip library
+- Cache and parallelize clip library thumbnail loading to eliminate reload lag in large libraries
+- Add multi-select batch actions to the clip library: favorite/unfavorite, share, add tags to all selected clips, and bulk delete with a confirmation that names the count and warns when favorites are included
+- Warn before saving when the disk is nearly full, estimating clip size from the configured bitrate and blocking the save when free space falls below the estimate plus a 200 MB margin; fails open if capacity cannot be determined
+- Add GIF export from the clip library (whole clip, Medium size by default) and from the trim view (selected range, with Small/Medium/Large size options); exports are written next to the source clip and revealed in Finder
+- Add customizable clip file-name templates with {app}, {date}, and {time} tokens, configurable in Settings > General with a live preview, a token legend, and a reset action; the default template preserves the existing naming behavior
+- Fix high-pitched system audio in merged clips
+
 ## 1.5
 
 - Merge system and microphone audio by default so shared clips keep mic audio on services that ignore secondary audio tracks

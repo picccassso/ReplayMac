@@ -8,26 +8,27 @@ It continuously buffers recent screen/audio capture and saves the last N seconds
 
 ## Features
 
-- **Instant replay** — Continuously buffers the last N seconds (15–300) of your screen and audio. Save retroactively with a click or hotkey.
+- **Instant replay** — Continuously buffers the last N seconds (15–300) of screen and audio; save retroactively with a click or hotkey.
 - **Dual display support** — Capture one or two monitors, saved as a side-by-side composite or as separate files.
-- **Hardware-accelerated encoding** — HEVC or H.264 via VideoToolbox, with configurable resolution, frame rate (30/60/120 fps), and bitrate (10–50 Mbps).
-- **System audio modes + microphone** — Record all system audio, no system audio, or only one selected app; microphone audio is merged with system audio by default for easier sharing, with an option to keep system and mic audio as separate tracks inside the MP4 for editing.
-- **Live audio level meters** — Real-time system audio and microphone level meters in audio settings, with RMS-based measurement and auto-reset when capture stops.
-- **Ring buffer memory management** — Configurable total memory cap (256 MB–4 GB) shared across all replay buffers, evicting oldest footage as needed and trimming under system memory pressure.
-- **Opt-in extended replay buffer** — Save longer 5, 10, or 30 minute replay windows by rolling temporary segments to disk, with clear SSD write and disk usage warnings before enabling.
-- **Five configurable hotkeys** — Save clip, toggle recording, save last 15s, save last 60s, save extended replay — assign any key combination.
-- **Clip library + quick trim** — Browse, preview, trim/export, play, reveal in Finder, rename, or delete saved clips from a built-in library window.
-- **Clip sharing** — Open the macOS share sheet or copy a saved clip file for pasting into another app.
-- **Clip organization** — Search clips, mark favorites, add display names, tags, and notes, and filter the library down to favorites.
-- **Storage cleanup** — See total library size and move non-favorite clips to Trash by age or in bulk.
-- **Capture profiles** — Save named video/audio/buffer configurations and apply them later when switching games, displays, or workflows.
+- **Hardware-accelerated encoding** — HEVC or H.264 via VideoToolbox, with configurable resolution, frame rate, and bitrate.
+- **System audio + microphone** — Capture all apps, no audio, or one selected app. Mic and system audio merge into a single track by default; optionally keep as separate tracks inside the MP4.
+- **Live audio level meters** — Real-time RMS-based level meters for system audio and microphone in audio settings.
+- **Ring buffer memory management** — Configurable memory cap (256 MB–4 GB) shared across all replay buffers, with automatic eviction under memory pressure.
+- **Extended replay buffer** — Optionally roll 5, 10, or 30 minute replay windows to disk, with SSD write and disk usage warnings before enabling.
+- **Six configurable hotkeys** — Save clip, toggle recording, save last 15s, save last 60s, save extended replay, open clip library.
+- **Clip library** — Browse, preview, trim, export, or export as GIF; rename, tag, favorite, and batch-act on multiple clips at once.
+- **Clip sharing** — Open the macOS share sheet or copy a clip file for pasting into another app.
+- **Clip organization** — Search clips, mark favorites, add display names, tags, and notes.
+- **Storage cleanup** — View total library size and move non-favorite clips to Trash by age or in bulk.
+- **Capture profiles** — Save named video/audio/buffer configurations and switch between them on demand.
+- **Customizable file-name templates** — Name clips with `{app}`, `{date}`, and `{time}` tokens, with a live preview in Settings > General.
 - **Quality presets** — Performance, Quality, Ultra, and Custom modes that tune resolution, frame rate, and bitrate together.
-- **Live settings** — Capture, encoding, and audio changes apply automatically while recording; no restart required.
-- **Reliable save flow** — Preflight checks prevent saving when not recording or while the buffer is still filling; success feedback only appears after the clip is written.
-- **Clear menu bar status** — Live badge shows recording state, buffered time, and save progress (Saving / Saved / Failed). Menu includes Start/Stop Recording, buffer usage, and save actions that disable until footage is ready.
-- **Audio cue & notifications** — Optional sound and notification when a clip saves successfully; operational notifications for save failures and when recording stops or fails to start (permissions, display disconnect, GPU pressure).
+- **Live settings** — Capture, encoding, and audio changes apply while recording; no restart required.
+- **Reliable save flow** — Preflight checks block saves when not recording, while the buffer is filling, or when disk space is too low.
+- **Clear menu bar status** — Live badge shows recording state, buffered time, and save progress. Last saved clip is one click away from the menu.
+- **Notifications** — Optional sound and banner on save, with Open and Reveal in Finder actions on the notification; operational alerts for failures and capture events.
 - **Launch at login & auto-start** — Optionally begin recording automatically on login.
-- **Update availability check** — Check GitHub Releases on launch and show a download link in the menu when a newer version is available.
+- **Update availability check** — Checks GitHub Releases on launch and shows a download link in the menu when a newer version is available.
 
 ## Requirements
 
@@ -69,25 +70,33 @@ Clip library notes, tags, display names, and favorite state are stored in a hidd
     <th width="50%">Audio</th>
   </tr>
   <tr>
-    <td width="50%"><img src="app_photos/1_general_settings.png?v=1.5" alt="General settings" width="100%"></td>
-    <td width="50%"><img src="app_photos/3_audio_setting.png?v=1.5" alt="Audio settings" width="100%"></td>
+    <td width="50%"><img src="app_photos/1_general_settings.png?v=1.6" alt="General settings" width="100%"></td>
+    <td width="50%"><img src="app_photos/3_audio_settings.png?v=1.6" alt="Audio settings" width="100%"></td>
   </tr>
 </table>
 
 | Video | Video extended replay |
 | --- | --- |
-| ![Video settings](app_photos/2_video_settings_1.png?v=1.4) | ![Video settings extended replay](app_photos/2_video_settings_2.png?v=1.4) |
+| ![Video settings](app_photos/2_video_settings_1.png?v=1.6) | ![Video settings extended replay](app_photos/2_video_settings_2.png?v=1.6) |
 
 | Profiles | Profile details |
 | --- | --- |
-| ![Profile settings](app_photos/4_profile_settings_1.png?v=1.4) | ![Profile settings details](app_photos/4_profile_settings_2.png?v=1.4) |
+| ![Profile settings](app_photos/4_profile_settings_1.png?v=1.6) | ![Profile settings details](app_photos/4_profile_settings_2.png?v=1.6) |
 
 | Advanced | Hotkeys |
 | --- | --- |
-| ![Advanced settings](app_photos/6_advanced_settings.png?v=1.4) | ![Hotkey settings](app_photos/5_hotkey_settings.png?v=1.4) |
+| ![Advanced settings](app_photos/6_advanced_settings.png?v=1.6) | ![Hotkey settings](app_photos/5_hotkey_settings.png?v=1.6) |
 
-| Clip library | Clip details | Storage cleanup |
-| --- | --- | --- |
-| ![Clip library](app_photos/7_library_view_1.png?v=1.4) | ![Clip library details](app_photos/7_library_view_2.png?v=1.4) | ![Clip library cleanup](app_photos/7_library_view_3.png?v=1.4) |
+| Clip library | Clip details | Storage cleanup | Batch actions |
+| --- | --- | --- | --- |
+| ![Clip library](app_photos/7_library_view_1.png?v=1.6) | ![Clip library details](app_photos/7_library_view_2.png?v=1.6) | ![Clip library cleanup](app_photos/7_library_view_3.png?v=1.6) | ![Clip library batch actions](app_photos/7_library_view_4.png?v=1.6) |
 
 </details>
+
+## License
+
+ReplayMac is free and source-available.
+
+You may download, use, inspect, build, and modify it for personal use, but you may not redistribute modified builds, publish renamed forks, sell the app, or use the ReplayMac name/icon/branding without permission.
+
+See [LICENSE.md](LICENSE.md).
