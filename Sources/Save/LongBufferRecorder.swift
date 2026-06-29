@@ -31,6 +31,8 @@ public struct LongBufferSample: @unchecked Sendable {
 }
 
 public actor LongBufferRecorder {
+    typealias WriterFinisher = @Sendable (LongBufferWriterBox) async throws -> Void
+
     private struct Segment: Sendable {
         let url: URL
         let startPTS: Double
@@ -53,8 +55,15 @@ public actor LongBufferRecorder {
     private var droppedVideoSamples = 0
     private var droppedSystemAudioSamples = 0
     private var droppedMicSamples = 0
+    private let writerFinisher: WriterFinisher
 
-    public init() {}
+    public init() {
+        writerFinisher = Self.finishWriter
+    }
+
+    init(writerFinisher: @escaping WriterFinisher) {
+        self.writerFinisher = writerFinisher
+    }
 
     public func configure(
         enabled: Bool,
@@ -85,6 +94,8 @@ public actor LongBufferRecorder {
         let pts = presentationTimeStamp(sample)
 
         do {
+            discardFailedActiveSegmentIfNeeded()
+
             if writer == nil {
                 try startSegment(at: pts, videoSample: sample)
             } else if let activeSegmentStartPTS, pts - activeSegmentStartPTS >= segmentSeconds {
@@ -95,8 +106,11 @@ public actor LongBufferRecorder {
             if !append(sample, to: videoInput) {
                 droppedVideoSamples += 1
                 logDropIfNeeded(label: "video", count: droppedVideoSamples)
+                discardFailedActiveSegmentIfNeeded()
             }
-            activeSegmentEndPTS = max(activeSegmentEndPTS ?? pts, pts)
+            if writer != nil {
+                activeSegmentEndPTS = max(activeSegmentEndPTS ?? pts, pts)
+            }
             pruneSegments(keepingNewestPTS: pts)
         } catch {
             print("Long buffer video append failed: \(error)")
@@ -223,6 +237,13 @@ public actor LongBufferRecorder {
 
         let fileName = "ReplayMac_LongBuffer_\(Int(Date().timeIntervalSince1970))_\(UUID().uuidString).mp4"
         let url = segmentDirectory.appendingPathComponent(fileName)
+        var installedWriter = false
+        defer {
+            if !installedWriter {
+                try? FileManager.default.removeItem(at: url)
+            }
+        }
+
         let writer = try AVAssetWriter(outputURL: url, fileType: .mp4)
         writer.metadata = ClipMetadata.makeMetadataItems()
         writer.movieFragmentInterval = CMTime(seconds: 1, preferredTimescale: 600)
@@ -264,6 +285,7 @@ public actor LongBufferRecorder {
         activeSegmentURL = url
         activeSegmentStartPTS = pts
         activeSegmentEndPTS = pts
+        installedWriter = true
     }
 
     private func appendAudio(_ sample: CMSampleBuffer, to input: AVAssetWriterInput?) -> Bool {
@@ -272,6 +294,9 @@ public actor LongBufferRecorder {
         let appended = append(sample, to: input)
         let pts = presentationTimeStamp(sample)
         activeSegmentEndPTS = max(activeSegmentEndPTS ?? pts, pts)
+        if !appended {
+            discardFailedActiveSegmentIfNeeded()
+        }
         return appended
     }
 
@@ -297,31 +322,45 @@ public actor LongBufferRecorder {
             return
         }
 
+        let segmentURL = activeSegmentURL
+        let segmentStartPTS = activeSegmentStartPTS
+        let segmentEndPTS = activeSegmentEndPTS
+        let videoInput = self.videoInput
+        let systemAudioInput = self.systemAudioInput
+        let micInput = self.micInput
+
+        // Detach the writer before awaiting finishWriting. Actor methods are
+        // re-entrant at suspension points, so incoming samples must never see a
+        // writer whose inputs have already been marked as finished. Detaching
+        // here also guarantees that a finish failure cannot poison every later
+        // segment and save attempt.
+        clearActiveSegment()
+
         videoInput?.markAsFinished()
         systemAudioInput?.markAsFinished()
         micInput?.markAsFinished()
 
-        let writerBox = LongBufferWriterBox(writer)
-        try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
-            writerBox.writer.finishWriting {
-                if let error = writerBox.writer.error {
-                    continuation.resume(throwing: error)
-                } else {
-                    continuation.resume()
-                }
+        do {
+            try await writerFinisher(LongBufferWriterBox(writer))
+        } catch {
+            if let segmentURL {
+                try? FileManager.default.removeItem(at: segmentURL)
             }
+            throw error
         }
 
-        if let activeSegmentURL, let activeSegmentStartPTS {
+        if let segmentURL, let segmentStartPTS {
             segments.append(
                 Segment(
-                    url: activeSegmentURL,
-                    startPTS: activeSegmentStartPTS,
-                    endPTS: activeSegmentEndPTS ?? activeSegmentStartPTS
+                    url: segmentURL,
+                    startPTS: segmentStartPTS,
+                    endPTS: segmentEndPTS ?? segmentStartPTS
                 )
             )
         }
+    }
 
+    private func clearActiveSegment() {
         self.writer = nil
         videoInput = nil
         systemAudioInput = nil
@@ -329,6 +368,40 @@ public actor LongBufferRecorder {
         activeSegmentURL = nil
         activeSegmentStartPTS = nil
         activeSegmentEndPTS = nil
+    }
+
+    /// Drops a writer that AVFoundation has moved into a terminal failure
+    /// state. The next video sample will immediately create a fresh segment.
+    /// Backpressure (`isReadyForMoreMediaData == false`) is intentionally not
+    /// treated as terminal and continues to use the current writer.
+    @discardableResult
+    private func discardFailedActiveSegmentIfNeeded() -> Bool {
+        guard let writer, writer.status == .failed || writer.status == .cancelled else {
+            return false
+        }
+
+        let failedURL = activeSegmentURL
+        let errorDescription = writer.error?.localizedDescription ?? "writer cancelled"
+        clearActiveSegment()
+        if let failedURL {
+            try? FileManager.default.removeItem(at: failedURL)
+        }
+        print("Long buffer writer reset after terminal failure: \(errorDescription)")
+        return true
+    }
+
+    private static func finishWriter(_ writerBox: LongBufferWriterBox) async throws {
+        try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
+            writerBox.writer.finishWriting {
+                if writerBox.writer.status == .completed {
+                    continuation.resume()
+                } else {
+                    continuation.resume(
+                        throwing: writerBox.writer.error ?? LongBufferRecorderError.exportFailed
+                    )
+                }
+            }
+        }
     }
 
     private func pruneSegments(keepingNewestPTS newestPTS: Double) {
@@ -358,7 +431,7 @@ public actor LongBufferRecorder {
     }
 }
 
-private final class LongBufferWriterBox: @unchecked Sendable {
+final class LongBufferWriterBox: @unchecked Sendable {
     let writer: AVAssetWriter
 
     init(_ writer: AVAssetWriter) {
