@@ -124,3 +124,83 @@ final class CaptureDelegateTests: XCTestCase {
         XCTAssertNil(delegate.frameStatus(of: buffer))
     }
 }
+
+final class CaptureHealthTests: XCTestCase {
+    func testDetectsMissingVideoAfterStartupGracePeriod() {
+        let start = Date(timeIntervalSinceReferenceDate: 1_000)
+
+        XCTAssertTrue(CaptureHealth.isVideoStalled(
+            isCaptureRunning: true,
+            isSessionActive: true,
+            monitoringStartedAt: start,
+            lastVideoSampleDate: nil,
+            now: start.addingTimeInterval(15),
+            timeout: 15
+        ))
+    }
+
+    func testRecentVideoSampleKeepsCaptureHealthy() {
+        let start = Date(timeIntervalSinceReferenceDate: 1_000)
+
+        XCTAssertFalse(CaptureHealth.isVideoStalled(
+            isCaptureRunning: true,
+            isSessionActive: true,
+            monitoringStartedAt: start,
+            lastVideoSampleDate: start.addingTimeInterval(20),
+            now: start.addingTimeInterval(30),
+            timeout: 15
+        ))
+    }
+
+    func testInactiveSessionDoesNotTriggerWatchdog() {
+        let start = Date(timeIntervalSinceReferenceDate: 1_000)
+
+        XCTAssertFalse(CaptureHealth.isVideoStalled(
+            isCaptureRunning: true,
+            isSessionActive: false,
+            monitoringStartedAt: start,
+            lastVideoSampleDate: nil,
+            now: start.addingTimeInterval(60),
+            timeout: 15
+        ))
+    }
+
+    func testRecoveryWaitsUntilSessionAndScreensAreActive() {
+        XCTAssertFalse(CaptureRecoveryPolicy.shouldScheduleRecovery(
+            automaticResumeEnabled: true,
+            shouldResume: true,
+            isSessionActive: false,
+            areScreensAwake: true,
+            isPreparingRecovery: false,
+            hasScheduledRecovery: false
+        ))
+        XCTAssertFalse(CaptureRecoveryPolicy.shouldScheduleRecovery(
+            automaticResumeEnabled: true,
+            shouldResume: true,
+            isSessionActive: true,
+            areScreensAwake: false,
+            isPreparingRecovery: false,
+            hasScheduledRecovery: false
+        ))
+    }
+
+    func testRecoverySchedulesAfterSessionReactivation() {
+        XCTAssertTrue(CaptureRecoveryPolicy.shouldScheduleRecovery(
+            automaticResumeEnabled: true,
+            shouldResume: true,
+            isSessionActive: true,
+            areScreensAwake: true,
+            isPreparingRecovery: false,
+            hasScheduledRecovery: false
+        ))
+    }
+
+    func testRecognizesSystemStoppedStreamError() {
+        let error = NSError(
+            domain: SCStreamErrorDomain,
+            code: SCStreamError.Code.systemStoppedStream.rawValue
+        )
+
+        XCTAssertTrue(CaptureInterruptionClassifier.isSystemStoppedStream(error))
+    }
+}

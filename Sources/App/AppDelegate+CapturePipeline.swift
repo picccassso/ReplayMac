@@ -1,4 +1,5 @@
 import Foundation
+import os
 
 import Audio
 import Capture
@@ -7,6 +8,8 @@ import Encode
 import Feedback
 import Save
 import UI
+
+private let captureRecoveryLogger = Logger(subsystem: "com.replaymac", category: "CaptureRecovery")
 
 @MainActor
 extension AppDelegate {
@@ -35,12 +38,21 @@ extension AppDelegate {
     }
 
     func startCapturePipeline(userInitiated: Bool = true) {
+        if userInitiated {
+            shouldResumeCaptureAfterInterruption = false
+            captureRecoveryAttempts = 0
+            captureRecoveryTask?.cancel()
+            captureRecoveryTask = nil
+        }
         Task {
             await startCapturePipelineAsync(userInitiated: userInitiated)
         }
     }
 
-    func startCapturePipelineAsync(userInitiated: Bool = true) async {
+    func startCapturePipelineAsync(
+        userInitiated: Bool = true,
+        showFailureNotification: Bool = true
+    ) async {
         guard !isCaptureRunning else {
             return
         }
@@ -220,6 +232,8 @@ extension AppDelegate {
                 }
 
                 isCaptureRunning = true
+                shouldResumeCaptureAfterInterruption = false
+                captureRecoveryAttempts = 0
                 menuBarState.setRecording(true)
                 menuBarState.setExtendedBufferRecording(
                     AppSettings.longBufferEnabled && !isSeparateDualSaveMode
@@ -230,7 +244,10 @@ extension AppDelegate {
             if !userInitiated,
                !UserDefaults.standard.bool(forKey: "hasPromptedForScreenCapture") {
                 UserDefaults.standard.set(true, forKey: "hasPromptedForScreenCapture")
-                await startCapturePipelineAsync(userInitiated: true)
+                await startCapturePipelineAsync(
+                    userInitiated: true,
+                    showFailureNotification: showFailureNotification
+                )
                 return
             }
 
@@ -239,7 +256,9 @@ extension AppDelegate {
             menuBarState.setRecording(false)
             statusItemController.refreshPresentation()
             let message = CaptureStartErrorMapper.userMessage(for: error)
-            NotificationManager.shared.showOperationalNotification(title: message.title, body: message.body)
+            if showFailureNotification {
+                NotificationManager.shared.showOperationalNotification(title: message.title, body: message.body)
+            }
             print("Failed to start capture: \(error)")
         }
     }
@@ -306,7 +325,13 @@ extension AppDelegate {
         }
     }
 
-    func stopCapturePipelineAsync() async {
+    func stopCapturePipelineAsync(preserveResumeIntent: Bool = false) async {
+        if !preserveResumeIntent {
+            shouldResumeCaptureAfterInterruption = false
+            captureRecoveryAttempts = 0
+            captureRecoveryTask?.cancel()
+            captureRecoveryTask = nil
+        }
         guard isCaptureRunning else {
             return
         }
@@ -317,7 +342,7 @@ extension AppDelegate {
         await captureManager.stop()
         await perAppAudioCapture.stop()
         longBufferAppendPump.reset()
-        await longBufferRecorder.stop(deleteSegments: true)
+        await longBufferRecorder.stop(deleteSegments: !preserveResumeIntent)
         micAudioCapture.stop()
         videoEncoder.stop()
         dualDisplay1VideoEncoder.stop()
@@ -363,12 +388,9 @@ extension AppDelegate {
 
     func handleCaptureInterruption(_ interruption: CaptureInterruption) {
         switch interruption {
-        case .restartedAfterGPUPressure:
-            menuBarState.setRecording(true)
-            if let message = interruption.userMessage {
-                NotificationManager.shared.showOperationalNotification(title: message.title, body: message.body)
-            }
-        case .gpuPressurePaused, .permissionRevoked, .displayDisconnected, .stopped:
+        case .systemStopped:
+            beginRecoverableCaptureInterruption(reason: "ScreenCaptureKit system stop")
+        case .permissionRevoked, .displayDisconnected, .stopped:
             if let message = interruption.userMessage {
                 NotificationManager.shared.showOperationalNotification(title: message.title, body: message.body)
             }
@@ -376,6 +398,92 @@ extension AppDelegate {
                 print("Capture stopped: \(reason)")
             }
             stopCapturePipeline()
+        }
+    }
+
+    func beginRecoverableCaptureInterruption(reason: String) {
+        guard AppSettings.resumeRecordingAfterWake else {
+            NotificationManager.shared.showOperationalNotification(
+                title: "Recording Paused",
+                body: "macOS interrupted screen capture. Choose Start Recording to continue."
+            )
+            stopCapturePipeline()
+            return
+        }
+        guard !isPreparingCaptureRecovery else { return }
+
+        shouldResumeCaptureAfterInterruption = true
+        isPreparingCaptureRecovery = true
+        captureRecoveryLogger.warning("Preparing capture recovery after \(reason, privacy: .public)")
+
+        Task { @MainActor [weak self] in
+            guard let self else { return }
+            await self.stopCapturePipelineAsync(preserveResumeIntent: true)
+            self.isPreparingCaptureRecovery = false
+            self.scheduleCaptureRecoveryIfNeeded(reason: reason)
+        }
+    }
+
+    func scheduleCaptureRecoveryIfNeeded(reason: String) {
+        guard CaptureRecoveryPolicy.shouldScheduleRecovery(
+            automaticResumeEnabled: AppSettings.resumeRecordingAfterWake,
+            shouldResume: shouldResumeCaptureAfterInterruption,
+            isSessionActive: isWorkspaceSessionActive,
+            areScreensAwake: areScreensAwake,
+            isPreparingRecovery: isPreparingCaptureRecovery,
+            hasScheduledRecovery: captureRecoveryTask != nil
+        ) else {
+            return
+        }
+
+        captureRecoveryTask = Task { @MainActor [weak self] in
+            guard let self else { return }
+            var shouldRetry = false
+            defer {
+                self.captureRecoveryTask = nil
+                if shouldRetry {
+                    self.scheduleCaptureRecoveryIfNeeded(reason: reason)
+                }
+            }
+
+            // Let loginwindow finish restoring the display session before
+            // asking ScreenCaptureKit for fresh display objects.
+            try? await Task.sleep(for: .seconds(2))
+            guard !Task.isCancelled,
+                  AppSettings.resumeRecordingAfterWake,
+                  self.shouldResumeCaptureAfterInterruption,
+                  self.isWorkspaceSessionActive,
+                  self.areScreensAwake else {
+                return
+            }
+
+            if self.isCaptureRunning {
+                await self.stopCapturePipelineAsync(preserveResumeIntent: true)
+            }
+            await self.startCapturePipelineAsync(
+                userInitiated: false,
+                showFailureNotification: false
+            )
+
+            if self.isCaptureRunning {
+                self.shouldResumeCaptureAfterInterruption = false
+                self.captureRecoveryAttempts = 0
+                captureRecoveryLogger.info("Capture recovery succeeded after \(reason, privacy: .public)")
+                NotificationManager.shared.showOperationalNotification(
+                    title: "Recording Resumed",
+                    body: "ReplayMac resumed recording after \(reason)."
+                )
+            } else {
+                self.captureRecoveryAttempts += 1
+                captureRecoveryLogger.error("Capture recovery attempt \(self.captureRecoveryAttempts) failed after \(reason, privacy: .public)")
+                shouldRetry = self.captureRecoveryAttempts < 3
+                if !shouldRetry {
+                    NotificationManager.shared.showOperationalNotification(
+                        title: "Recording Could Not Resume",
+                        body: "ReplayMac could not restore screen capture automatically. Choose Start Recording to try again."
+                    )
+                }
+            }
         }
     }
 

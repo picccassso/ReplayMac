@@ -2,7 +2,6 @@
 import CoreGraphics
 import CoreMedia
 import CoreVideo
-import os.log
 
 public struct CaptureConfig: Sendable {
     public let width: Int
@@ -41,7 +40,6 @@ public actor CaptureManager {
     private let videoQueue = DispatchQueue(label: "com.replaymac.video", qos: .userInteractive)
     private let secondaryVideoQueue = DispatchQueue(label: "com.replaymac.video.secondary", qos: .userInteractive)
     private let audioQueue = DispatchQueue(label: "com.replaymac.audio", qos: .userInitiated)
-    private let logger = Logger(subsystem: "com.replaymac", category: "Capture")
 
     // Single-display config for restart
     private var currentFilter: SCContentFilter?
@@ -54,10 +52,7 @@ public actor CaptureManager {
     private var dualConfiguration2: SCStreamConfiguration?
 
     private var isDualMode = false
-    private var restartAttempts: [Date] = []
     private var userInitiatedStop = false
-    private let maxRestartAttempts = 5
-    private let restartWindowSeconds: TimeInterval = 60
 
     private var interruptionHandler: (@Sendable (CaptureInterruption) -> Void)?
 
@@ -200,19 +195,19 @@ public actor CaptureManager {
         delegate.setStreamStoppedHandler { [weak self] error in
             guard let self else { return }
             Task {
-                await self.handleStreamStopped(error: error, isDual: false)
+                await self.handleStreamStopped(error: error)
             }
         }
         delegate1.setStreamStoppedHandler { [weak self] error in
             guard let self else { return }
             Task {
-                await self.handleStreamStopped(error: error, isDual: true, streamLabel: "1")
+                await self.handleStreamStopped(error: error)
             }
         }
         delegate2.setStreamStoppedHandler { [weak self] error in
             guard let self else { return }
             Task {
-                await self.handleStreamStopped(error: error, isDual: true, streamLabel: "2")
+                await self.handleStreamStopped(error: error)
             }
         }
     }
@@ -230,6 +225,7 @@ public actor CaptureManager {
         excludeOwnAppAudio: Bool = false,
         captureAudio: Bool = true
     ) async throws -> CaptureConfig {
+        delegate.resetStats()
         let permissions = CapturePermissions()
         let content = try await permissions.requestAccess(interactive: interactivePermissionPrompt)
 
@@ -269,7 +265,6 @@ public actor CaptureManager {
 
         userInitiatedStop = false
         isDualMode = false
-        restartAttempts.removeAll()
         currentFilter = filter
         currentConfiguration = config
         self.stream = newStream
@@ -302,6 +297,8 @@ public actor CaptureManager {
         excludeOwnAppAudio: Bool = false,
         captureAudio: Bool = true
     ) async throws -> (config1: CaptureConfig, config2: CaptureConfig) {
+        delegate1.resetStats()
+        delegate2.resetStats()
         let permissions = CapturePermissions()
         let content = try await permissions.requestAccess(interactive: interactivePermissionPrompt)
 
@@ -372,7 +369,6 @@ public actor CaptureManager {
 
         userInitiatedStop = false
         isDualMode = true
-        restartAttempts.removeAll()
         dualFilter1 = filter1
         dualFilter2 = filter2
         dualConfiguration1 = config1
@@ -410,12 +406,14 @@ public actor CaptureManager {
         await performStop()
     }
 
-    private func performStop() async {
+    private func performStop(requestStreamStop: Bool = true) async {
         userInitiatedStop = true
 
         if isDualMode {
-            try? await stream1?.stopCapture()
-            try? await stream2?.stopCapture()
+            if requestStreamStop {
+                try? await stream1?.stopCapture()
+                try? await stream2?.stopCapture()
+            }
             stream1 = nil
             stream2 = nil
             dualFilter1 = nil
@@ -423,27 +421,29 @@ public actor CaptureManager {
             dualConfiguration1 = nil
             dualConfiguration2 = nil
         } else {
-            try? await stream?.stopCapture()
+            if requestStreamStop {
+                try? await stream?.stopCapture()
+            }
             stream = nil
             currentFilter = nil
             currentConfiguration = nil
         }
 
-        restartAttempts.removeAll()
         isDualMode = false
         userInitiatedStop = false
     }
 
     // MARK: - Stream stopped handler
 
-    private func handleStreamStopped(error: Error, isDual: Bool, streamLabel: String = "") async {
+    private func handleStreamStopped(error: Error) async {
         guard !userInitiatedStop else {
             return
         }
 
         let nsError = error as NSError
-        if nsError.code == -3821 {
-            await attemptRestartAfterGPUDisconnect(isDual: isDual, streamLabel: streamLabel)
+        if CaptureInterruptionClassifier.isSystemStoppedStream(error) {
+            interruptionHandler?(.systemStopped)
+            await performStop(requestStreamStop: false)
             return
         }
 
@@ -457,76 +457,6 @@ public actor CaptureManager {
         }
 
         await performStop()
-    }
-
-    private func attemptRestartAfterGPUDisconnect(isDual: Bool, streamLabel: String = "") async {
-        let now = Date()
-        restartAttempts = restartAttempts.filter { now.timeIntervalSince($0) <= restartWindowSeconds }
-
-        guard restartAttempts.count < maxRestartAttempts else {
-            logger.error("Capture restart halted after repeated -3821 failures")
-            interruptionHandler?(.gpuPressurePaused)
-            await performStop()
-            return
-        }
-
-        restartAttempts.append(now)
-        logger.error("Received SCK -3821 on stream\(streamLabel). Restart attempt \(self.restartAttempts.count)")
-
-        do {
-            try await Task.sleep(for: .milliseconds(500))
-        } catch {
-            return
-        }
-
-        do {
-            try await recreateStreamFromCurrentConfiguration(isDual: isDual)
-            logger.info("Capture stream\(streamLabel) restarted after SCK -3821")
-            interruptionHandler?(.restartedAfterGPUPressure)
-        } catch {
-            logger.error("Capture restart failed: \(error.localizedDescription, privacy: .public)")
-            interruptionHandler?(.stopped("Restart failed: \(error.localizedDescription)"))
-        }
-    }
-
-    private func recreateStreamFromCurrentConfiguration(isDual: Bool) async throws {
-        if isDual {
-            guard let filter1 = dualFilter1,
-                  let filter2 = dualFilter2,
-                  let config1 = dualConfiguration1,
-                  let config2 = dualConfiguration2 else {
-                throw CaptureRestartError.missingConfiguration
-            }
-
-            try? await stream1?.stopCapture()
-            try? await stream2?.stopCapture()
-            stream1 = nil
-            stream2 = nil
-
-            let replacement1 = SCStream(filter: filter1, configuration: config1, delegate: delegate1)
-            try replacement1.addStreamOutput(delegate1, type: .screen, sampleHandlerQueue: videoQueue)
-            try replacement1.addStreamOutput(delegate1, type: .audio, sampleHandlerQueue: audioQueue)
-
-            let replacement2 = SCStream(filter: filter2, configuration: config2, delegate: delegate2)
-            try replacement2.addStreamOutput(delegate2, type: .screen, sampleHandlerQueue: secondaryVideoQueue)
-
-            try await startDualStreams(replacement1, replacement2)
-            stream1 = replacement1
-            stream2 = replacement2
-        } else {
-            guard let filter = currentFilter, let configuration = currentConfiguration else {
-                throw CaptureRestartError.missingConfiguration
-            }
-
-            try? await stream?.stopCapture()
-            stream = nil
-
-            let replacement = SCStream(filter: filter, configuration: configuration, delegate: delegate)
-            try replacement.addStreamOutput(delegate, type: .screen, sampleHandlerQueue: videoQueue)
-            try replacement.addStreamOutput(delegate, type: .audio, sampleHandlerQueue: audioQueue)
-            try await replacement.startCapture()
-            stream = replacement
-        }
     }
 
     private func startDualStreams(_ firstStream: SCStream, _ secondStream: SCStream) async throws {
@@ -543,8 +473,7 @@ public actor CaptureManager {
 }
 
 public enum CaptureInterruption: Sendable {
-    case restartedAfterGPUPressure
-    case gpuPressurePaused
+    case systemStopped
     case permissionRevoked
     case displayDisconnected
     case stopped(String)

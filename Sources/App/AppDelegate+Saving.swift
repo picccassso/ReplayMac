@@ -128,7 +128,9 @@ extension AppDelegate {
             return
         }
 
-        if let diskFailure = diskSpaceFailure(lastSeconds: lastSeconds, streamCount: 1) {
+        // Extended saves temporarily stage one copy of the selected segments
+        // alongside the final exported clip, so reserve space for both.
+        if let diskFailure = diskSpaceFailure(lastSeconds: lastSeconds, streamCount: 2) {
             let message = SavePreflight.notificationMessage(for: diskFailure)
             NotificationManager.shared.showOperationalNotification(title: message.title, body: message.body)
             menuBarState.showSaveFailedBriefly()
@@ -160,6 +162,13 @@ extension AppDelegate {
                 NotificationManager.shared.showClipSavedNotification(fileURL: savedURL, clipDuration: lastSeconds)
             }
             print("Long-buffer clip saved: \(savedURL.path)")
+        } catch LongBufferRecorderError.longBufferExportAlreadyInProgress {
+            menuBarState.finishSaving(success: false)
+            statusItemController.refreshPresentation()
+            NotificationManager.shared.showOperationalNotification(
+                title: "Long Replay Already Saving",
+                body: "A long replay is already saving. Wait for it to finish before saving another."
+            )
         } catch {
             menuBarState.finishSaving(success: false)
             statusItemController.refreshPresentation()

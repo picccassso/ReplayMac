@@ -43,7 +43,12 @@ class AppDelegate: NSObject, NSApplicationDelegate, @unchecked Sendable {
     let hotkeyManager = HotkeyManager()
 
     var isCaptureRunning = false
-    var wasRecordingBeforeSleep = false
+    var isWorkspaceSessionActive = true
+    var areScreensAwake = true
+    var shouldResumeCaptureAfterInterruption = false
+    var isPreparingCaptureRecovery = false
+    var captureRecoveryAttempts = 0
+    var captureRecoveryTask: Task<Void, Never>?
     var monitoringTask: Task<Void, Never>?
     var clipLibraryWindowController: NSWindowController?
     var bufferDurationObservation: Defaults.Observation?
@@ -130,6 +135,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, @unchecked Sendable {
     func applicationWillTerminate(_ notification: Notification) {
         monitoringTask?.cancel()
         settingsReconcileTask?.cancel()
+        captureRecoveryTask?.cancel()
         stopCapturePipeline()
     }
 

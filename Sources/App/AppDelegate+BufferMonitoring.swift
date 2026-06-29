@@ -1,6 +1,7 @@
 import Darwin.Mach
 import Foundation
 
+import Capture
 import UI
 
 @MainActor
@@ -40,6 +41,7 @@ extension AppDelegate {
         monitoringTask?.cancel()
         monitoringTask = Task {
             var tick = 0
+            let monitoringStartedAt = Date()
             while !Task.isCancelled {
                 do {
                     try await Task.sleep(for: .seconds(1))
@@ -48,6 +50,21 @@ extension AppDelegate {
                 }
 
                 tick += 1
+
+                let captureStats = self.isDualMode
+                    ? self.captureManager.captureStats1()
+                    : self.captureManager.captureStats()
+                let now = Date()
+                if CaptureHealth.isVideoStalled(
+                    isCaptureRunning: self.isCaptureRunning,
+                    isSessionActive: self.isWorkspaceSessionActive && self.areScreensAwake,
+                    monitoringStartedAt: monitoringStartedAt,
+                    lastVideoSampleDate: captureStats.lastVideoSampleDate,
+                    now: now
+                ) {
+                    self.beginRecoverableCaptureInterruption(reason: "capture watchdog")
+                    break
+                }
 
                 self.systemAudioCapture.setVolume(AppSettings.systemAudioVolume)
                 self.micAudioCapture.setVolume(AppSettings.microphoneVolume)
@@ -93,10 +110,8 @@ extension AppDelegate {
                     micAudioMemory: micMemory
                 )
 
-                let stats = self.captureManager.captureStats()
-                let now = Date()
-                let audioAge = stats.lastAudioSampleDate.map { String(format: "%.1fs ago", now.timeIntervalSince($0)) } ?? "never"
-                print("SCKCallbacks | Audio: total=\(stats.audioSampleCount) invalid=\(stats.invalidAudioSampleCount) last=\(audioAge)")
+                let audioAge = captureStats.lastAudioSampleDate.map { String(format: "%.1fs ago", now.timeIntervalSince($0)) } ?? "never"
+                print("SCKCallbacks | Video: total=\(captureStats.videoSampleCount) | Audio: total=\(captureStats.audioSampleCount) invalid=\(captureStats.invalidAudioSampleCount) last=\(audioAge)")
             }
         }
     }

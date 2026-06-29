@@ -3,6 +3,8 @@ import CoreMedia
 import CoreVideo
 
 public struct CaptureStats: Sendable {
+    public let videoSampleCount: Int
+    public let lastVideoSampleDate: Date?
     public let audioSampleCount: Int
     public let invalidAudioSampleCount: Int
     public let lastAudioSampleDate: Date?
@@ -13,6 +15,7 @@ public final class CaptureDelegate: NSObject, SCStreamOutput, SCStreamDelegate, 
     private var videoHandler: ((CMSampleBuffer) -> Void)?
     private var audioHandler: ((CMSampleBuffer) -> Void)?
     private var frameCount = 0
+    private var lastVideoSampleDate: Date?
     private var audioSampleCount = 0
     private var invalidAudioSampleCount = 0
     private var lastAudioSampleDate: Date?
@@ -22,10 +25,22 @@ public final class CaptureDelegate: NSObject, SCStreamOutput, SCStreamDelegate, 
         lock.lock()
         defer { lock.unlock() }
         return CaptureStats(
+            videoSampleCount: frameCount,
+            lastVideoSampleDate: lastVideoSampleDate,
             audioSampleCount: audioSampleCount,
             invalidAudioSampleCount: invalidAudioSampleCount,
             lastAudioSampleDate: lastAudioSampleDate
         )
+    }
+
+    public func resetStats() {
+        lock.lock()
+        frameCount = 0
+        lastVideoSampleDate = nil
+        audioSampleCount = 0
+        invalidAudioSampleCount = 0
+        lastAudioSampleDate = nil
+        lock.unlock()
     }
 
     public func setVideoHandler(_ handler: @escaping (CMSampleBuffer) -> Void) {
@@ -50,19 +65,23 @@ public final class CaptureDelegate: NSObject, SCStreamOutput, SCStreamDelegate, 
         switch outputType {
         case .screen:
             guard sampleBuffer.isValid else { return }
-            guard let status = frameStatus(of: sampleBuffer), status == .complete else { return }
+            let now = Date()
+            lock.lock()
             frameCount += 1
+            lastVideoSampleDate = now
+            let currentFrameCount = frameCount
+            let handler = videoHandler
+            lock.unlock()
+
+            guard let status = frameStatus(of: sampleBuffer), status == .complete else { return }
             let pts = CMSampleBufferGetPresentationTimeStamp(sampleBuffer)
             if let pixelBuffer = CMSampleBufferGetImageBuffer(sampleBuffer) {
                 let width = CVPixelBufferGetWidth(pixelBuffer)
                 let height = CVPixelBufferGetHeight(pixelBuffer)
-                if frameCount % 300 == 0 {
-                    print("Frame #\(frameCount) | PTS: \(pts.seconds) | Size: \(width)x\(height)")
+                if currentFrameCount % 300 == 0 {
+                    print("Frame #\(currentFrameCount) | PTS: \(pts.seconds) | Size: \(width)x\(height)")
                 }
             }
-            lock.lock()
-            let handler = videoHandler
-            lock.unlock()
             handler?(sampleBuffer)
 
         case .audio:

@@ -33,30 +33,65 @@ extension AppDelegate {
             name: NSWorkspace.didWakeNotification,
             object: nil
         )
+        workspaceCenter.addObserver(
+            self,
+            selector: #selector(screensDidSleep(_:)),
+            name: NSWorkspace.screensDidSleepNotification,
+            object: nil
+        )
+        workspaceCenter.addObserver(
+            self,
+            selector: #selector(screensDidWake(_:)),
+            name: NSWorkspace.screensDidWakeNotification,
+            object: nil
+        )
+        workspaceCenter.addObserver(
+            self,
+            selector: #selector(sessionDidResignActive(_:)),
+            name: NSWorkspace.sessionDidResignActiveNotification,
+            object: nil
+        )
+        workspaceCenter.addObserver(
+            self,
+            selector: #selector(sessionDidBecomeActive(_:)),
+            name: NSWorkspace.sessionDidBecomeActiveNotification,
+            object: nil
+        )
     }
 
     @objc private func systemWillSleep(_ notification: Notification) {
-        // Remember whether we were actively recording so we only resume what
-        // the user actually had running. Captured before the OS tears the
-        // capture stream down as the displays sleep.
-        wasRecordingBeforeSleep = isCaptureRunning
+        areScreensAwake = false
+        rememberCaptureForAutomaticResume()
     }
 
     @objc private func systemDidWake(_ notification: Notification) {
-        guard AppSettings.resumeRecordingAfterWake,
-              wasRecordingBeforeSleep,
-              !isCaptureRunning else {
-            wasRecordingBeforeSleep = false
-            return
-        }
-        wasRecordingBeforeSleep = false
+        areScreensAwake = true
+        scheduleCaptureRecoveryIfNeeded(reason: "system wake")
+    }
 
-        // Give the displays a moment to come back before recreating the
-        // capture stream, otherwise ScreenCaptureKit may fail to start.
-        Task { @MainActor in
-            try? await Task.sleep(for: .seconds(1))
-            guard !self.isCaptureRunning else { return }
-            self.startCapturePipeline(userInitiated: false)
+    @objc private func screensDidSleep(_ notification: Notification) {
+        areScreensAwake = false
+        rememberCaptureForAutomaticResume()
+    }
+
+    @objc private func screensDidWake(_ notification: Notification) {
+        areScreensAwake = true
+        scheduleCaptureRecoveryIfNeeded(reason: "screen wake")
+    }
+
+    @objc private func sessionDidResignActive(_ notification: Notification) {
+        isWorkspaceSessionActive = false
+        rememberCaptureForAutomaticResume()
+    }
+
+    @objc private func sessionDidBecomeActive(_ notification: Notification) {
+        isWorkspaceSessionActive = true
+        scheduleCaptureRecoveryIfNeeded(reason: "session reactivated")
+    }
+
+    private func rememberCaptureForAutomaticResume() {
+        if isCaptureRunning {
+            shouldResumeCaptureAfterInterruption = true
         }
     }
 

@@ -13,15 +13,10 @@ public struct CaptureUserMessage: Sendable {
 public extension CaptureInterruption {
     var userMessage: CaptureUserMessage? {
         switch self {
-        case .restartedAfterGPUPressure:
-            return CaptureUserMessage(
-                title: "Recording Resumed",
-                body: "ReplayMac recovered from a temporary capture interruption."
-            )
-        case .gpuPressurePaused:
+        case .systemStopped:
             return CaptureUserMessage(
                 title: "Recording Paused",
-                body: "Recording stopped after repeated GPU errors. Choose Start Recording from the menu bar to try again."
+                body: "macOS interrupted screen capture. ReplayMac will resume when your session is active."
             )
         case .permissionRevoked:
             return CaptureUserMessage(
