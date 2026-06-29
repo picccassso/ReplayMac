@@ -2,6 +2,7 @@
 import CoreGraphics
 import CoreMedia
 import CoreVideo
+import os.log
 
 public struct CaptureConfig: Sendable {
     public let width: Int
@@ -55,6 +56,7 @@ public actor CaptureManager {
     private var userInitiatedStop = false
 
     private var interruptionHandler: (@Sendable (CaptureInterruption) -> Void)?
+    private let logger = Logger(subsystem: "com.replaymac", category: "CaptureRecovery")
 
     public init() {}
 
@@ -441,7 +443,11 @@ public actor CaptureManager {
         }
 
         let nsError = error as NSError
-        if CaptureInterruptionClassifier.isSystemStoppedStream(error) {
+        let isSystemStopped = CaptureInterruptionClassifier.isSystemStoppedStream(error)
+        logger.error(
+            "ScreenCaptureKit stream stopped domain=\(nsError.domain, privacy: .public) code=\(nsError.code, privacy: .public) systemStopped=\(isSystemStopped, privacy: .public) description=\(nsError.localizedDescription, privacy: .public)"
+        )
+        if isSystemStopped {
             interruptionHandler?(.systemStopped)
             await performStop(requestStreamStop: false)
             return
@@ -456,7 +462,11 @@ public actor CaptureManager {
             interruptionHandler?(.stopped(nsError.localizedDescription))
         }
 
-        await performStop()
+        // The delegate callback means the single stream is already stopped;
+        // asking ScreenCaptureKit to stop it again produces
+        // attemptToStopStreamState (-3808). Dual mode still needs to stop the
+        // other stream if only one display stream failed.
+        await performStop(requestStreamStop: isDualMode)
     }
 
     private func startDualStreams(_ firstStream: SCStream, _ secondStream: SCStream) async throws {

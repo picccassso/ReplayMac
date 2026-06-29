@@ -61,7 +61,7 @@ extension AppDelegate {
 
     @objc private func systemWillSleep(_ notification: Notification) {
         areScreensAwake = false
-        rememberCaptureForAutomaticResume()
+        prepareCaptureForAutomaticResume(reason: "system sleep")
     }
 
     @objc private func systemDidWake(_ notification: Notification) {
@@ -71,7 +71,7 @@ extension AppDelegate {
 
     @objc private func screensDidSleep(_ notification: Notification) {
         areScreensAwake = false
-        rememberCaptureForAutomaticResume()
+        prepareCaptureForAutomaticResume(reason: "screens sleeping")
     }
 
     @objc private func screensDidWake(_ notification: Notification) {
@@ -81,7 +81,7 @@ extension AppDelegate {
 
     @objc private func sessionDidResignActive(_ notification: Notification) {
         isWorkspaceSessionActive = false
-        rememberCaptureForAutomaticResume()
+        prepareCaptureForAutomaticResume(reason: "session resigned active")
     }
 
     @objc private func sessionDidBecomeActive(_ notification: Notification) {
@@ -89,10 +89,14 @@ extension AppDelegate {
         scheduleCaptureRecoveryIfNeeded(reason: "session reactivated")
     }
 
-    private func rememberCaptureForAutomaticResume() {
-        if isCaptureRunning {
-            shouldResumeCaptureAfterInterruption = true
+    private func prepareCaptureForAutomaticResume(reason: String) {
+        guard isCaptureRunning || shouldResumeCaptureAfterInterruption else {
+            return
         }
+        captureRecoveryLogger.info(
+            "Observed \(reason, privacy: .public); preserving recording for automatic resume"
+        )
+        beginRecoverableCaptureInterruption(reason: reason)
     }
 
     @objc private func windowVisibilityChanged(_ notification: Notification) {

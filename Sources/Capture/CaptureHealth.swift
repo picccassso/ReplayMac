@@ -19,6 +19,8 @@ public enum CaptureHealth {
 }
 
 public enum CaptureRecoveryPolicy {
+    public static let maximumAttempts = 5
+
     public static func shouldScheduleRecovery(
         automaticResumeEnabled: Bool,
         shouldResume: Bool,
@@ -33,5 +35,42 @@ public enum CaptureRecoveryPolicy {
             && areScreensAwake
             && !isPreparingRecovery
             && !hasScheduledRecovery
+    }
+
+    public static func shouldRecoverUnexpectedStreamStop(
+        automaticResumeEnabled: Bool,
+        captureWasRunning: Bool
+    ) -> Bool {
+        automaticResumeEnabled && captureWasRunning
+    }
+
+    public static func shouldPreserveTransitionStop(
+        automaticResumeEnabled: Bool,
+        shouldResume: Bool,
+        isSessionActive: Bool,
+        areScreensAwake: Bool,
+        isPreparingRecovery: Bool
+    ) -> Bool {
+        automaticResumeEnabled && shouldResume
+            && (isPreparingRecovery || !isSessionActive || !areScreensAwake)
+    }
+
+    public static func retryDelay(completedAttempts: Int) -> TimeInterval {
+        let attempt = max(0, completedAttempts)
+        return min(2 * pow(2, Double(attempt)), 10)
+    }
+
+    public static func isStableRestart(
+        isCaptureRunning: Bool,
+        lastVideoSampleDate: Date?,
+        now: Date,
+        maximumSampleAge: TimeInterval = 5
+    ) -> Bool {
+        guard isCaptureRunning,
+              maximumSampleAge > 0,
+              let lastVideoSampleDate else {
+            return false
+        }
+        return now.timeIntervalSince(lastVideoSampleDate) <= maximumSampleAge
     }
 }

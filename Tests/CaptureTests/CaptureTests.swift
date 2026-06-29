@@ -195,6 +195,89 @@ final class CaptureHealthTests: XCTestCase {
         ))
     }
 
+    func testUnexpectedStopDuringSleepPreservesRecoveryIntent() {
+        XCTAssertTrue(CaptureRecoveryPolicy.shouldPreserveTransitionStop(
+            automaticResumeEnabled: true,
+            shouldResume: true,
+            isSessionActive: true,
+            areScreensAwake: false,
+            isPreparingRecovery: false
+        ))
+        XCTAssertTrue(CaptureRecoveryPolicy.shouldPreserveTransitionStop(
+            automaticResumeEnabled: true,
+            shouldResume: true,
+            isSessionActive: true,
+            areScreensAwake: true,
+            isPreparingRecovery: true
+        ))
+    }
+
+    func testActiveSessionDoesNotLookLikeTransitionStop() {
+        XCTAssertFalse(CaptureRecoveryPolicy.shouldPreserveTransitionStop(
+            automaticResumeEnabled: true,
+            shouldResume: true,
+            isSessionActive: true,
+            areScreensAwake: true,
+            isPreparingRecovery: false
+        ))
+        XCTAssertFalse(CaptureRecoveryPolicy.shouldPreserveTransitionStop(
+            automaticResumeEnabled: false,
+            shouldResume: true,
+            isSessionActive: false,
+            areScreensAwake: false,
+            isPreparingRecovery: true
+        ))
+    }
+
+    func testUnexpectedGenericStopRecoversEvenBeforeSleepNotification() {
+        XCTAssertTrue(CaptureRecoveryPolicy.shouldRecoverUnexpectedStreamStop(
+            automaticResumeEnabled: true,
+            captureWasRunning: true
+        ))
+        XCTAssertFalse(CaptureRecoveryPolicy.shouldRecoverUnexpectedStreamStop(
+            automaticResumeEnabled: false,
+            captureWasRunning: true
+        ))
+        XCTAssertFalse(CaptureRecoveryPolicy.shouldRecoverUnexpectedStreamStop(
+            automaticResumeEnabled: true,
+            captureWasRunning: false
+        ))
+    }
+
+    func testRecoveryRetryBackoffAllowsDisplaysTimeToReturn() {
+        XCTAssertEqual(CaptureRecoveryPolicy.maximumAttempts, 5)
+        XCTAssertEqual(CaptureRecoveryPolicy.retryDelay(completedAttempts: 0), 2)
+        XCTAssertEqual(CaptureRecoveryPolicy.retryDelay(completedAttempts: 1), 4)
+        XCTAssertEqual(CaptureRecoveryPolicy.retryDelay(completedAttempts: 2), 8)
+        XCTAssertEqual(CaptureRecoveryPolicy.retryDelay(completedAttempts: 3), 10)
+        XCTAssertEqual(CaptureRecoveryPolicy.retryDelay(completedAttempts: 4), 10)
+    }
+
+    func testRecoveryRequiresRecentVideoBeforeReportingSuccess() {
+        let now = Date(timeIntervalSinceReferenceDate: 2_000)
+
+        XCTAssertTrue(CaptureRecoveryPolicy.isStableRestart(
+            isCaptureRunning: true,
+            lastVideoSampleDate: now.addingTimeInterval(-1),
+            now: now
+        ))
+        XCTAssertFalse(CaptureRecoveryPolicy.isStableRestart(
+            isCaptureRunning: true,
+            lastVideoSampleDate: nil,
+            now: now
+        ))
+        XCTAssertFalse(CaptureRecoveryPolicy.isStableRestart(
+            isCaptureRunning: false,
+            lastVideoSampleDate: now,
+            now: now
+        ))
+        XCTAssertFalse(CaptureRecoveryPolicy.isStableRestart(
+            isCaptureRunning: true,
+            lastVideoSampleDate: now.addingTimeInterval(-6),
+            now: now
+        ))
+    }
+
     func testRecognizesSystemStoppedStreamError() {
         let error = NSError(
             domain: SCStreamErrorDomain,
@@ -202,5 +285,28 @@ final class CaptureHealthTests: XCTestCase {
         )
 
         XCTAssertTrue(CaptureInterruptionClassifier.isSystemStoppedStream(error))
+    }
+
+    func testRecognizesWrappedSystemStoppedStreamError() {
+        let underlying = NSError(
+            domain: SCStreamErrorDomain,
+            code: SCStreamError.Code.systemStoppedStream.rawValue
+        )
+        let wrapper = NSError(
+            domain: NSCocoaErrorDomain,
+            code: NSFileReadUnknownError,
+            userInfo: [NSUnderlyingErrorKey: underlying]
+        )
+
+        XCTAssertTrue(CaptureInterruptionClassifier.isSystemStoppedStream(wrapper))
+    }
+
+    func testAttemptToStopAlreadyStoppedStreamIsNotSystemStopCause() {
+        let error = NSError(
+            domain: SCStreamErrorDomain,
+            code: SCStreamError.Code.attemptToStopStreamState.rawValue
+        )
+
+        XCTAssertFalse(CaptureInterruptionClassifier.isSystemStoppedStream(error))
     }
 }

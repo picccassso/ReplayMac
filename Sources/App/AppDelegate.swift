@@ -113,12 +113,12 @@ class AppDelegate: NSObject, NSApplicationDelegate, @unchecked Sendable {
             }
         }
 
+        setupWindowObservers()
+        setupPowerObservers()
+
         if AppSettings.autoStartRecordingOnLaunch {
             startCapturePipeline(userInitiated: false)
         }
-
-        setupWindowObservers()
-        setupPowerObservers()
 
         bufferDurationObservation = Defaults.observe(.bufferDurationSeconds) { [weak self] _ in
             self?.syncBufferDurationToSettings()

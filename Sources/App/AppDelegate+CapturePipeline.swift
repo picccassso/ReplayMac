@@ -9,7 +9,7 @@ import Feedback
 import Save
 import UI
 
-private let captureRecoveryLogger = Logger(subsystem: "com.replaymac", category: "CaptureRecovery")
+let captureRecoveryLogger = Logger(subsystem: "com.replaymac", category: "CaptureRecovery")
 
 @MainActor
 extension AppDelegate {
@@ -51,7 +51,8 @@ extension AppDelegate {
 
     func startCapturePipelineAsync(
         userInitiated: Bool = true,
-        showFailureNotification: Bool = true
+        showFailureNotification: Bool = true,
+        isRecoveryAttempt: Bool = false
     ) async {
         guard !isCaptureRunning else {
             return
@@ -232,8 +233,10 @@ extension AppDelegate {
                 }
 
                 isCaptureRunning = true
-                shouldResumeCaptureAfterInterruption = false
-                captureRecoveryAttempts = 0
+                if !isRecoveryAttempt {
+                    shouldResumeCaptureAfterInterruption = false
+                    captureRecoveryAttempts = 0
+                }
                 menuBarState.setRecording(true)
                 menuBarState.setExtendedBufferRecording(
                     AppSettings.longBufferEnabled && !isSeparateDualSaveMode
@@ -246,13 +249,14 @@ extension AppDelegate {
                 UserDefaults.standard.set(true, forKey: "hasPromptedForScreenCapture")
                 await startCapturePipelineAsync(
                     userInitiated: true,
-                    showFailureNotification: showFailureNotification
+                    showFailureNotification: showFailureNotification,
+                    isRecoveryAttempt: isRecoveryAttempt
                 )
                 return
             }
 
+            await cleanupAfterFailedCaptureStart()
             isCaptureRunning = false
-            await perAppAudioCapture.stop()
             menuBarState.setRecording(false)
             statusItemController.refreshPresentation()
             let message = CaptureStartErrorMapper.userMessage(for: error)
@@ -261,6 +265,21 @@ extension AppDelegate {
             }
             print("Failed to start capture: \(error)")
         }
+    }
+
+    func cleanupAfterFailedCaptureStart() async {
+        await captureManager.stop()
+        await perAppAudioCapture.stop()
+        longBufferAppendPump.reset()
+        await longBufferRecorder.stop(deleteSegments: false)
+        micAudioCapture.stop()
+        videoEncoder.stop()
+        dualDisplay1VideoEncoder.stop()
+        dualDisplay2VideoEncoder.stop()
+        systemAudioEncoder.stop()
+        micAudioEncoder.stop()
+        frameCompositor.reset()
+        AudioLevelMonitor.shared.reset()
     }
 
     func startSingleDisplayCapture(
@@ -387,6 +406,51 @@ extension AppDelegate {
     }
 
     func handleCaptureInterruption(_ interruption: CaptureInterruption) {
+        let shouldRecoverUnexpectedStop = CaptureRecoveryPolicy.shouldRecoverUnexpectedStreamStop(
+            automaticResumeEnabled: AppSettings.resumeRecordingAfterWake,
+            captureWasRunning: isCaptureRunning
+        )
+        if shouldRecoverUnexpectedStop {
+            switch interruption {
+            case .permissionRevoked:
+                break
+            case .systemStopped:
+                beginRecoverableCaptureInterruption(reason: "ScreenCaptureKit system stop")
+                return
+            case .displayDisconnected:
+                beginRecoverableCaptureInterruption(reason: "display became unavailable")
+                return
+            case .stopped(let reason):
+                beginRecoverableCaptureInterruption(reason: "unexpected stream stop: \(reason)")
+                return
+            }
+        }
+
+        let shouldRecoverTransitionStop = CaptureRecoveryPolicy.shouldPreserveTransitionStop(
+            automaticResumeEnabled: AppSettings.resumeRecordingAfterWake,
+            shouldResume: shouldResumeCaptureAfterInterruption,
+            isSessionActive: isWorkspaceSessionActive,
+            areScreensAwake: areScreensAwake,
+            isPreparingRecovery: isPreparingCaptureRecovery
+        )
+        if shouldRecoverTransitionStop {
+            switch interruption {
+            case .permissionRevoked:
+                break
+            case .systemStopped:
+                beginRecoverableCaptureInterruption(reason: "ScreenCaptureKit system stop")
+                return
+            case .displayDisconnected:
+                beginRecoverableCaptureInterruption(reason: "display changed during sleep or session transition")
+                return
+            case .stopped(let reason):
+                beginRecoverableCaptureInterruption(
+                    reason: "stream stopped during sleep or session transition: \(reason)"
+                )
+                return
+            }
+        }
+
         switch interruption {
         case .systemStopped:
             beginRecoverableCaptureInterruption(reason: "ScreenCaptureKit system stop")
@@ -410,6 +474,9 @@ extension AppDelegate {
             stopCapturePipeline()
             return
         }
+        guard isCaptureRunning || shouldResumeCaptureAfterInterruption else {
+            return
+        }
         guard !isPreparingCaptureRecovery else { return }
 
         shouldResumeCaptureAfterInterruption = true
@@ -425,14 +492,18 @@ extension AppDelegate {
     }
 
     func scheduleCaptureRecoveryIfNeeded(reason: String) {
-        guard CaptureRecoveryPolicy.shouldScheduleRecovery(
+        let shouldSchedule = CaptureRecoveryPolicy.shouldScheduleRecovery(
             automaticResumeEnabled: AppSettings.resumeRecordingAfterWake,
             shouldResume: shouldResumeCaptureAfterInterruption,
             isSessionActive: isWorkspaceSessionActive,
             areScreensAwake: areScreensAwake,
             isPreparingRecovery: isPreparingCaptureRecovery,
             hasScheduledRecovery: captureRecoveryTask != nil
-        ) else {
+        )
+        guard shouldSchedule else {
+            captureRecoveryLogger.debug(
+                "Recovery not scheduled reason=\(reason, privacy: .public) enabled=\(AppSettings.resumeRecordingAfterWake, privacy: .public) shouldResume=\(self.shouldResumeCaptureAfterInterruption, privacy: .public) sessionActive=\(self.isWorkspaceSessionActive, privacy: .public) screensAwake=\(self.areScreensAwake, privacy: .public) preparing=\(self.isPreparingCaptureRecovery, privacy: .public) alreadyScheduled=\(self.captureRecoveryTask != nil, privacy: .public)"
+            )
             return
         }
 
@@ -446,9 +517,17 @@ extension AppDelegate {
                 }
             }
 
-            // Let loginwindow finish restoring the display session before
-            // asking ScreenCaptureKit for fresh display objects.
-            try? await Task.sleep(for: .seconds(2))
+            // External displays can take substantially longer than the user
+            // session to return. Back off across attempts so ScreenCaptureKit
+            // receives fresh display objects rather than exhausting retries in
+            // the first few seconds after loginwindow disappears.
+            let delay = CaptureRecoveryPolicy.retryDelay(
+                completedAttempts: self.captureRecoveryAttempts
+            )
+            captureRecoveryLogger.info(
+                "Scheduling capture recovery attempt \(self.captureRecoveryAttempts + 1, privacy: .public) after \(delay, privacy: .public)s; reason=\(reason, privacy: .public)"
+            )
+            try? await Task.sleep(for: .seconds(delay))
             guard !Task.isCancelled,
                   AppSettings.resumeRecordingAfterWake,
                   self.shouldResumeCaptureAfterInterruption,
@@ -462,10 +541,31 @@ extension AppDelegate {
             }
             await self.startCapturePipelineAsync(
                 userInitiated: false,
-                showFailureNotification: false
+                showFailureNotification: false,
+                isRecoveryAttempt: true
             )
 
             if self.isCaptureRunning {
+                captureRecoveryLogger.info(
+                    "Validating capture recovery attempt \(self.captureRecoveryAttempts + 1, privacy: .public) for video callbacks"
+                )
+                try? await Task.sleep(for: .seconds(5))
+            }
+            guard !Task.isCancelled else {
+                return
+            }
+
+            let stats = self.isDualMode
+                ? self.captureManager.captureStats1()
+                : self.captureManager.captureStats()
+            let now = Date()
+            let isStable = CaptureRecoveryPolicy.isStableRestart(
+                isCaptureRunning: self.isCaptureRunning,
+                lastVideoSampleDate: stats.lastVideoSampleDate,
+                now: now
+            )
+
+            if isStable {
                 self.shouldResumeCaptureAfterInterruption = false
                 self.captureRecoveryAttempts = 0
                 captureRecoveryLogger.info("Capture recovery succeeded after \(reason, privacy: .public)")
@@ -475,8 +575,12 @@ extension AppDelegate {
                 )
             } else {
                 self.captureRecoveryAttempts += 1
-                captureRecoveryLogger.error("Capture recovery attempt \(self.captureRecoveryAttempts) failed after \(reason, privacy: .public)")
-                shouldRetry = self.captureRecoveryAttempts < 3
+                let lastVideoAge = stats.lastVideoSampleDate
+                    .map { now.timeIntervalSince($0) } ?? -1
+                captureRecoveryLogger.error(
+                    "Capture recovery attempt \(self.captureRecoveryAttempts, privacy: .public) was not stable after \(reason, privacy: .public); running=\(self.isCaptureRunning, privacy: .public) lastVideoAge=\(lastVideoAge, privacy: .public)"
+                )
+                shouldRetry = self.captureRecoveryAttempts < CaptureRecoveryPolicy.maximumAttempts
                 if !shouldRetry {
                     NotificationManager.shared.showOperationalNotification(
                         title: "Recording Could Not Resume",
