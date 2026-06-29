@@ -13,7 +13,9 @@ public final class StatusItemController: NSObject, NSMenuDelegate, @unchecked Se
     private var libraryItem: NSMenuItem?
     private var revealLastClipItem: NSMenuItem?
     private var openLastClipItem: NSMenuItem?
+    private var recordingDurationItem: NSMenuItem?
     private var bufferUsageItem: NSMenuItem?
+    private var longBufferUsageItem: NSMenuItem?
     private var hotkeyHintItem: NSMenuItem?
     private var updateItem: NSMenuItem?
 
@@ -112,9 +114,17 @@ public final class StatusItemController: NSObject, NSMenuDelegate, @unchecked Se
         revealLastClipItem.target = self
         menu.addItem(revealLastClipItem)
 
+        let recordingDurationItem = NSMenuItem(title: "", action: nil, keyEquivalent: "")
+        recordingDurationItem.isEnabled = false
+        menu.addItem(recordingDurationItem)
+
         let bufferUsageItem = NSMenuItem(title: "", action: nil, keyEquivalent: "")
         bufferUsageItem.isEnabled = false
         menu.addItem(bufferUsageItem)
+
+        let longBufferUsageItem = NSMenuItem(title: "", action: nil, keyEquivalent: "")
+        longBufferUsageItem.isEnabled = false
+        menu.addItem(longBufferUsageItem)
 
         let settingsItem = NSMenuItem(title: "Settings…", action: #selector(openSettings), keyEquivalent: "")
         settingsItem.target = self
@@ -137,7 +147,9 @@ public final class StatusItemController: NSObject, NSMenuDelegate, @unchecked Se
         self.libraryItem = libraryItem
         self.openLastClipItem = openLastClipItem
         self.revealLastClipItem = revealLastClipItem
+        self.recordingDurationItem = recordingDurationItem
         self.bufferUsageItem = bufferUsageItem
+        self.longBufferUsageItem = longBufferUsageItem
         self.hotkeyHintItem = hotkeyHintItem
         self.updateItem = updateItem
         refreshMenuItems()
@@ -170,12 +182,29 @@ public final class StatusItemController: NSObject, NSMenuDelegate, @unchecked Se
         openLastClipItem?.isHidden = !hasLastClip
         revealLastClipItem?.isHidden = !hasLastClip
 
-        let capLabel = MenuBarState.formattedDuration(TimeInterval(replaySeconds))
-        var bufferLine = "Buffer: \(state.formattedBufferDuration) / \(capLabel) · \(state.formattedBufferMemory)"
+        recordingDurationItem?.title = "Recording: \(state.formattedRecordingDuration)"
+        recordingDurationItem?.isHidden = !state.isRecording
+
+        let quickReplayCap = TimeInterval(replaySeconds)
+        let capLabel = MenuBarState.formattedDuration(quickReplayCap)
+        var bufferLine = "Quick replay: \(state.formattedBufferDuration) / \(capLabel) · \(state.formattedBufferMemory)"
         if state.isRecording && state.bufferedSeconds < TimeInterval(replaySeconds) {
             bufferLine += " (filling…)"
+        } else if state.isRecording {
+            bufferLine += " (ready)"
         }
         bufferUsageItem?.title = bufferLine
+
+        let longReplayCap = TimeInterval(longBufferSeconds)
+        let longReplayAvailable = min(state.extendedBufferElapsedSeconds, longReplayCap)
+        var longBufferLine = "Extended replay: \(MenuBarState.formattedDuration(longReplayAvailable)) / \(MenuBarState.formattedDuration(longReplayCap))"
+        if state.isRecording && longReplayAvailable < longReplayCap {
+            longBufferLine += " (filling…)"
+        } else if state.isRecording {
+            longBufferLine += " (ready)"
+        }
+        longBufferUsageItem?.title = longBufferLine
+        longBufferUsageItem?.isHidden = !AppSettings.longBufferEnabled
 
         hotkeyHintItem?.isHidden = hasSaveHotkeyConfigured
 
@@ -190,9 +219,15 @@ public final class StatusItemController: NSObject, NSMenuDelegate, @unchecked Se
     private func updateTooltip() {
         guard let button = statusItem?.button else { return }
 
-        let capLabel = MenuBarState.formattedDuration(TimeInterval(AppSettings.bufferDurationSeconds))
         if state.isRecording {
-            button.toolTip = "ReplayMac — Recording \(state.formattedBufferDuration)/\(capLabel)"
+            if AppSettings.longBufferEnabled {
+                let longReplayCap = TimeInterval(AppSettings.longBufferDurationSeconds)
+                let available = min(state.extendedBufferElapsedSeconds, longReplayCap)
+                button.toolTip = "ReplayMac — Recording \(state.formattedRecordingDuration) · Extended replay \(MenuBarState.formattedDuration(available))/\(MenuBarState.formattedDuration(longReplayCap))"
+            } else {
+                let cap = TimeInterval(AppSettings.bufferDurationSeconds)
+                button.toolTip = "ReplayMac — Recording \(state.formattedRecordingDuration) · Quick replay \(state.formattedBufferDuration)/\(MenuBarState.formattedDuration(cap))"
+            }
         } else {
             button.toolTip = "ReplayMac — Not recording"
         }
@@ -308,7 +343,7 @@ private struct StatusBadgeView: View {
                             .pulsingDot()
                     }
                     .frame(width: 12, height: 12)
-                    Text(state.formattedBufferDuration)
+                    Text(state.formattedRecordingDuration)
                         .foregroundStyle(AppTheme.textPrimary)
                 } else {
                     Image(systemName: "record.circle")

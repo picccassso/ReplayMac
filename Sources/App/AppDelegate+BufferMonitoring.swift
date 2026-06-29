@@ -61,6 +61,7 @@ extension AppDelegate {
                     dualDisplay2: dualDisplay2Duration,
                     isSeparateDualSave: self.isSeparateDualSaveMode
                 )
+                self.menuBarState.updateRecordingElapsed()
                 self.menuBarState.setBufferedSeconds(bufferedSeconds)
                 self.statusItemController.refreshPresentation()
 

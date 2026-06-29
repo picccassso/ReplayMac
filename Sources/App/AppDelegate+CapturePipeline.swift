@@ -221,6 +221,9 @@ extension AppDelegate {
 
                 isCaptureRunning = true
                 menuBarState.setRecording(true)
+                menuBarState.setExtendedBufferRecording(
+                    AppSettings.longBufferEnabled && !isSeparateDualSaveMode
+                )
                 statusItemController.refreshPresentation()
                 startMonitoring()
         } catch {
@@ -326,6 +329,7 @@ extension AppDelegate {
 
         isCaptureRunning = false
         menuBarState.setRecording(false)
+        menuBarState.setExtendedBufferRecording(false)
         menuBarState.setBufferedSeconds(0)
         statusItemController.refreshPresentation()
     }
@@ -339,6 +343,7 @@ extension AppDelegate {
             maxDurationSeconds: TimeInterval(AppSettings.longBufferDurationSeconds),
             outputDirectory: AppSettings.outputDirectoryURL
         )
+        menuBarState.setExtendedBufferRecording(enabled && isCaptureRunning)
 
         if AppSettings.longBufferEnabled && separateDualSave {
             NotificationManager.shared.showOperationalNotification(
