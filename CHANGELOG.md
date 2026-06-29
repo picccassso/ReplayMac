@@ -1,5 +1,13 @@
 # Changelog
 
+## 1.6.6
+
+- Recover long-buffer recording after writer failures: reset failed or cancelled writers immediately, remove incomplete segment files, and let the next sample start a fresh segment
+- Clarify recording and replay buffer status: keep the menu-bar timer advancing for the full session, and show recording time, quick-replay availability, and extended-replay availability as separate states
+- Harden long-buffer saves and capture recovery: serialize extended replay exports, pin segments with deferred deletion, export from isolated copies, reset failed writers, and recover recording after screen sleep or session transitions
+- Stabilize capture recovery after wake: preserve resume intent across sleep and session transitions, validate recovery via video callbacks rather than stream-start return values, and retry display-unavailable failures with backoff
+- Disable replay saves during export: gray out both quick replay and extended replay menu actions whenever any clip is being written or exported
+
 ## 1.6.5
 
 - Add Retina capture resolution for HiDPI displays while keeping the macOS UI at its current scaled size
