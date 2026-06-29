@@ -10,6 +10,25 @@ public enum SavePreflightFailure: Equatable {
 public enum SavePreflight {
     public static let minimumBufferedSeconds: TimeInterval = 1
 
+    public static func canSaveQuickReplay(
+        isRecording: Bool,
+        bufferedSeconds: TimeInterval,
+        saveInProgress: Bool
+    ) -> Bool {
+        failure(
+            isRecording: isRecording,
+            bufferedSeconds: bufferedSeconds,
+            saveInProgress: saveInProgress
+        ) == nil
+    }
+
+    public static func canSaveLongReplay(
+        isRecording: Bool,
+        saveInProgress: Bool
+    ) -> Bool {
+        isRecording && !saveInProgress
+    }
+
     public static func bufferedSeconds(
         primaryVideo: TimeInterval,
         dualDisplay1: TimeInterval,

@@ -163,12 +163,19 @@ public final class StatusItemController: NSObject, NSMenuDelegate, @unchecked Se
     private func refreshMenuItems() {
         let replaySeconds = AppSettings.bufferDurationSeconds
         saveItem?.title = "Save Last \(replaySeconds) Seconds"
-        saveItem?.isEnabled = state.isRecording && state.bufferedSeconds >= SavePreflight.minimumBufferedSeconds
+        saveItem?.isEnabled = SavePreflight.canSaveQuickReplay(
+            isRecording: state.isRecording,
+            bufferedSeconds: state.bufferedSeconds,
+            saveInProgress: state.isSaveInProgress
+        )
 
         let longBufferSeconds = AppSettings.longBufferDurationSeconds
         saveLongBufferItem?.title = "Save Last \(MenuBarState.formattedDuration(TimeInterval(longBufferSeconds)))"
         saveLongBufferItem?.isHidden = !AppSettings.longBufferEnabled
-        saveLongBufferItem?.isEnabled = state.isRecording && !state.isSaveInProgress
+        saveLongBufferItem?.isEnabled = SavePreflight.canSaveLongReplay(
+            isRecording: state.isRecording,
+            saveInProgress: state.isSaveInProgress
+        )
 
         toggleRecordingItem?.title = state.isRecording ? "Stop Recording" : "Start Recording"
 

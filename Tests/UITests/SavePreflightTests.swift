@@ -32,6 +32,28 @@ final class SavePreflightTests: XCTestCase {
         XCTAssertEqual(failure, .saveInProgress)
     }
 
+    func testBothReplaySaveActionsAreDisabledWhileSaving() {
+        XCTAssertFalse(SavePreflight.canSaveQuickReplay(
+            isRecording: true,
+            bufferedSeconds: 30,
+            saveInProgress: true
+        ))
+        XCTAssertFalse(SavePreflight.canSaveLongReplay(
+            isRecording: true,
+            saveInProgress: true
+        ))
+
+        XCTAssertTrue(SavePreflight.canSaveQuickReplay(
+            isRecording: true,
+            bufferedSeconds: 30,
+            saveInProgress: false
+        ))
+        XCTAssertTrue(SavePreflight.canSaveLongReplay(
+            isRecording: true,
+            saveInProgress: false
+        ))
+    }
+
     func testAllowsSaveWhenReady() {
         let failure = SavePreflight.failure(
             isRecording: true,
