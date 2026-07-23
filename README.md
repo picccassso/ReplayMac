@@ -4,6 +4,10 @@
 
 <img src="ReplayMac_icon.png" alt="ReplayMac icon" width="220" />
 
+[![Download on the Mac App Store](https://tools.applemediaservices.com/api/badges/download-on-the-mac-app-store/black/en-us?size=250x83)](https://apps.apple.com/us/app/replaycap/id6789296427?mt=12)
+
+> Note: ReplayMac on the Mac App Store is called **ReplayCap** — same app, different name (see above). It's a one-time purchase that supports development.
+
 ReplayMac is a macOS menu bar instant-replay clipper.
 
 It continuously buffers recent screen/audio capture and saves the last N seconds to an MP4 when triggered. Recording and save state stay visible in the menu bar so you always know what the app is doing.
