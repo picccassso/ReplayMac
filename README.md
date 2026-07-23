@@ -1,7 +1,5 @@
 # ReplayMac
 
-> **Looking for ReplayCap?** That's this app's Mac App Store edition. Apple's App Review doesn't allow "Mac" in App Store app names (Guideline 5.2.5), so the store version ships under a different name — same app, same features.
-
 <img src="ReplayMac_icon.png" alt="ReplayMac icon" width="220" />
 
 [![Download on the Mac App Store](https://tools.applemediaservices.com/api/badges/download-on-the-mac-app-store/black/en-us?size=250x83)](https://apps.apple.com/us/app/replaycap/id6789296427?mt=12)
