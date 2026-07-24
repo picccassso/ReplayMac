@@ -41,6 +41,11 @@ extension AppDelegate {
     }
 
     func saveConfiguredClip(lastSeconds: TimeInterval) async {
+        guard let outputDirectory = selectedOutputDirectoryOrNotify() else {
+            menuBarState.showSaveFailedBriefly()
+            return
+        }
+
         if let failure = SavePreflight.failure(
             isRecording: isCaptureRunning,
             bufferedSeconds: currentBufferedVideoSeconds(),
@@ -70,7 +75,6 @@ extension AppDelegate {
         statusItemController.refreshPresentation()
 
         do {
-            let outputDirectory = AppSettings.outputDirectoryURL
             print("Saving clip to output directory: \(outputDirectory.path(percentEncoded: false))")
 
             let baseName = resolvedClipBaseName()
@@ -113,6 +117,11 @@ extension AppDelegate {
     }
 
     func saveConfiguredLongBufferClip(lastSeconds: TimeInterval) async {
+        guard let outputDirectory = selectedOutputDirectoryOrNotify() else {
+            menuBarState.showSaveFailedBriefly()
+            return
+        }
+
         guard AppSettings.longBufferEnabled else {
             NotificationManager.shared.showOperationalNotification(
                 title: "Long Buffer Disabled",
@@ -145,7 +154,7 @@ extension AppDelegate {
         do {
             let savedURL = try await longBufferRecorder.saveClip(
                 lastSeconds: lastSeconds,
-                outputDirectory: AppSettings.outputDirectoryURL,
+                outputDirectory: outputDirectory,
                 mergeAudioTracks: AppSettings.mergeAudioTracks,
                 baseName: resolvedClipBaseName()
             )
@@ -220,13 +229,26 @@ extension AppDelegate {
     private func availableDiskCapacityBytes() -> Int64? {
         // Probe the output directory if it exists, otherwise the home directory
         // (same volume), since the output folder is created lazily on first save.
-        let outputURL = AppSettings.outputDirectoryURL
+        guard let outputURL = AppSettings.outputDirectoryURL else {
+            return nil
+        }
         let probeURL = FileManager.default.fileExists(atPath: outputURL.path)
             ? outputURL
             : FileManager.default.homeDirectoryForCurrentUser
 
         let values = try? probeURL.resourceValues(forKeys: [.volumeAvailableCapacityForImportantUsageKey])
         return values?.volumeAvailableCapacityForImportantUsage
+    }
+
+    func selectedOutputDirectoryOrNotify() -> URL? {
+        guard let outputDirectory = AppSettings.outputDirectoryURL else {
+            NotificationManager.shared.showOperationalNotification(
+                title: "Choose an Output Folder",
+                body: "Open Settings and choose the folder where clips should be saved."
+            )
+            return nil
+        }
+        return outputDirectory
     }
 
 }

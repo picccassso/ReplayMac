@@ -55,6 +55,15 @@ extension AppDelegate {
         showFailureNotification: Bool = true,
         isRecoveryAttempt: Bool = false
     ) async {
+        // Capture must never begin while first-run setup is still active. Keep
+        // this guard at the authoritative async entry point so menu actions,
+        // hotkeys, game detection, session recording, recovery, and launch
+        // auto-start cannot accidentally bypass onboarding.
+        guard Defaults[.hasCompletedOnboarding] else {
+            showOnboardingWindow()
+            return
+        }
+
         guard !isCaptureRunning else {
             return
         }
@@ -395,13 +404,19 @@ extension AppDelegate {
     }
 
     func configureLongBufferForCurrentSettings() async {
+        guard let outputDirectory = AppSettings.outputDirectoryURL else {
+            await longBufferRecorder.stop(deleteSegments: true)
+            menuBarState.setExtendedBufferRecording(false)
+            return
+        }
+
         let separateDualSave = AppSettings.captureMode == CaptureMode.dualSideBySide.rawValue
             && AppSettings.dualCaptureSaveMode == DualCaptureSaveMode.separateFiles.rawValue
         let enabled = AppSettings.longBufferEnabled && !separateDualSave
         await longBufferRecorder.configure(
             enabled: enabled,
             maxDurationSeconds: TimeInterval(AppSettings.longBufferDurationSeconds),
-            outputDirectory: AppSettings.outputDirectoryURL
+            outputDirectory: outputDirectory
         )
         menuBarState.setExtendedBufferRecording(enabled && isCaptureRunning)
 

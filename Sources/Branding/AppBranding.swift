@@ -16,4 +16,9 @@ public enum AppBranding {
     /// Defaults to the canonical name so tests and previews, which never run
     /// the app entry point, see stable branding.
     nonisolated(unsafe) public static var name = "ReplayCap"
+
+    /// Whether a fresh install must begin without any proposed output folder.
+    /// The App Store build sets this to `true`; the direct build sets it to
+    /// `false` so it can retain its traditional Movies/ReplayMac default.
+    nonisolated(unsafe) public static var requiresExplicitOutputDirectorySelection = true
 }

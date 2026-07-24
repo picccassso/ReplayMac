@@ -1,4 +1,5 @@
 import Foundation
+import Branding
 import Defaults
 import Save
 
@@ -117,13 +118,25 @@ public enum LongBufferDuration: Int, CaseIterable, Identifiable {
     }
 }
 
-private enum AppDefaultValues {
-    static var outputDirectoryPath: String {
-        ClipMetadata.defaultOutputDirectory.path(percentEncoded: false)
-    }
-}
-
 public enum AppSettings {
+    /// App Store installs have no proposed output folder. Direct builds retain
+    /// their traditional user-visible Movies folder default.
+    public static var defaultOutputDirectoryPath: String {
+        defaultOutputDirectoryPath(
+            requiresExplicitSelection: AppBranding.requiresExplicitOutputDirectorySelection,
+            directBuildDefault: ClipMetadata.defaultOutputDirectory
+        )
+    }
+
+    public static func defaultOutputDirectoryPath(
+        requiresExplicitSelection: Bool,
+        directBuildDefault: URL
+    ) -> String {
+        requiresExplicitSelection
+            ? ""
+            : directBuildDefault.standardizedFileURL.path(percentEncoded: false)
+    }
+
     /// Updates only the old built-in file-name template. Custom templates and
     /// previously selected output folders remain untouched across the rename.
     public static func migrateLegacyBrandDefaults() {
@@ -149,10 +162,13 @@ public enum AppSettings {
         TimeInterval(bufferDurationSeconds) + ringBufferHeadroomSeconds
     }
 
-    public static var outputDirectoryURL: URL {
-        let path = Defaults[.outputDirectoryPath]
-        guard !path.isEmpty else {
-            return URL(filePath: AppDefaultValues.outputDirectoryPath, directoryHint: .isDirectory)
+    public static var outputDirectoryURL: URL? {
+        outputDirectoryURL(for: Defaults[.outputDirectoryPath])
+    }
+
+    public static func outputDirectoryURL(for path: String) -> URL? {
+        guard !path.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+            return nil
         }
         return URL(filePath: (path as NSString).expandingTildeInPath, directoryHint: .isDirectory)
             .standardizedFileURL
@@ -299,7 +315,7 @@ public enum AppSettings {
 
 public extension Defaults.Keys {
     static let bufferDurationSeconds = Key<Int>("bufferDurationSeconds", default: 30)
-    static let outputDirectoryPath = Key<String>("outputDirectoryPath", default: AppDefaultValues.outputDirectoryPath)
+    static let outputDirectoryPath = Key<String>("outputDirectoryPath", default: AppSettings.defaultOutputDirectoryPath)
     static let launchAtLogin = Key<Bool>("launchAtLogin", default: false)
     static let autoStartRecordingOnLaunch = Key<Bool>("autoStartRecordingOnLaunch", default: true)
     static let resumeRecordingAfterWake = Key<Bool>("resumeRecordingAfterWake", default: true)

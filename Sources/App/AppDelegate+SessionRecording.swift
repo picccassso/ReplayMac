@@ -22,6 +22,10 @@ extension AppDelegate {
             return
         }
 
+        guard let outputDirectory = selectedOutputDirectoryOrNotify() else {
+            return
+        }
+
         if isSeparateDualSaveMode {
             NotificationManager.shared.showOperationalNotification(
                 title: "Session Recording Unavailable",
@@ -47,7 +51,7 @@ extension AppDelegate {
         await sessionRecorder.configure(
             enabled: true,
             maxDurationSeconds: .infinity,
-            outputDirectory: AppSettings.outputDirectoryURL,
+            outputDirectory: outputDirectory,
             storage: .session
         )
 
@@ -104,6 +108,15 @@ extension AppDelegate {
         statusItemController.refreshPresentation()
 
         do {
+            guard let outputDirectory = AppSettings.outputDirectoryURL else {
+                await discardSessionRecording()
+                menuBarState.finishSaving(success: false)
+                isSessionFinalizeInProgress = false
+                statusItemController.refreshPresentation()
+                _ = selectedOutputDirectoryOrNotify()
+                return nil
+            }
+
             let recordedSeconds = await sessionRecorder.recordedDurationSeconds()
             guard recordedSeconds >= SavePreflight.minimumBufferedSeconds else {
                 await discardSessionRecording()
@@ -120,14 +133,14 @@ extension AppDelegate {
             }
 
             let savedURL = try await sessionRecorder.saveEntireRecording(
-                outputDirectory: AppSettings.outputDirectoryURL,
+                outputDirectory: outputDirectory,
                 mergeAudioTracks: AppSettings.mergeAudioTracks,
                 baseName: resolvedClipBaseName()
             )
             await sessionRecorder.configure(
                 enabled: false,
                 maxDurationSeconds: .infinity,
-                outputDirectory: AppSettings.outputDirectoryURL,
+                outputDirectory: outputDirectory,
                 storage: .session
             )
 
@@ -171,11 +184,15 @@ extension AppDelegate {
     func discardSessionRecording() async {
         isSessionRecording = false
         menuBarState.setSessionRecording(false)
-        await sessionRecorder.configure(
-            enabled: false,
-            maxDurationSeconds: .infinity,
-            outputDirectory: AppSettings.outputDirectoryURL,
-            storage: .session
-        )
+        if let outputDirectory = AppSettings.outputDirectoryURL {
+            await sessionRecorder.configure(
+                enabled: false,
+                maxDurationSeconds: .infinity,
+                outputDirectory: outputDirectory,
+                storage: .session
+            )
+        } else {
+            await sessionRecorder.stop(deleteSegments: true)
+        }
     }
 }

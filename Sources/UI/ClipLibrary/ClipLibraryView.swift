@@ -702,8 +702,16 @@ private final class ClipLibraryViewModel: ObservableObject {
     private var clipCache: [String: CachedClip] = [:]
 
     func reload() async {
-        let base = ClipMetadata.scanClips(in: AppSettings.outputDirectoryURL)
-        metadataByPath = ClipLibraryMetadataStore.load(in: AppSettings.outputDirectoryURL)
+        guard let outputDirectory = AppSettings.outputDirectoryURL else {
+            rows = []
+            metadataByPath = [:]
+            clipCache = [:]
+            updateStorageSummary()
+            return
+        }
+
+        let base = ClipMetadata.scanClips(in: outputDirectory)
+        metadataByPath = ClipLibraryMetadataStore.load(in: outputDirectory)
 
         let cache = clipCache
         let misses = base.filter { cache[Self.cacheKey(for: $0)] == nil }
@@ -919,7 +927,10 @@ private final class ClipLibraryViewModel: ObservableObject {
     }
 
     private func persistMetadata() {
-        ClipLibraryMetadataStore.save(metadataByPath, in: AppSettings.outputDirectoryURL)
+        guard let outputDirectory = AppSettings.outputDirectoryURL else {
+            return
+        }
+        ClipLibraryMetadataStore.save(metadataByPath, in: outputDirectory)
     }
 
     private func sanitizedFileBaseName(_ requestedName: String) -> String {

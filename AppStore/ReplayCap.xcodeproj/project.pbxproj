@@ -7,10 +7,12 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
+		42D5F3CD02C6BACCDD74E93B /* AppDelegate+SessionRecording.swift in Sources */ = {isa = PBXBuildFile; fileRef = 811A90C8E108D370D41F2E14 /* AppDelegate+SessionRecording.swift */; };
 		598657E41BBF2656BD8580DF /* ReplayCapApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = E502C57EAC829FFA49D1AEAA /* ReplayCapApp.swift */; };
 		59FC72A89D86D16E2601CA39 /* ReplayCap.icns in Resources */ = {isa = PBXBuildFile; fileRef = 559BD2D28A1E37FA72B57DF0 /* ReplayCap.icns */; };
 		70F1C5157C4605E0F4524886 /* AppDelegate+CapturePipeline.swift in Sources */ = {isa = PBXBuildFile; fileRef = FD15E173F82D19D367B3941E /* AppDelegate+CapturePipeline.swift */; };
 		8009A0BFB4ED8C95A6C8510A /* AppDelegate.swift in Sources */ = {isa = PBXBuildFile; fileRef = 362278FEFEF0BE440B232470 /* AppDelegate.swift */; };
+		8529A3D24FB29A10DB4EC5D1 /* AppDelegate+GameAutoRecord.swift in Sources */ = {isa = PBXBuildFile; fileRef = 184D4E754EE320C9D54925C6 /* AppDelegate+GameAutoRecord.swift */; };
 		98E0B453DB518A83A2E9E018 /* AppDelegate+RuntimeSettings.swift in Sources */ = {isa = PBXBuildFile; fileRef = B955C46510EBB27E8FF1F310 /* AppDelegate+RuntimeSettings.swift */; };
 		9DFFE2F8FEB019DF3EE2B968 /* AppDelegate+PipelineHandlers.swift in Sources */ = {isa = PBXBuildFile; fileRef = F5702EA1CBB05618D37A878B /* AppDelegate+PipelineHandlers.swift */; };
 		B5C10F40B0CC1CDECD6428BF /* Defaults in Frameworks */ = {isa = PBXBuildFile; productRef = 54941E8632529ACB7E9560AE /* Defaults */; };
@@ -20,16 +22,20 @@
 		EBC8ECE2C1CF0B15C954C378 /* AppDelegate+UI.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7422DD4CC1BD5CBE6D3C9DFB /* AppDelegate+UI.swift */; };
 		EE47FB927173BFA4C4CEE237 /* ReplayCapKit in Frameworks */ = {isa = PBXBuildFile; productRef = 8FA0B81CD05A3FB24FAAFD33 /* ReplayCapKit */; };
 		F81DEDB146EDA9B5E1273923 /* AppDelegate+BufferMonitoring.swift in Sources */ = {isa = PBXBuildFile; fileRef = C188C46C55CF686576AD3FA7 /* AppDelegate+BufferMonitoring.swift */; };
+		FBEACDC288E847EEAE143CE5 /* GameActivityMonitor.swift in Sources */ = {isa = PBXBuildFile; fileRef = 82AD9C2256AEB70D6579213C /* GameActivityMonitor.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
 		0D85B597549C4A75BE9F1757 /* AppDelegate+Hotkeys.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "AppDelegate+Hotkeys.swift"; sourceTree = "<group>"; };
+		184D4E754EE320C9D54925C6 /* AppDelegate+GameAutoRecord.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "AppDelegate+GameAutoRecord.swift"; sourceTree = "<group>"; };
 		2757777606E302889B063A23 /* AppDelegate+Updates.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "AppDelegate+Updates.swift"; sourceTree = "<group>"; };
 		362278FEFEF0BE440B232470 /* AppDelegate.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppDelegate.swift; sourceTree = "<group>"; };
 		3C981F42E9347975C0A654CB /* AppDelegate+Saving.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "AppDelegate+Saving.swift"; sourceTree = "<group>"; };
 		559BD2D28A1E37FA72B57DF0 /* ReplayCap.icns */ = {isa = PBXFileReference; lastKnownFileType = image.icns; path = ReplayCap.icns; sourceTree = "<group>"; };
 		7422DD4CC1BD5CBE6D3C9DFB /* AppDelegate+UI.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "AppDelegate+UI.swift"; sourceTree = "<group>"; };
-		B92FCC5DE4358F60EAE8A201 /* ReplayCap */ = {isa = PBXFileReference; lastKnownFileType = folder; name = ReplayCap; path = ..; sourceTree = SOURCE_ROOT; };
+		811A90C8E108D370D41F2E14 /* AppDelegate+SessionRecording.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "AppDelegate+SessionRecording.swift"; sourceTree = "<group>"; };
+		82AD9C2256AEB70D6579213C /* GameActivityMonitor.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GameActivityMonitor.swift; sourceTree = "<group>"; };
+		B92FCC5DE4358F60EAE8A201 /* ReplayMac */ = {isa = PBXFileReference; lastKnownFileType = folder; name = ReplayMac; path = ..; sourceTree = SOURCE_ROOT; };
 		B955C46510EBB27E8FF1F310 /* AppDelegate+RuntimeSettings.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "AppDelegate+RuntimeSettings.swift"; sourceTree = "<group>"; };
 		C188C46C55CF686576AD3FA7 /* AppDelegate+BufferMonitoring.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "AppDelegate+BufferMonitoring.swift"; sourceTree = "<group>"; };
 		CEDA418D306D1299AE9360AC /* ReplayCap.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = ReplayCap.app; sourceTree = BUILT_PRODUCTS_DIR; };
@@ -57,12 +63,15 @@
 				362278FEFEF0BE440B232470 /* AppDelegate.swift */,
 				C188C46C55CF686576AD3FA7 /* AppDelegate+BufferMonitoring.swift */,
 				FD15E173F82D19D367B3941E /* AppDelegate+CapturePipeline.swift */,
+				184D4E754EE320C9D54925C6 /* AppDelegate+GameAutoRecord.swift */,
 				0D85B597549C4A75BE9F1757 /* AppDelegate+Hotkeys.swift */,
 				F5702EA1CBB05618D37A878B /* AppDelegate+PipelineHandlers.swift */,
 				B955C46510EBB27E8FF1F310 /* AppDelegate+RuntimeSettings.swift */,
 				3C981F42E9347975C0A654CB /* AppDelegate+Saving.swift */,
+				811A90C8E108D370D41F2E14 /* AppDelegate+SessionRecording.swift */,
 				7422DD4CC1BD5CBE6D3C9DFB /* AppDelegate+UI.swift */,
 				2757777606E302889B063A23 /* AppDelegate+Updates.swift */,
+				82AD9C2256AEB70D6579213C /* GameActivityMonitor.swift */,
 				E502C57EAC829FFA49D1AEAA /* ReplayCapApp.swift */,
 			);
 			name = App;
@@ -74,7 +83,7 @@
 			children = (
 				8A5465FB69F4157777A137D3 /* App */,
 				CF332306BDE3009E9881B82E /* Packages */,
-				5DC5C1AF0CE1FAC0C3319A1C /* ReplayCap */,
+				5DC5C1AF0CE1FAC0C3319A1C /* ReplayMac */,
 				516A12ABAD7FCEAB573917D3 /* Products */,
 			);
 			sourceTree = "<group>";
@@ -87,13 +96,13 @@
 			name = Products;
 			sourceTree = "<group>";
 		};
-		5DC5C1AF0CE1FAC0C3319A1C /* ReplayCap */ = {
+		5DC5C1AF0CE1FAC0C3319A1C /* ReplayMac */ = {
 			isa = PBXGroup;
 			children = (
 				7F3F87FC03679F7324469247 /* Resources */,
 				94F78A8804029C3AC51C2932 /* Sources */,
 			);
-			name = ReplayCap;
+			name = ReplayMac;
 			path = ..;
 			sourceTree = "<group>";
 		};
@@ -124,7 +133,7 @@
 		CF332306BDE3009E9881B82E /* Packages */ = {
 			isa = PBXGroup;
 			children = (
-				B92FCC5DE4358F60EAE8A201 /* ReplayCap */,
+				B92FCC5DE4358F60EAE8A201 /* ReplayMac */,
 			);
 			name = Packages;
 			sourceTree = "<group>";
@@ -209,13 +218,16 @@
 			files = (
 				F81DEDB146EDA9B5E1273923 /* AppDelegate+BufferMonitoring.swift in Sources */,
 				70F1C5157C4605E0F4524886 /* AppDelegate+CapturePipeline.swift in Sources */,
+				8529A3D24FB29A10DB4EC5D1 /* AppDelegate+GameAutoRecord.swift in Sources */,
 				B5CBA568240ACC36ADB3CEA3 /* AppDelegate+Hotkeys.swift in Sources */,
 				9DFFE2F8FEB019DF3EE2B968 /* AppDelegate+PipelineHandlers.swift in Sources */,
 				98E0B453DB518A83A2E9E018 /* AppDelegate+RuntimeSettings.swift in Sources */,
 				BB1051AEA33C4D1699E65EAA /* AppDelegate+Saving.swift in Sources */,
+				42D5F3CD02C6BACCDD74E93B /* AppDelegate+SessionRecording.swift in Sources */,
 				EBC8ECE2C1CF0B15C954C378 /* AppDelegate+UI.swift in Sources */,
 				E0584D5F4C1713065639C581 /* AppDelegate+Updates.swift in Sources */,
 				8009A0BFB4ED8C95A6C8510A /* AppDelegate.swift in Sources */,
+				FBEACDC288E847EEAE143CE5 /* GameActivityMonitor.swift in Sources */,
 				598657E41BBF2656BD8580DF /* ReplayCapApp.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;

@@ -23,11 +23,15 @@ extension SettingsView {
                 HStack(alignment: .firstTextBaseline, spacing: 8) {
                     Text("Output directory")
                     Spacer()
-                    Text(UserHome.abbreviateForDisplay(outputDirectoryPath))
+                    Text(
+                        outputDirectoryPath.isEmpty
+                            ? "No folder selected"
+                            : UserHome.abbreviateForDisplay(outputDirectoryPath)
+                    )
                         .lineLimit(1)
                         .truncationMode(.middle)
                         .foregroundStyle(AppTheme.textSecondary)
-                        .help(outputDirectoryPath)
+                        .help(outputDirectoryPath.isEmpty ? "No folder selected" : outputDirectoryPath)
                 }
 
                 Button("Choose Folder…") {

@@ -115,18 +115,18 @@ public struct OnboardingView: View {
         ) {
             VStack(alignment: .leading, spacing: 14) {
                 VStack(alignment: .leading, spacing: 6) {
-                    Text(hasSelectedOutputDirectory ? "Selected folder" : "Suggested location")
+                    Text(storageLocationTitle)
                         .font(.caption)
                         .foregroundStyle(AppTheme.textSecondary)
 
                     HStack(spacing: 10) {
                         Image(systemName: "folder.fill")
                             .foregroundStyle(AppTheme.accent)
-                        Text(UserHome.abbreviateForDisplay(outputDirectoryPath))
+                        Text(storageLocationDisplayPath)
                             .font(.system(.body, design: .monospaced))
                             .lineLimit(1)
                             .truncationMode(.middle)
-                            .help(outputDirectoryPath)
+                            .help(outputDirectoryPath.isEmpty ? "No folder selected" : outputDirectoryPath)
                         Spacer()
                     }
                 }
@@ -152,6 +152,22 @@ public struct OnboardingView: View {
                     .fixedSize(horizontal: false, vertical: true)
             }
         }
+    }
+
+    private var storageLocationTitle: String {
+        if hasSelectedOutputDirectory {
+            return "Selected folder"
+        }
+        return AppBranding.requiresExplicitOutputDirectorySelection
+            ? "No folder selected"
+            : "Suggested location"
+    }
+
+    private var storageLocationDisplayPath: String {
+        guard !outputDirectoryPath.isEmpty else {
+            return "Choose a folder to continue"
+        }
+        return UserHome.abbreviateForDisplay(outputDirectoryPath)
     }
 
     private var captureStep: some View {

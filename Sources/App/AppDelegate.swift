@@ -104,8 +104,10 @@ class AppDelegate: NSObject, NSApplicationDelegate, @unchecked Sendable {
         // modules — they read AppBranding at runtime.
         #if APPSTORE
         AppBranding.name = "ReplayCap"
+        AppBranding.requiresExplicitOutputDirectorySelection = true
         #else
         AppBranding.name = "ReplayMac"
+        AppBranding.requiresExplicitOutputDirectorySelection = false
         #endif
         // Capture legacy-install state before any AppSettings access can seed
         // the preferences domain and make a clean install look established.
@@ -126,6 +128,9 @@ class AppDelegate: NSObject, NSApplicationDelegate, @unchecked Sendable {
         // entitlement. Existing installs from an older build may therefore
         // need to choose their output folder once to create a bookmark.
         if !restoredOutputDirectoryAccess {
+            // Do not carry an unbookmarked path forward as a proposed location.
+            // The user must make a fresh choice through the standard picker.
+            Defaults.reset(.outputDirectoryPath)
             Defaults[.hasCompletedOnboarding] = false
         }
 #else

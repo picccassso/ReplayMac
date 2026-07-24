@@ -8,10 +8,10 @@ public extension Defaults.Keys {
 
 /// Keeps sandbox access to a user-chosen output directory across launches.
 ///
-/// App Store builds require every output folder, including the suggested
-/// `~/Movies/ReplayCap` location, to be selected through the standard folder
-/// picker. The scoped access is held open for the app's lifetime because clips
-/// can be saved at any moment while recording.
+/// App Store builds start with no proposed output folder and require the user
+/// to select one through the standard folder picker. The scoped access is held
+/// open for the app's lifetime because clips can be saved at any moment while
+/// recording.
 @MainActor
 public enum OutputDirectoryAccess {
     private static var scopedURL: URL?
@@ -44,18 +44,10 @@ public enum OutputDirectoryAccess {
         panel.canChooseDirectories = true
         panel.allowsMultipleSelection = false
         panel.canCreateDirectories = true
-        let suggestedURL = URL(
-            filePath: Defaults[.outputDirectoryPath],
-            directoryHint: .isDirectory
-        ).standardizedFileURL
-        var isDirectory: ObjCBool = false
-        panel.directoryURL = if FileManager.default.fileExists(
-            atPath: suggestedURL.path(percentEncoded: false),
-            isDirectory: &isDirectory
-        ), isDirectory.boolValue {
-            suggestedURL
-        } else {
-            suggestedURL.deletingLastPathComponent()
+        if let initialDirectory = initialPanelDirectoryURL(
+            storedPath: Defaults[.outputDirectoryPath]
+        ) {
+            panel.directoryURL = initialDirectory
         }
 
         guard panel.runModal() == .OK, let selectedURL = panel.url else {
@@ -68,6 +60,27 @@ public enum OutputDirectoryAccess {
         UserDefaults.standard.synchronize()
         adopt(selectedURL)
         return path
+    }
+
+    /// Resolves the folder where the picker should open. An empty stored path
+    /// deliberately returns `nil`, leaving the standard panel to choose its own
+    /// neutral starting location instead of steering a fresh install to Movies.
+    nonisolated static func initialPanelDirectoryURL(
+        storedPath: String,
+        fileManager: FileManager = .default
+    ) -> URL? {
+        guard let storedURL = AppSettings.outputDirectoryURL(for: storedPath) else {
+            return nil
+        }
+
+        var isDirectory: ObjCBool = false
+        if fileManager.fileExists(
+            atPath: storedURL.path(percentEncoded: false),
+            isDirectory: &isDirectory
+        ), isDirectory.boolValue {
+            return storedURL
+        }
+        return storedURL.deletingLastPathComponent()
     }
 
     /// Re-establish access to a previously chosen folder. Call once at launch,
@@ -89,8 +102,8 @@ public enum OutputDirectoryAccess {
                 bookmarkDataIsStale: &isStale
             )
         } catch {
-            // Folder is gone (deleted, or on an unmounted volume). Fall back to
-            // the default output directory rather than failing every save.
+            // Folder is gone (deleted, or on an unmounted volume). Drop the
+            // stored path so App Store builds require a fresh explicit choice.
             NSLog("OutputDirectoryAccess: dropping unresolvable bookmark: \(error)")
             Defaults[.outputDirectoryBookmark] = nil
             Defaults.reset(.outputDirectoryPath)

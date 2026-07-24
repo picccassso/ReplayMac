@@ -57,6 +57,10 @@ extension AppDelegate {
     }
 
     private func handleGameActivityStarted(gameName: String) {
+        guard Defaults[.hasCompletedOnboarding] else {
+            return
+        }
+
         // Never override a recording that is already in progress (manual or a
         // previous auto-start); just adopt it so we know not to stop it.
         guard !isCaptureRunning else {
