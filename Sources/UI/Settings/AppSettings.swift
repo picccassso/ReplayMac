@@ -221,7 +221,6 @@ public enum AppSettings {
     public static var microphoneVolume: Double { Defaults[.microphoneVolume] }
 
     public static var videoCodec: String { Defaults[.videoCodec] }
-    public static var videoCodecEnum: VideoCodec { VideoCodec(rawValue: Defaults[.videoCodec]) ?? .hevc }
     public static var bitrateMbps: Double { Defaults[.bitrateMbps] }
     public static var captureResolution: String { Defaults[.captureResolution] }
     public static var customCaptureWidth: Int { Defaults[.customCaptureWidth] }

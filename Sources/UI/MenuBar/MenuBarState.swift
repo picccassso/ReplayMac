@@ -124,10 +124,6 @@ public final class MenuBarState: ObservableObject {
         ByteCountFormatter.string(fromByteCount: Int64(bufferMemoryBytes), countStyle: .file)
     }
 
-    public var formattedBufferDuration: String {
-        Self.formattedDuration(bufferedSeconds)
-    }
-
     /// Recording time shown to the user, capped at the largest configured
     /// replay window — elapsed time beyond what can still be saved isn't
     /// actionable. Session recording shows uncapped elapsed time instead.

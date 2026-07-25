@@ -110,19 +110,6 @@ public final class VideoRingBuffer: @unchecked Sendable {
     }
 
     @discardableResult
-    public func evictToMemory(maxBytes: Int) -> Int {
-        lock.lock()
-        defer { lock.unlock() }
-
-        let startingBytes = _currentMemoryBytes
-        while _currentMemoryBytes > maxBytes, deque.count > 1 {
-            guard keyframeIndices.count >= 2 else { break }
-            evictOldestGOP()
-        }
-        return max(0, startingBytes - _currentMemoryBytes)
-    }
-
-    @discardableResult
     public func trimToDuration(maxSeconds: TimeInterval) -> Int {
         lock.lock()
         defer { lock.unlock() }
