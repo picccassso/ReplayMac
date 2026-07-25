@@ -139,6 +139,8 @@ public actor LongBufferRecorder {
     private let writerBuilder: WriterBuilder
     private let clipExporter: ClipExporter
     private let logger = Logger(subsystem: "com.replaycap", category: "LongBuffer")
+    /// Static counterpart for the export helpers, which run off the actor.
+    private static let exportLogger = Logger(subsystem: "com.replaycap", category: "LongBuffer")
 
     public init() {
         writerFinisher = Self.finishWriter
@@ -281,11 +283,18 @@ public actor LongBufferRecorder {
     }
 
     /// Finishes the active segment and exports every retained segment (full session).
+    ///
+    /// Ingest stops first. The session is over by the time this is called, and
+    /// leaving it enabled would start a fresh segment the moment the next frame
+    /// arrived — writing new files to disk, and contending with the export for
+    /// the video encoder, for as long as the save took. Retained segments are
+    /// kept; the caller reconfigures the recorder to delete them.
     public func saveEntireRecording(
         outputDirectory: URL,
         mergeAudioTracks: Bool = true,
         baseName: String? = nil
     ) async throws -> URL {
+        isEnabled = false
         try await finishCurrentSegment()
         let duration = recordedDurationSeconds()
         guard duration > 0 || !segments.isEmpty else {
@@ -463,23 +472,55 @@ public actor LongBufferRecorder {
             baseName: baseName,
             suffix: outputSuffix
         )
-        let preset: String
-        if mergeAudioTracks, compositionAudioTracks.count > 1 {
-            preset = AVAssetExportPresetHighestQuality
-        } else {
-            preset = await AVAssetExportSession.compatibility(
-                ofExportPreset: AVAssetExportPresetPassthrough,
-                with: composition,
-                outputFileType: .mp4
-            ) ? AVAssetExportPresetPassthrough : AVAssetExportPresetHighestQuality
+
+        // Passing video through is the whole point: an export session would
+        // transcode every frame just to merge the audio tracks. Transcoding
+        // stays available for the rare composition passthrough cannot express
+        // (a capture format change mid-recording).
+        do {
+            try await CompositionRemuxer.write(
+                composition: composition,
+                to: outputURL,
+                mergeAudioTracks: mergeAudioTracks,
+                metadata: ClipMetadata.makeMetadataItems()
+            )
+            return outputURL
+        } catch is CancellationError {
+            try? FileManager.default.removeItem(at: outputURL)
+            throw CancellationError()
+        } catch {
+            exportLogger.notice(
+                "Passthrough write unavailable, falling back to transcode error=\(describeError(error), privacy: .public)"
+            )
+            try? FileManager.default.removeItem(at: outputURL)
         }
 
-        guard let exportSession = AVAssetExportSession(asset: composition, presetName: preset) else {
+        try await transcode(
+            composition: composition,
+            audioTracks: compositionAudioTracks,
+            to: outputURL,
+            mergeAudioTracks: mergeAudioTracks
+        )
+        return outputURL
+    }
+
+    /// Full decode/re-encode of the composition. Only reached when the
+    /// passthrough writer cannot handle the source.
+    private static func transcode(
+        composition: AVMutableComposition,
+        audioTracks: [AVMutableCompositionTrack],
+        to outputURL: URL,
+        mergeAudioTracks: Bool
+    ) async throws {
+        guard let exportSession = AVAssetExportSession(
+            asset: composition,
+            presetName: AVAssetExportPresetHighestQuality
+        ) else {
             throw LongBufferRecorderError.cannotCreateExportSession
         }
-        if mergeAudioTracks, compositionAudioTracks.count > 1 {
+        if mergeAudioTracks, audioTracks.count > 1 {
             let audioMix = AVMutableAudioMix()
-            audioMix.inputParameters = compositionAudioTracks.map { track in
+            audioMix.inputParameters = audioTracks.map { track in
                 let parameters = AVMutableAudioMixInputParameters(track: track)
                 parameters.setVolume(1, at: .zero)
                 return parameters
@@ -488,8 +529,6 @@ public actor LongBufferRecorder {
         }
         exportSession.shouldOptimizeForNetworkUse = true
         try await exportSession.export(to: outputURL, as: .mp4)
-
-        return outputURL
     }
 
     private static func stageSegments(

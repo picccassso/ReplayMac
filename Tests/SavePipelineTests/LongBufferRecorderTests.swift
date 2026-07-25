@@ -395,6 +395,50 @@ final class LongBufferRecorderTests: XCTestCase {
         XCTAssertFalse(FileManager.default.fileExists(atPath: longBufferDir.path))
     }
 
+    /// Frames keep arriving from the capture pipeline while a session save runs.
+    /// They must not start a new segment: that wrote files nobody would ever
+    /// read and made the export share the video encoder with live capture for
+    /// the whole save.
+    func testSessionSaveStopsIngestBeforeExporting() async throws {
+        let outputDirectory = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: outputDirectory) }
+
+        let gate = ExportGate()
+        let recorder = makeFileBackedRecorder { _, _, outputDirectory, _, _, _ in
+            await gate.pauseExporter()
+            let url = outputDirectory.appendingPathComponent("session.mp4")
+            try Data("session".utf8).write(to: url)
+            return url
+        }
+        await recorder.configure(
+            enabled: true,
+            maxDurationSeconds: .infinity,
+            outputDirectory: outputDirectory,
+            storage: .session
+        )
+        await recorder.appendVideo(try makeVideoSample(pts: 0))
+
+        let saveTask = Task {
+            try await recorder.saveEntireRecording(outputDirectory: outputDirectory)
+        }
+        await gate.waitUntilStarted()
+
+        let segmentsDuringExport = try sessionSegmentFiles(in: outputDirectory).count
+        await recorder.appendVideo(try makeVideoSample(pts: 61))
+        await recorder.appendVideo(try makeVideoSample(pts: 122))
+        XCTAssertEqual(
+            try sessionSegmentFiles(in: outputDirectory).count,
+            segmentsDuringExport,
+            "Frames arriving during a session save must not start new segments"
+        )
+        let isEnabledDuringExport = await recorder.isRecordingEnabled()
+        XCTAssertFalse(isEnabledDuringExport)
+
+        await gate.release()
+        _ = try await saveTask.value
+    }
+
     func testConfigureRemovesOnlyOrphanedLegacyReplayMacSegments() async throws {
         let outputDirectory = FileManager.default.temporaryDirectory
             .appendingPathComponent(UUID().uuidString, isDirectory: true)
@@ -442,6 +486,18 @@ final class LongBufferRecorderTests: XCTestCase {
             },
             clipExporter: clipExporter
         )
+    }
+
+    private func sessionSegmentFiles(in outputDirectory: URL) throws -> [URL] {
+        let segmentDirectory = outputDirectory
+            .appendingPathComponent(".ReplayCapSession", isDirectory: true)
+        guard FileManager.default.fileExists(atPath: segmentDirectory.path) else {
+            return []
+        }
+        return try FileManager.default.contentsOfDirectory(
+            at: segmentDirectory,
+            includingPropertiesForKeys: nil
+        ).filter { $0.pathExtension == "mp4" }
     }
 
     private func segmentFiles(in outputDirectory: URL) throws -> [URL] {
