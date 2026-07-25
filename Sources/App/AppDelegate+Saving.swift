@@ -49,7 +49,8 @@ extension AppDelegate {
         if let failure = SavePreflight.failure(
             isRecording: isCaptureRunning,
             bufferedSeconds: currentBufferedVideoSeconds(),
-            saveInProgress: menuBarState.isSaveInProgress
+            saveInProgress: menuBarState.isSaveInProgress,
+            replayBufferEnabled: replayBufferGate.isEnabled
         ) {
             if failure != .saveInProgress {
                 let message = SavePreflight.notificationMessage(for: failure)
@@ -132,6 +133,13 @@ extension AppDelegate {
 
         guard isCaptureRunning else {
             let message = SavePreflight.notificationMessage(for: .notRecording)
+            NotificationManager.shared.showOperationalNotification(title: message.title, body: message.body)
+            menuBarState.showSaveFailedBriefly()
+            return
+        }
+
+        guard replayBufferGate.isEnabled else {
+            let message = SavePreflight.notificationMessage(for: .replayBufferUnavailable)
             NotificationManager.shared.showOperationalNotification(title: message.title, body: message.body)
             menuBarState.showSaveFailedBriefly()
             return

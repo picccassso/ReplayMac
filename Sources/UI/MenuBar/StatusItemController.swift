@@ -226,6 +226,11 @@ public final class StatusItemController: NSObject, NSMenuDelegate, @unchecked Se
             bufferLine += " (ready)"
         }
         bufferUsageItem?.title = bufferLine
+        // A session recording that started capture on its own deliberately
+        // leaves the replay buffers empty, so reporting them would just look
+        // like something had gone wrong.
+        let isSessionOnlyCapture = state.isSessionRecording && !state.isRecording
+        bufferUsageItem?.isHidden = isSessionOnlyCapture
 
         let longReplayCap = TimeInterval(longBufferSeconds)
         let longReplayAvailable = min(state.extendedBufferElapsedSeconds, longReplayCap)
@@ -236,7 +241,7 @@ public final class StatusItemController: NSObject, NSMenuDelegate, @unchecked Se
             longBufferLine += " (ready)"
         }
         longBufferUsageItem?.title = longBufferLine
-        longBufferUsageItem?.isHidden = !AppSettings.longBufferEnabled
+        longBufferUsageItem?.isHidden = !AppSettings.longBufferEnabled || isSessionOnlyCapture
 
         hotkeyHintItem?.isHidden = hasSaveHotkeyConfigured
 

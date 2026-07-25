@@ -22,6 +22,47 @@ final class SavePreflightTests: XCTestCase {
         XCTAssertEqual(failure, .bufferEmpty)
     }
 
+    /// A session recording that owns the capture pipeline keeps the replay
+    /// buffers empty on purpose. Reporting `.bufferEmpty` there would tell the
+    /// user to wait for something that is never going to arrive.
+    func testReportsReplayBufferOffRatherThanStillFilling() {
+        let failure = SavePreflight.failure(
+            isRecording: true,
+            bufferedSeconds: 0,
+            saveInProgress: false,
+            replayBufferEnabled: false
+        )
+
+        XCTAssertEqual(failure, .replayBufferUnavailable)
+    }
+
+    func testReplayBufferOffDisablesBothReplaySaveActions() {
+        XCTAssertFalse(SavePreflight.canSaveQuickReplay(
+            isRecording: true,
+            bufferedSeconds: 30,
+            saveInProgress: false,
+            replayBufferEnabled: false
+        ))
+        XCTAssertFalse(SavePreflight.canSaveLongReplay(
+            isRecording: true,
+            saveInProgress: false,
+            replayBufferEnabled: false
+        ))
+    }
+
+    /// An in-flight save still takes priority, so the user is told to wait
+    /// rather than being sent to a setting that is not the reason.
+    func testSaveInProgressOutranksReplayBufferOff() {
+        let failure = SavePreflight.failure(
+            isRecording: true,
+            bufferedSeconds: 0,
+            saveInProgress: true,
+            replayBufferEnabled: false
+        )
+
+        XCTAssertEqual(failure, .saveInProgress)
+    }
+
     func testBlocksWhenSaveInProgress() {
         let failure = SavePreflight.failure(
             isRecording: true,

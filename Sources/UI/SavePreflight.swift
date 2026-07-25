@@ -3,6 +3,7 @@ import Foundation
 public enum SavePreflightFailure: Equatable {
     case saveInProgress
     case notRecording
+    case replayBufferUnavailable
     case bufferEmpty
     case insufficientDiskSpace
 }
@@ -13,20 +14,23 @@ public enum SavePreflight {
     public static func canSaveQuickReplay(
         isRecording: Bool,
         bufferedSeconds: TimeInterval,
-        saveInProgress: Bool
+        saveInProgress: Bool,
+        replayBufferEnabled: Bool = true
     ) -> Bool {
         failure(
             isRecording: isRecording,
             bufferedSeconds: bufferedSeconds,
-            saveInProgress: saveInProgress
+            saveInProgress: saveInProgress,
+            replayBufferEnabled: replayBufferEnabled
         ) == nil
     }
 
     public static func canSaveLongReplay(
         isRecording: Bool,
-        saveInProgress: Bool
+        saveInProgress: Bool,
+        replayBufferEnabled: Bool = true
     ) -> Bool {
-        isRecording && !saveInProgress
+        isRecording && !saveInProgress && replayBufferEnabled
     }
 
     public static func bufferedSeconds(
@@ -42,10 +46,15 @@ public enum SavePreflight {
         return min(dualDisplay1, dualDisplay2)
     }
 
+    /// - Parameter replayBufferEnabled: false while a session recording owns
+    ///   the capture pipeline. The buffers are deliberately not being filled,
+    ///   so reporting them as still filling would promise something that will
+    ///   never happen.
     public static func failure(
         isRecording: Bool,
         bufferedSeconds: TimeInterval,
         saveInProgress: Bool,
+        replayBufferEnabled: Bool = true,
         minimumBufferedSeconds: TimeInterval = minimumBufferedSeconds
     ) -> SavePreflightFailure? {
         if saveInProgress {
@@ -53,6 +62,9 @@ public enum SavePreflight {
         }
         if !isRecording {
             return .notRecording
+        }
+        if !replayBufferEnabled {
+            return .replayBufferUnavailable
         }
         if bufferedSeconds < minimumBufferedSeconds {
             return .bufferEmpty
@@ -66,6 +78,11 @@ public enum SavePreflight {
             return ("Save Already in Progress", "Wait for the current clip to finish saving.")
         case .notRecording:
             return ("Not Recording", "Start recording before saving a clip.")
+        case .replayBufferUnavailable:
+            return (
+                "Replay Buffer Off",
+                "A session recording is in progress. Stop it to save the session, or start buffer recording to capture replays."
+            )
         case .bufferEmpty:
             return ("Buffer Still Filling", "Wait a moment for footage to buffer before saving.")
         case .insufficientDiskSpace:

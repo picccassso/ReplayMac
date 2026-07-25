@@ -41,6 +41,12 @@ class AppDelegate: NSObject, NSApplicationDelegate, @unchecked Sendable {
     lazy var longBufferAppendPump = LongBufferAppendPump(
         recorders: [longBufferRecorder, sessionRecorder]
     )
+    /// Gates the replay ring buffers. Off while a session recording owns the
+    /// capture pipeline, so a session never fills a buffer the user did not ask for.
+    let replayBufferGate = ReplayBufferGate()
+    /// True when the capture pipeline was started by a session recording rather
+    /// than by buffer recording, and so should be torn down when it stops.
+    var sessionOwnsCapturePipeline = false
     /// True while a start→stop session recording is actively writing to disk.
     var isSessionRecording = false
     var isSessionFinalizeInProgress = false

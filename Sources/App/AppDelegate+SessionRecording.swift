@@ -41,9 +41,16 @@ extension AppDelegate {
             return
         }
 
+        // Starting capture for a session must not start buffer recording too.
+        // When buffer recording is already running the user asked for both, so
+        // the buffers are left alone and capture outlives the session.
         if !isCaptureRunning {
+            sessionOwnsCapturePipeline = true
+            replayBufferGate.setEnabled(false)
             await startCapturePipelineAsync(userInitiated: userInitiated)
             guard isCaptureRunning else {
+                sessionOwnsCapturePipeline = false
+                replayBufferGate.setEnabled(true)
                 return
             }
         }
@@ -67,8 +74,29 @@ extension AppDelegate {
         }
     }
 
+    /// - Parameter releaseCaptureOwnership: pass `false` from capture teardown,
+    ///   which is already stopping the pipeline and would otherwise re-enter it.
     @discardableResult
-    func stopSessionRecording(userInitiated: Bool) async -> URL? {
+    func stopSessionRecording(
+        userInitiated: Bool,
+        releaseCaptureOwnership: Bool = true
+    ) async -> URL? {
+        let savedURL = await performStopSessionRecording(userInitiated: userInitiated)
+
+        // Only tear capture down once the session has genuinely finished. A
+        // stop request arriving mid-save returns early and must leave the
+        // in-flight export alone.
+        if releaseCaptureOwnership,
+           sessionOwnsCapturePipeline,
+           !isSessionRecording,
+           !isSessionFinalizeInProgress {
+            await stopCapturePipelineAsync()
+        }
+        return savedURL
+    }
+
+    @discardableResult
+    private func performStopSessionRecording(userInitiated: Bool) async -> URL? {
         guard isSessionRecording || isSessionFinalizeInProgress else {
             return nil
         }

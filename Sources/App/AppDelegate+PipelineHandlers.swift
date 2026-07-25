@@ -39,19 +39,30 @@ func replayCapPerAppAudioHandler(_ systemAudioCapture: SystemAudioCapture) -> @S
     }
 }
 
+// The append pump is always fed: it drives the session recorder as well as the
+// extended-replay recorder, and each recorder ignores samples while disabled.
+// Only the ring buffers are gated, since those exist solely for replay saves.
 func replayCapPrimaryVideoOutputHandler(
     videoRingBuffer: VideoRingBuffer,
-    longBufferAppendPump: LongBufferAppendPump
+    longBufferAppendPump: LongBufferAppendPump,
+    replayBufferGate: ReplayBufferGate
 ) -> VideoEncoder.OutputHandler {
     { sampleBuffer in
-        videoRingBuffer.append(encodedSample: sampleBuffer)
+        if replayBufferGate.isEnabled {
+            videoRingBuffer.append(encodedSample: sampleBuffer)
+        }
         longBufferAppendPump.enqueueVideo(LongBufferSample(sampleBuffer))
     }
 }
 
-func replayCapDualVideoOutputHandler(_ videoRingBuffer: VideoRingBuffer) -> VideoEncoder.OutputHandler {
+func replayCapDualVideoOutputHandler(
+    _ videoRingBuffer: VideoRingBuffer,
+    replayBufferGate: ReplayBufferGate
+) -> VideoEncoder.OutputHandler {
     { sampleBuffer in
-        videoRingBuffer.append(encodedSample: sampleBuffer)
+        if replayBufferGate.isEnabled {
+            videoRingBuffer.append(encodedSample: sampleBuffer)
+        }
     }
 }
 
@@ -67,20 +78,26 @@ func replayCapAudioEncodeHandler(_ audioEncoder: AudioEncoder) -> @Sendable (CMS
 
 func replayCapSystemAudioOutputHandler(
     systemAudioRingBuffer: AudioRingBuffer,
-    longBufferAppendPump: LongBufferAppendPump
+    longBufferAppendPump: LongBufferAppendPump,
+    replayBufferGate: ReplayBufferGate
 ) -> AudioEncoder.OutputHandler {
     { sampleBuffer in
-        systemAudioRingBuffer.append(sampleBuffer)
+        if replayBufferGate.isEnabled {
+            systemAudioRingBuffer.append(sampleBuffer)
+        }
         longBufferAppendPump.enqueueSystemAudio(LongBufferSample(sampleBuffer))
     }
 }
 
 func replayCapMicrophoneOutputHandler(
     micAudioRingBuffer: AudioRingBuffer,
-    longBufferAppendPump: LongBufferAppendPump
+    longBufferAppendPump: LongBufferAppendPump,
+    replayBufferGate: ReplayBufferGate
 ) -> AudioEncoder.OutputHandler {
     { sampleBuffer in
-        micAudioRingBuffer.append(sampleBuffer)
+        if replayBufferGate.isEnabled {
+            micAudioRingBuffer.append(sampleBuffer)
+        }
         longBufferAppendPump.enqueueMicrophone(LongBufferSample(sampleBuffer))
     }
 }

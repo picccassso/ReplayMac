@@ -17,23 +17,32 @@ extension AppDelegate {
     func configurePipelines() {
         videoEncoder.outputHandler = replayCapPrimaryVideoOutputHandler(
             videoRingBuffer: videoRingBuffer,
-            longBufferAppendPump: longBufferAppendPump
+            longBufferAppendPump: longBufferAppendPump,
+            replayBufferGate: replayBufferGate
         )
-        dualDisplay1VideoEncoder.outputHandler = replayCapDualVideoOutputHandler(dualDisplay1VideoRingBuffer)
-        dualDisplay2VideoEncoder.outputHandler = replayCapDualVideoOutputHandler(dualDisplay2VideoRingBuffer)
+        dualDisplay1VideoEncoder.outputHandler = replayCapDualVideoOutputHandler(
+            dualDisplay1VideoRingBuffer,
+            replayBufferGate: replayBufferGate
+        )
+        dualDisplay2VideoEncoder.outputHandler = replayCapDualVideoOutputHandler(
+            dualDisplay2VideoRingBuffer,
+            replayBufferGate: replayBufferGate
+        )
 
         frameCompositor.outputHandler = replayCapFrameCompositorOutputHandler(videoEncoder)
 
         systemAudioEncoder.outputHandler = replayCapSystemAudioOutputHandler(
             systemAudioRingBuffer: systemAudioRingBuffer,
-            longBufferAppendPump: longBufferAppendPump
+            longBufferAppendPump: longBufferAppendPump,
+            replayBufferGate: replayBufferGate
         )
         systemAudioCapture.setHandler(replayCapAudioEncodeHandler(systemAudioEncoder))
         perAppAudioCapture.setHandler(replayCapPerAppAudioHandler(systemAudioCapture))
 
         micAudioEncoder.outputHandler = replayCapMicrophoneOutputHandler(
             micAudioRingBuffer: micAudioRingBuffer,
-            longBufferAppendPump: longBufferAppendPump
+            longBufferAppendPump: longBufferAppendPump,
+            replayBufferGate: replayBufferGate
         )
         micAudioCapture.setHandler(replayCapAudioEncodeHandler(micAudioEncoder))
     }
@@ -247,9 +256,11 @@ extension AppDelegate {
                     shouldResumeCaptureAfterInterruption = false
                     captureRecoveryAttempts = 0
                 }
-                menuBarState.setRecording(true)
+                menuBarState.setRecording(replayBufferGate.isEnabled)
                 menuBarState.setExtendedBufferRecording(
-                    AppSettings.longBufferEnabled && !isSeparateDualSaveMode
+                    replayBufferGate.isEnabled
+                        && AppSettings.longBufferEnabled
+                        && !isSeparateDualSaveMode
                 )
                 statusItemController.refreshPresentation()
                 startMonitoring()
@@ -363,8 +374,10 @@ extension AppDelegate {
         }
         guard isCaptureRunning else {
             if isSessionRecording {
-                await stopSessionRecording(userInitiated: false)
+                await stopSessionRecording(userInitiated: false, releaseCaptureOwnership: false)
             }
+            sessionOwnsCapturePipeline = false
+            replayBufferGate.setEnabled(true)
             return
         }
 
@@ -377,8 +390,19 @@ extension AppDelegate {
             if preserveResumeIntent {
                 await discardSessionRecording()
             } else {
-                await stopSessionRecording(userInitiated: false)
+                await stopSessionRecording(userInitiated: false, releaseCaptureOwnership: false)
             }
+        }
+
+        // Capture that a session started has nothing to resume into — the
+        // recording was just discarded — and resuming would silently leave
+        // buffer recording running, which is the state the session was
+        // deliberately avoiding. Drop the resume intent and return to idle.
+        // The recovery paths gate on this flag, so clearing it is enough;
+        // cancelling the task here could cancel the caller.
+        if preserveResumeIntent, sessionOwnsCapturePipeline {
+            shouldResumeCaptureAfterInterruption = false
+            captureRecoveryAttempts = 0
         }
 
         await captureManager.stop()
@@ -396,6 +420,8 @@ extension AppDelegate {
         AudioLevelMonitor.shared.reset()
 
         isCaptureRunning = false
+        sessionOwnsCapturePipeline = false
+        replayBufferGate.setEnabled(true)
         menuBarState.setRecording(false)
         menuBarState.setExtendedBufferRecording(false)
         menuBarState.setSessionRecording(false)
@@ -412,7 +438,7 @@ extension AppDelegate {
 
         let separateDualSave = AppSettings.captureMode == CaptureMode.dualSideBySide.rawValue
             && AppSettings.dualCaptureSaveMode == DualCaptureSaveMode.separateFiles.rawValue
-        let enabled = AppSettings.longBufferEnabled && !separateDualSave
+        let enabled = AppSettings.longBufferEnabled && !separateDualSave && replayBufferGate.isEnabled
         await longBufferRecorder.configure(
             enabled: enabled,
             maxDurationSeconds: TimeInterval(AppSettings.longBufferDurationSeconds),
