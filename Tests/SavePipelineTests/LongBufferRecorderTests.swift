@@ -439,6 +439,99 @@ final class LongBufferRecorderTests: XCTestCase {
         _ = try await saveTask.value
     }
 
+    /// P-frames reference a keyframe that no segment file holds, so a segment
+    /// opened on one plays back black until the encoder's next keyframe — up to
+    /// two seconds of blank video at the head of every saved recording.
+    func testSegmentWaitsForAKeyframeBeforeOpening() async throws {
+        let outputDirectory = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: outputDirectory) }
+
+        let recorder = makeFileBackedRecorder { _, _, outputDirectory, _, _, _ in
+            outputDirectory.appendingPathComponent("unused.mp4")
+        }
+        await recorder.configure(
+            enabled: true,
+            maxDurationSeconds: .infinity,
+            outputDirectory: outputDirectory,
+            storage: .session
+        )
+
+        await recorder.appendVideo(try makeVideoSample(pts: 0, isKeyframe: false))
+        await recorder.appendVideo(try makeVideoSample(pts: 0.5, isKeyframe: false))
+        XCTAssertEqual(
+            try sessionSegmentFiles(in: outputDirectory).count,
+            0,
+            "No segment may open before a keyframe arrives"
+        )
+
+        await recorder.appendVideo(try makeVideoSample(pts: 1, isKeyframe: true))
+        XCTAssertEqual(try sessionSegmentFiles(in: outputDirectory).count, 1)
+
+        let duration = await recorder.recordedDurationSeconds()
+        XCTAssertEqual(duration, 0, accuracy: 0.001, "The segment must start at the keyframe")
+    }
+
+    /// Waiting forever would be worse than the black frames: a stream that
+    /// stopped producing keyframes would record nothing at all.
+    func testSegmentOpensWithoutAKeyframeAfterTheWaitElapses() async throws {
+        let outputDirectory = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: outputDirectory) }
+
+        let recorder = makeFileBackedRecorder { _, _, outputDirectory, _, _, _ in
+            outputDirectory.appendingPathComponent("unused.mp4")
+        }
+        await recorder.configure(
+            enabled: true,
+            maxDurationSeconds: .infinity,
+            outputDirectory: outputDirectory,
+            storage: .session
+        )
+
+        for pts in stride(from: 0.0, through: 2.5, by: 0.5) {
+            await recorder.appendVideo(try makeVideoSample(pts: pts, isKeyframe: false))
+        }
+        XCTAssertEqual(try sessionSegmentFiles(in: outputDirectory).count, 0)
+
+        await recorder.appendVideo(try makeVideoSample(pts: 3.5, isKeyframe: false))
+        XCTAssertEqual(
+            try sessionSegmentFiles(in: outputDirectory).count,
+            1,
+            "A stream with no keyframes must still record"
+        )
+    }
+
+    /// The same gap appears at every segment boundary, once a minute, so a
+    /// rollover has to land on a keyframe too. Segments run slightly long
+    /// rather than cutting early, which would drop the frames in between.
+    func testSegmentRolloverWaitsForAKeyframe() async throws {
+        let outputDirectory = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: outputDirectory) }
+
+        let recorder = makeFileBackedRecorder { _, _, outputDirectory, _, _, _ in
+            outputDirectory.appendingPathComponent("unused.mp4")
+        }
+        await recorder.configure(
+            enabled: true,
+            maxDurationSeconds: .infinity,
+            outputDirectory: outputDirectory,
+            storage: .session
+        )
+
+        await recorder.appendVideo(try makeVideoSample(pts: 0, isKeyframe: true))
+        await recorder.appendVideo(try makeVideoSample(pts: 61, isKeyframe: false))
+        XCTAssertEqual(
+            try sessionSegmentFiles(in: outputDirectory).count,
+            1,
+            "A rollover past the segment length must not cut on a P-frame"
+        )
+
+        await recorder.appendVideo(try makeVideoSample(pts: 61.5, isKeyframe: true))
+        XCTAssertEqual(try sessionSegmentFiles(in: outputDirectory).count, 2)
+    }
+
     func testConfigureRemovesOnlyOrphanedLegacyReplayMacSegments() async throws {
         let outputDirectory = FileManager.default.temporaryDirectory
             .appendingPathComponent(UUID().uuidString, isDirectory: true)
@@ -512,7 +605,10 @@ final class LongBufferRecorderTests: XCTestCase {
         ).filter { $0.pathExtension == "mp4" }
     }
 
-    private func makeVideoSample(pts: Double = 1.0 / 30.0) throws -> LongBufferSample {
+    private func makeVideoSample(
+        pts: Double = 1.0 / 30.0,
+        isKeyframe: Bool = true
+    ) throws -> LongBufferSample {
         var pixelBuffer: CVPixelBuffer?
         let pixelStatus = CVPixelBufferCreate(
             kCFAllocatorDefault,
@@ -552,6 +648,19 @@ final class LongBufferRecorderTests: XCTestCase {
         guard sampleStatus == noErr, let sampleBuffer else {
             throw TestError.couldNotCreateSampleBuffer(sampleStatus)
         }
+
+        if !isKeyframe,
+           let attachments = CMSampleBufferGetSampleAttachmentsArray(sampleBuffer, createIfNecessary: true) {
+            let attachment = Unmanaged<CFMutableDictionary>
+                .fromOpaque(CFArrayGetValueAtIndex(attachments, 0))
+                .takeUnretainedValue()
+            CFDictionarySetValue(
+                attachment,
+                Unmanaged.passUnretained(kCMSampleAttachmentKey_NotSync).toOpaque(),
+                Unmanaged.passUnretained(kCFBooleanTrue).toOpaque()
+            )
+        }
+
         return LongBufferSample(sampleBuffer)
     }
 }

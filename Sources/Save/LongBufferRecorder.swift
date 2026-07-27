@@ -113,6 +113,12 @@ public actor LongBufferRecorder {
     }
 
     private let segmentSeconds: Double = 60
+    /// How long a segment may wait for a keyframe before giving up on one.
+    ///
+    /// The encoder is configured for keyframes at most two seconds apart, so
+    /// the wait is normally a single frame. This bound only exists so a stream
+    /// that stops producing keyframes records something rather than nothing.
+    private let keyframeWaitSeconds: Double = 3
     private var isEnabled = false
     private var maxDurationSeconds: Double = 300
     private var storageConfig: LongBufferStorageConfig = .longBuffer
@@ -120,6 +126,7 @@ public actor LongBufferRecorder {
     private var segmentDirectory: URL?
     private var segments: [Segment] = []
     private var latestVideoPTS: Double?
+    private var awaitingKeyframeSincePTS: Double?
     private var isExportInProgress = false
     private var segmentPinOwners: [URL: Set<String>] = [:]
     private var pendingDeletionURLs: Set<URL> = []
@@ -189,6 +196,7 @@ public actor LongBufferRecorder {
         droppedSystemAudioSamples = 0
         droppedMicSamples = 0
         latestVideoPTS = nil
+        awaitingKeyframeSincePTS = nil
 
         cleanupOrphanedSegmentsIfNeeded(in: requestedSegmentDirectory)
         if let legacyName = storage.legacySegmentDirectoryName {
@@ -217,8 +225,12 @@ public actor LongBufferRecorder {
             discardFailedActiveSegmentIfNeeded()
 
             if writer == nil {
+                guard mayOpenSegment(at: pts, videoSample: sample) else { return }
                 try startSegment(at: pts, videoSample: sample)
-            } else if let activeSegmentStartPTS, pts - activeSegmentStartPTS >= segmentSeconds {
+            } else if let activeSegmentStartPTS,
+                      pts - activeSegmentStartPTS >= segmentSeconds,
+                      Self.isSyncSample(sample)
+                        || pts - activeSegmentStartPTS >= segmentSeconds + keyframeWaitSeconds {
                 try await finishCurrentSegment()
                 try startSegment(at: pts, videoSample: sample)
             }
@@ -599,6 +611,45 @@ public actor LongBufferRecorder {
                 "Failed to clean long-buffer staging directory id=\(exportID, privacy: .public) error=\(Self.describeError(error), privacy: .public)"
             )
         }
+    }
+
+    /// A segment must open on a keyframe. Frames encoded before one reference
+    /// a keyframe that no segment file contains, so a segment opened on them
+    /// decodes to black until the next keyframe arrives — a second or two of
+    /// blank video at the head of every save, and at each segment boundary.
+    /// Skipping them costs nothing: they were never going to be watchable.
+    private func mayOpenSegment(at pts: Double, videoSample: CMSampleBuffer) -> Bool {
+        if Self.isSyncSample(videoSample) {
+            awaitingKeyframeSincePTS = nil
+            return true
+        }
+
+        let waitingSince = awaitingKeyframeSincePTS ?? pts
+        awaitingKeyframeSincePTS = waitingSince
+        let waited = pts - waitingSince
+        guard waited >= keyframeWaitSeconds else {
+            return false
+        }
+
+        awaitingKeyframeSincePTS = nil
+        logger.notice(
+            "Opening long-buffer segment without a keyframe after \(waited, privacy: .public)s of waiting"
+        )
+        return true
+    }
+
+    /// Absent attachments mean the sample carries no dependency information,
+    /// which every encoder in the pipeline only omits for keyframes.
+    private static func isSyncSample(_ sample: CMSampleBuffer) -> Bool {
+        guard let attachments = CMSampleBufferGetSampleAttachmentsArray(sample, createIfNecessary: false)
+                as? [[String: Any]],
+              let attachment = attachments.first else {
+            return true
+        }
+        if let notSync = attachment[kCMSampleAttachmentKey_NotSync as String] as? Bool {
+            return !notSync
+        }
+        return true
     }
 
     private func startSegment(at pts: Double, videoSample: CMSampleBuffer) throws {

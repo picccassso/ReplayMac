@@ -43,6 +43,7 @@ public final class VideoEncoder: @unchecked Sendable {
     private var _currentConfiguration: VideoEncoderConfiguration?
     private var expectedPTSQueue: [CMTime] = []
     private var encodeCount: Int64 = 0
+    private var forcesKeyframeOnNextFrame = false
 
     public var outputHandler: OutputHandler? {
         get {
@@ -153,6 +154,20 @@ public final class VideoEncoder: @unchecked Sendable {
         stateLock.unlock()
     }
 
+    /// Forces the next encoded frame to be a keyframe.
+    ///
+    /// A recorder can only begin a file on a keyframe — earlier frames
+    /// reference one that will not be in the file — so anything that starts
+    /// writing mid-stream would otherwise have to discard frames until the
+    /// encoder's next scheduled keyframe, up to `MaxKeyFrameIntervalDuration`
+    /// away. Asking for one here keeps that wait down to a single frame.
+    public func requestKeyframe() {
+        stateLock.lock()
+        defer { stateLock.unlock() }
+        guard compressionSession != nil else { return }
+        forcesKeyframeOnNextFrame = true
+    }
+
     public func encode(sampleBuffer: CMSampleBuffer) {
         stateLock.lock()
         let session = compressionSession
@@ -167,14 +182,20 @@ public final class VideoEncoder: @unchecked Sendable {
         stateLock.lock()
         expectedPTSQueue.append(pts)
         encodeCount += 1
+        let forcesKeyframe = forcesKeyframeOnNextFrame
+        forcesKeyframeOnNextFrame = false
         stateLock.unlock()
+
+        let frameProperties: CFDictionary? = forcesKeyframe
+            ? [kVTEncodeFrameOptionKey_ForceKeyFrame: kCFBooleanTrue] as CFDictionary
+            : nil
 
         let status = VTCompressionSessionEncodeFrame(
             session,
             imageBuffer: pixelBuffer,
             presentationTimeStamp: pts,
             duration: duration,
-            frameProperties: nil,
+            frameProperties: frameProperties,
             sourceFrameRefcon: nil,
             infoFlagsOut: nil
         )
@@ -182,6 +203,9 @@ public final class VideoEncoder: @unchecked Sendable {
         if status != noErr {
             stateLock.lock()
             _ = expectedPTSQueue.popLast()
+            // The frame never reached the encoder, so a keyframe request that
+            // rode along with it has to carry over to the next one.
+            forcesKeyframeOnNextFrame = forcesKeyframeOnNextFrame || forcesKeyframe
             stateLock.unlock()
             print("Encoder: VTCompressionSessionEncodeFrame failed with status \(status)")
         }
@@ -194,6 +218,7 @@ public final class VideoEncoder: @unchecked Sendable {
         _currentConfiguration = nil
         expectedPTSQueue.removeAll()
         encodeCount = 0
+        forcesKeyframeOnNextFrame = false
         stateLock.unlock()
 
         guard let session else { return }

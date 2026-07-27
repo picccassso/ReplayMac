@@ -61,6 +61,11 @@ extension AppDelegate {
             outputDirectory: outputDirectory,
             storage: .session
         )
+        // The recorder can only open its first segment on a keyframe, and when
+        // capture was already running the encoder's next scheduled one can be
+        // up to two seconds out. Ask for one now so the session starts on the
+        // frame the user pressed the hotkey on.
+        videoEncoder.requestKeyframe()
 
         isSessionRecording = true
         menuBarState.setSessionRecording(true)

@@ -444,6 +444,12 @@ extension AppDelegate {
             maxDurationSeconds: TimeInterval(AppSettings.longBufferDurationSeconds),
             outputDirectory: outputDirectory
         )
+        if enabled {
+            // Segments only open on a keyframe. When this runs against a
+            // running encoder — a settings change mid-capture — waiting for the
+            // next scheduled one would silently drop up to two seconds.
+            videoEncoder.requestKeyframe()
+        }
         menuBarState.setExtendedBufferRecording(enabled && isCaptureRunning)
 
         if AppSettings.longBufferEnabled && separateDualSave {
