@@ -1,3 +1,4 @@
+import Capture
 import SwiftUI
 
 extension SettingsView {
@@ -121,9 +122,36 @@ extension SettingsView {
             captureProfiles = []
             return
         }
-        captureProfiles = profiles.sorted { $0.updatedAt > $1.updatedAt }
+        captureProfiles = migrateLegacyDisplayIDs(in: profiles).sorted { $0.updatedAt > $1.updatedAt }
         selectedProfileID = selectedProfileID ?? captureProfiles.first?.id
         syncSelectedProfileNameDraft()
+    }
+
+    /// Profiles saved by older builds hold raw `CGDirectDisplayID`s; upgrade them so
+    /// applying an old profile doesn't reintroduce an ID that stops matching later.
+    /// Profiles referencing displays that aren't attached are left as they are.
+    func migrateLegacyDisplayIDs(in profiles: [CaptureProfile]) -> [CaptureProfile] {
+        let online = DisplayIdentity.onlineDisplayIDs()
+        guard !online.isEmpty else { return profiles }
+
+        var migrated = profiles
+        var didChange = false
+        for index in migrated.indices {
+            if let key = DisplayIdentity.migratedKey(forLegacyValue: migrated[index].captureDisplayID, among: online) {
+                migrated[index].captureDisplayID = key
+                didChange = true
+            }
+            if let key = DisplayIdentity.migratedKey(forLegacyValue: migrated[index].captureDisplayID2, among: online) {
+                migrated[index].captureDisplayID2 = key
+                didChange = true
+            }
+        }
+
+        if didChange {
+            captureProfiles = migrated
+            persistCaptureProfiles()
+        }
+        return migrated
     }
 
     func persistCaptureProfiles() {

@@ -84,6 +84,7 @@ let package = Package(
             dependencies: [
                 "Branding",
                 "Audio",
+                "Capture",
                 "Save",
                 "Hotkeys",
                 .product(name: "KeyboardShortcuts", package: "KeyboardShortcuts"),

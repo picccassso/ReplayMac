@@ -88,12 +88,12 @@ extension SettingsView {
     }
 
     var selectedCaptureDisplays: [DisplayOption] {
-        let display1 = displays.first { $0.id == captureDisplayID } ?? displays.first
+        let display1 = connectedDisplay(matching: captureDisplayID) ?? connectedDisplays.first
         guard captureModeRawValue == CaptureMode.dualSideBySide.rawValue else {
             return display1.map { [$0] } ?? []
         }
 
-        let display2 = displays.first { $0.id == captureDisplayID2 }
+        let display2 = connectedDisplay(matching: captureDisplayID2)
         return [display1, display2].compactMap { $0 }
     }
 
@@ -107,8 +107,18 @@ extension SettingsView {
         }
     }
 
+    /// Displays attached right now, excluding placeholders for saved-but-disconnected
+    /// selections — resolution math must never be driven by a placeholder's size.
+    var connectedDisplays: [DisplayOption] {
+        displays.filter(\.isConnected)
+    }
+
+    func connectedDisplay(matching id: String) -> DisplayOption? {
+        connectedDisplays.first { $0.id == id }
+    }
+
     func validateCaptureResolutionSelection() {
-        guard !displays.isEmpty else { return }
+        guard !connectedDisplays.isEmpty else { return }
 
         if captureResolutionRawValue == CaptureResolution.retina.rawValue,
            !isRetinaResolutionAvailable {
@@ -126,8 +136,8 @@ extension SettingsView {
             return nil
         }
 
-        let display1 = displays.first { $0.id == captureDisplayID } ?? displays.first
-        let display2 = displays.first { $0.id == captureDisplayID2 }
+        let display1 = connectedDisplay(matching: captureDisplayID) ?? connectedDisplays.first
+        let display2 = connectedDisplay(matching: captureDisplayID2)
         let dimensions1 = dimensions(
             for: display1,
             fallback: nil,
@@ -151,7 +161,7 @@ extension SettingsView {
             return nil
         }
 
-        let display = displays.first { $0.id == captureDisplayID } ?? displays.first
+        let display = connectedDisplay(matching: captureDisplayID) ?? connectedDisplays.first
         guard let display, display.width > 0, display.height > 0, customCaptureHeight > 0 else {
             return nil
         }
@@ -243,8 +253,8 @@ extension SettingsView {
     }
 
     func effectiveVideoDimensions(resolutionRawValue: String) -> (width: Int, height: Int) {
-        let display1 = displays.first { $0.id == captureDisplayID } ?? displays.first
-        let display2 = displays.first { $0.id == captureDisplayID2 }
+        let display1 = connectedDisplay(matching: captureDisplayID) ?? connectedDisplays.first
+        let display2 = connectedDisplay(matching: captureDisplayID2)
         let singleDimensions = dimensions(
             for: display1,
             fallback: nil,

@@ -232,7 +232,7 @@ public actor CaptureManager {
         let content = try await permissions.requestAccess(interactive: interactivePermissionPrompt)
 
         let selectedDisplay = content.displays.first { display in
-            String(display.displayID) == captureDisplayID
+            DisplayIdentity.matches(captureDisplayID, displayID: display.displayID)
         }
 
         guard let display = selectedDisplay ?? content.displays.first else {
@@ -309,10 +309,10 @@ public actor CaptureManager {
             throw CaptureError.notEnoughDisplays
         }
 
-        let selectedDisplay1 = displays.first { String($0.displayID) == captureDisplayID1 }
+        let selectedDisplay1 = displays.first { DisplayIdentity.matches(captureDisplayID1, displayID: $0.displayID) }
             ?? displays.first
         let remainingDisplays = displays.filter { $0.displayID != selectedDisplay1?.displayID }
-        let selectedDisplay2 = remainingDisplays.first { String($0.displayID) == captureDisplayID2 }
+        let selectedDisplay2 = remainingDisplays.first { DisplayIdentity.matches(captureDisplayID2, displayID: $0.displayID) }
             ?? remainingDisplays.first
 
         guard let display1 = selectedDisplay1, let display2 = selectedDisplay2 else {

@@ -145,6 +145,10 @@ class AppDelegate: NSObject, NSApplicationDelegate, @unchecked Sendable {
 
         NotificationManager.shared.requestAuthorization()
 
+        // Must run before the first capture starts, so a selection saved as a raw
+        // CGDirectDisplayID is upgraded to a stable key while that display is attached.
+        AppSettings.migrateDisplaySelectionsIfNeeded()
+
         configurePipelines()
 
         statusItemController.onSaveClip = { [weak self] in

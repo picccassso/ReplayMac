@@ -1,4 +1,6 @@
 import AVFoundation
+import AppKit
+import Capture
 import CoreGraphics
 import Defaults
 @preconcurrency import ScreenCaptureKit
@@ -33,43 +35,44 @@ extension SettingsView {
     func loadDisplays() async {
         do {
             let shareableContent = try await SCShareableContent.excludingDesktopWindows(false, onScreenWindowsOnly: true)
-            let options = shareableContent.displays.map { display in
-                let filter = SCContentFilter(display: display, excludingApplications: [], exceptingWindows: [])
-                let pointPixelScale = max(Double(filter.pointPixelScale), 1.0)
-                let displayID = CGDirectDisplayID(display.displayID)
-                let displayMode = CGDisplayCopyDisplayMode(displayID)
-                let pixelWidth = max(CGDisplayPixelsWide(displayID), displayMode?.pixelWidth ?? 0)
-                let pixelHeight = max(CGDisplayPixelsHigh(displayID), displayMode?.pixelHeight ?? 0)
-
-                return DisplayOption(
-                    id: String(display.displayID),
-                    name: "Display \(display.displayID) (\(display.width)x\(display.height) logical)",
-                    width: Int(display.width),
-                    height: Int(display.height),
-                    pointPixelScale: pointPixelScale,
-                    pixelWidth: pixelWidth,
-                    pixelHeight: pixelHeight
-                )
-            }
-
             await MainActor.run {
-                displays = options
+                let connected = shareableContent.displays.map { display -> DisplayOption in
+                    let filter = SCContentFilter(display: display, excludingApplications: [], exceptingWindows: [])
+                    let pointPixelScale = max(Double(filter.pointPixelScale), 1.0)
+                    let displayID = CGDirectDisplayID(display.displayID)
+                    let displayMode = CGDisplayCopyDisplayMode(displayID)
+                    let pixelWidth = max(CGDisplayPixelsWide(displayID), displayMode?.pixelWidth ?? 0)
+                    let pixelHeight = max(CGDisplayPixelsHigh(displayID), displayMode?.pixelHeight ?? 0)
+
+                    return DisplayOption(
+                        id: DisplayIdentity.stableKey(for: displayID),
+                        name: displayName(for: displayID, width: Int(display.width), height: Int(display.height)),
+                        width: Int(display.width),
+                        height: Int(display.height),
+                        pointPixelScale: pointPixelScale,
+                        pixelWidth: pixelWidth,
+                        pixelHeight: pixelHeight,
+                        isConnected: true
+                    )
+                }
+
+                // A selection that isn't attached right now stays selected. Overwriting it
+                // here is what used to lose the user's screen choice whenever a display ID
+                // changed or an external monitor was slow to wake after login.
+                migrateLegacyDisplaySelections(connected: connected)
+                displays = connected + placeholdersForDisconnectedSelections(connected: connected)
                 displayLoadError = nil
                 updateAudioApplications(from: shareableContent.applications)
 
-                if options.isEmpty {
-                    captureDisplayID = ""
-                    captureDisplayID2 = ""
-                } else {
-                    if !options.contains(where: { $0.id == captureDisplayID }) {
-                        captureDisplayID = options[0].id
-                    }
+                if captureDisplayID.isEmpty, let first = connected.first {
+                    captureDisplayID = first.id
+                }
+                if captureDisplayID2.isEmpty,
+                   let firstOther = connected.first(where: { $0.id != captureDisplayID }) {
+                    captureDisplayID2 = firstOther.id
+                }
 
-                    let remainingForDisplay2 = options.filter { $0.id != captureDisplayID }
-                    if !remainingForDisplay2.contains(where: { $0.id == captureDisplayID2 }) {
-                        captureDisplayID2 = remainingForDisplay2.first?.id ?? ""
-                    }
-
+                if !displays.isEmpty {
                     validateCaptureResolutionSelection()
                 }
             }
@@ -80,6 +83,51 @@ extension SettingsView {
                 displayLoadError = error.localizedDescription
             }
         }
+    }
+
+    /// Rewrite raw-`CGDirectDisplayID` selections saved by older builds into stable keys,
+    /// while the display they point at is still attached to identify it.
+    func migrateLegacyDisplaySelections(connected: [DisplayOption]) {
+        guard !connected.isEmpty else { return }
+        let online = DisplayIdentity.onlineDisplayIDs()
+
+        if let migrated = DisplayIdentity.migratedKey(forLegacyValue: captureDisplayID, among: online) {
+            captureDisplayID = migrated
+        }
+        if let migrated = DisplayIdentity.migratedKey(forLegacyValue: captureDisplayID2, among: online) {
+            captureDisplayID2 = migrated
+        }
+    }
+
+    /// Entries standing in for selected displays that aren't attached right now, so the
+    /// picker keeps showing the user's choice instead of silently jumping to another screen.
+    func placeholdersForDisconnectedSelections(connected: [DisplayOption]) -> [DisplayOption] {
+        let connectedIDs = Set(connected.map(\.id))
+        let selections = [captureDisplayID, captureDisplayID2]
+            .filter { !$0.isEmpty && !connectedIDs.contains($0) }
+
+        return Array(Set(selections)).sorted().map { id in
+            DisplayOption(
+                id: id,
+                name: "Previously selected display (not connected)",
+                width: 1920,
+                height: 1080,
+                pointPixelScale: 1,
+                pixelWidth: 1920,
+                pixelHeight: 1080,
+                isConnected: false
+            )
+        }
+    }
+
+    func displayName(for displayID: CGDirectDisplayID, width: Int, height: Int) -> String {
+        let localizedName = NSScreen.screens.first { screen in
+            (screen.deviceDescription[NSDeviceDescriptionKey("NSScreenNumber")] as? NSNumber)?
+                .uint32Value == displayID
+        }?.localizedName
+
+        let label = localizedName ?? (CGDisplayIsBuiltin(displayID) != 0 ? "Built-in Display" : "Display \(displayID)")
+        return "\(label) (\(width)x\(height) logical)"
     }
 
     func loadAudioApplications() async {

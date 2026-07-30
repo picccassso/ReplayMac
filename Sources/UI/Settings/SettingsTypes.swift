@@ -36,6 +36,9 @@ struct DisplayOption: Identifiable, Hashable {
     let pointPixelScale: Double
     let pixelWidth: Int
     let pixelHeight: Int
+    /// False for a saved selection whose display isn't attached right now. The option is
+    /// still listed so the stored choice survives until the display comes back.
+    var isConnected: Bool = true
 
     var retinaWidth: Int {
         AppSettings.retinaPixelDimension(

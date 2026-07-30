@@ -1,3 +1,4 @@
+import Capture
 import Foundation
 import Branding
 import Defaults
@@ -207,6 +208,24 @@ public enum AppSettings {
 
     public static var captureDisplayID2: String {
         Defaults[.captureDisplayID2]
+    }
+
+    /// Upgrade display selections that were saved as raw `CGDirectDisplayID`s.
+    ///
+    /// Runs at launch. A value can only be migrated while the display it points at is
+    /// still attached, so anything unresolvable is left untouched and picked up on a
+    /// later launch — the raw ID keeps working in the meantime.
+    public static func migrateDisplaySelectionsIfNeeded() {
+        let online = DisplayIdentity.onlineDisplayIDs()
+        guard !online.isEmpty else { return }
+
+        let keys: [Defaults.Key<String>] = [.captureDisplayID, .captureDisplayID2]
+        for key in keys {
+            let stored = Defaults[key]
+            if let migrated = DisplayIdentity.migratedKey(forLegacyValue: stored, among: online) {
+                Defaults[key] = migrated
+            }
+        }
     }
 
     public static var dualCaptureSaveMode: String {
