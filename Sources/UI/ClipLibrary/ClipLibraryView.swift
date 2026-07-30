@@ -1234,8 +1234,11 @@ private enum ClipAudioTracks {
     /// Builds a composition with the clip's video and only the selected audio
     /// track, so an export drops the other tracks entirely. Falls back to the
     /// original asset if the track is no longer present in the file.
-    @MainActor
-    static func soloComposition(
+    ///
+    /// Deliberately not main-actor isolated: `insertTimeRange` is synchronous
+    /// and can take real time on a long clip, which has no business blocking
+    /// the main thread.
+    nonisolated static func soloComposition(
         from asset: AVURLAsset,
         audioTrackID: CMPersistentTrackID
     ) async throws -> AVAsset {
@@ -1370,6 +1373,7 @@ private struct ClipTrimView: View {
     @State private var cropRect = NormalizedVideoCrop.fullFrame.rect
     @State private var cropAspect: CropAspectPreset = .free
     @State private var videoDisplaySize = CGSize(width: 16, height: 9)
+    @State private var activeExportSession: AVAssetExportSession?
 
     private var isBusy: Bool { isExporting || isExportingGIF }
     private var activeCrop: NormalizedVideoCrop? {
@@ -1471,6 +1475,15 @@ private struct ClipTrimView: View {
                     .lineLimit(1)
 
                 Spacer()
+
+                if isExporting, let session = activeExportSession {
+                    // An escape hatch while an export is running, so a wedged
+                    // export never leaves the sheet with no way out.
+                    Button("Cancel Export", role: .cancel) {
+                        session.cancelExport()
+                    }
+                    .help("Stop the export in progress")
+                }
 
                 Button("Cancel") {
                     dismiss()
@@ -1618,7 +1631,9 @@ private struct ClipTrimView: View {
                 )
             }
             exportSession.shouldOptimizeForNetworkUse = true
-            try await exportSession.export(to: outputURL, as: .mp4)
+            activeExportSession = exportSession
+            defer { activeExportSession = nil }
+            try await ExportWatchdog.runExport(exportSession, to: outputURL, as: .mp4)
 
             onExport()
             dismiss()
@@ -1716,6 +1731,7 @@ private enum TrimExportError: LocalizedError {
     case cannotCreateSession
     case cannotBuildComposition
     case exportFailed
+    case stalled
 
     var errorDescription: String? {
         switch self {
@@ -1725,7 +1741,59 @@ private enum TrimExportError: LocalizedError {
             return "Unable to prepare the selected audio track for export."
         case .exportFailed:
             return "Trim export did not complete."
+        case .stalled:
+            return "The export stopped making progress and was cancelled. Please try again."
         }
+    }
+}
+
+/// Carries an export session to the stall watchdog, which deliberately runs
+/// off the main actor so it still fires if the main actor is starved.
+private final class ExportSessionBox: @unchecked Sendable {
+    let session: AVAssetExportSession
+    init(_ session: AVAssetExportSession) { self.session = session }
+}
+
+private enum ExportWatchdog {
+    /// Seconds of zero progress before an export is treated as wedged.
+    static let stallTimeout = 90
+
+    /// Runs an export, cancelling it if `progress` stops advancing entirely.
+    ///
+    /// Without this a stuck export leaves the sheet spinning forever with no
+    /// way out but force-quitting. Progress-based rather than a flat deadline,
+    /// so a slow-but-advancing export of a long clip is never killed. The
+    /// watchdog is detached on purpose: a main-actor watchdog cannot fire in
+    /// exactly the situation it exists to catch.
+    @MainActor
+    static func runExport(
+        _ session: AVAssetExportSession,
+        to outputURL: URL,
+        as fileType: AVFileType
+    ) async throws {
+        let box = ExportSessionBox(session)
+        let watchdog = Task.detached(priority: .utility) {
+            var lastProgress: Float = -1
+            var stalledSeconds = 0
+            while !Task.isCancelled {
+                try? await Task.sleep(for: .seconds(2))
+                if Task.isCancelled { return }
+                let progress = box.session.progress
+                if progress > lastProgress {
+                    lastProgress = progress
+                    stalledSeconds = 0
+                } else {
+                    stalledSeconds += 2
+                    if stalledSeconds >= stallTimeout {
+                        box.session.cancelExport()
+                        return
+                    }
+                }
+            }
+        }
+        defer { watchdog.cancel() }
+
+        try await session.export(to: outputURL, as: fileType)
     }
 }
 

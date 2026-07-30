@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Make a wedged trim export recoverable instead of terminal: exports are watched for progress and cancelled after 90 seconds of no movement at all (progress-based, so a slow but advancing export is never killed), and a Cancel Export button appears while one is running. The watchdog runs off the main actor deliberately, so it still fires if the main actor is starved
+- Build trim compositions off the main thread: the audio solo composition and the crop video composition were main-actor isolated despite doing synchronous track loading and `insertTimeRange` work that can take real time on a long clip
 - Stop the export save panel from freezing the app: `NSSavePanel.runModal()` spun a nested modal run loop that does not service Swift concurrency's main-actor jobs, so while the panel was open every other main-actor continuation in the app — including the export that was about to run — was suspended; export destinations are now chosen with the non-blocking `begin(completionHandler:)`. This is the most likely cause of trim/crop exports hanging on a spinner and of the app then refusing to quit
 - Pause the trim preview player before exporting, so the export is not decoding the same file as the still-playing preview
 - Never strand the GIF export on a missing frame callback: deduplicate sample times that round onto the same tick (the generator coalesces identical requested times into one callback) and make the frame collector resume exactly once even if callback counts do not match

@@ -92,8 +92,10 @@ enum VideoCropper {
 
     /// Creates an export composition that first applies the track's preferred
     /// orientation and then moves the selected displayed region to (0, 0).
-    @MainActor
-    static func videoComposition(
+    ///
+    /// Deliberately not main-actor isolated: building this loads tracks and
+    /// their properties, and none of it needs the main thread.
+    nonisolated static func videoComposition(
         for asset: AVAsset,
         crop: NormalizedVideoCrop
     ) async throws -> AVMutableVideoComposition {
