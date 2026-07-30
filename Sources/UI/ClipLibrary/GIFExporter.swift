@@ -52,24 +52,32 @@ private final class GIFFrameCollector: @unchecked Sendable {
     private let total: Int
     private var collected: [(time: Double, image: CGImage)] = []
     private var processed = 0
+    private var finished = false
 
     init(total: Int) {
         self.total = total
     }
 
+    /// Returns the ordered frames exactly once, on the callback that completes
+    /// the batch. `>=` rather than `==` so an extra callback can't slip past
+    /// the completion point and strand the caller's continuation; `finished`
+    /// guarantees it still only fires once.
     func record(requestedTime: CMTime, image: CGImage?) -> [CGImage]? {
         lock.lock()
         defer { lock.unlock() }
+
+        guard !finished else { return nil }
 
         if let image {
             collected.append((requestedTime.seconds, image))
         }
 
         processed += 1
-        guard processed == total else {
+        guard processed >= total else {
             return nil
         }
 
+        finished = true
         return collected
             .sorted { $0.time < $1.time }
             .map(\.image)
@@ -104,8 +112,14 @@ enum GIFExporter {
         frameCount = min(frameCount, maxFrames)
         let interval = rangeDuration / Double(frameCount)
 
-        let sampleTimes: [CMTime] = (0..<frameCount).map { index in
-            CMTime(seconds: startSeconds + Double(index) * interval, preferredTimescale: 600)
+        // Deduplicate: a very short range can round two samples onto the same
+        // 1/600s tick, and the generator coalesces identical requested times
+        // into a single callback. The collector counts callbacks, so duplicates
+        // would leave it waiting for a callback that never comes.
+        var seenTicks = Set<Int64>()
+        let sampleTimes: [CMTime] = (0..<frameCount).compactMap { index in
+            let time = CMTime(seconds: startSeconds + Double(index) * interval, preferredTimescale: 600)
+            return seenTicks.insert(time.value).inserted ? time : nil
         }
 
         let asset = AVURLAsset(url: sourceURL)

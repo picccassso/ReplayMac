@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- Stop the export save panel from freezing the app: `NSSavePanel.runModal()` spun a nested modal run loop that does not service Swift concurrency's main-actor jobs, so while the panel was open every other main-actor continuation in the app — including the export that was about to run — was suspended; export destinations are now chosen with the non-blocking `begin(completionHandler:)`. This is the most likely cause of trim/crop exports hanging on a spinner and of the app then refusing to quit
+- Pause the trim preview player before exporting, so the export is not decoding the same file as the still-playing preview
+- Never strand the GIF export on a missing frame callback: deduplicate sample times that round onto the same tick (the generator coalesces identical requested times into one callback) and make the frame collector resume exactly once even if callback counts do not match
 - Make clip deletion discoverable in the library: right-click any row (or selection) for a context menu with Delete, press the Delete key on the selected clips, use the new Delete button in the single-clip detail bar, and double-click a row to preview; the Actions column is wider so the trash icon isn't clipped, and every action icon now has a tooltip
 - Add session recording: start→stop capture that writes continuously and saves one MP4 (screen + system audio + mic) when stopped — available from the menu bar and a new hotkey, independent of the instant-replay buffer
 - Publish the Mac App Store edition as ReplayCap after App Review rejected "Mac" in the app name (Guideline 5.2.5); the direct/GitHub build keeps the ReplayMac name via a launch-time branding constant shared across both builds

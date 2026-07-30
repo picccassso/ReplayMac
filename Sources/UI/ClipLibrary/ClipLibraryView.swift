@@ -606,7 +606,7 @@ public struct ClipLibraryView: View {
         guard end > 0 else { return }
 
         let suggestedURL = GIFExporter.uniqueOutputURL(basedOn: sourceURL)
-        guard let outputURL = ExportDestinationPicker.chooseDestination(
+        guard let outputURL = await ExportDestinationPicker.chooseDestination(
             suggestedURL: suggestedURL,
             contentType: .gif,
             title: "Export GIF"
@@ -1551,6 +1551,9 @@ private struct ClipTrimView: View {
     private func exportTrimmedClip() async {
         isExporting = true
         errorMessage = nil
+        // Stop the preview so the export isn't decoding the same file as the
+        // player, and so playback isn't left running under the save panel.
+        player?.pause()
         defer { isExporting = false }
 
         do {
@@ -1579,7 +1582,7 @@ private struct ClipTrimView: View {
                 in: url.deletingLastPathComponent(),
                 suffix: suffix
             )
-            guard let outputURL = ExportDestinationPicker.chooseDestination(
+            guard let outputURL = await ExportDestinationPicker.chooseDestination(
                 suggestedURL: suggestedURL,
                 contentType: .mpeg4Movie,
                 title: "Export Trimmed Clip"
@@ -1628,12 +1631,13 @@ private struct ClipTrimView: View {
     private func exportGIF() async {
         isExportingGIF = true
         errorMessage = nil
+        player?.pause()
         defer { isExportingGIF = false }
 
         do {
             let crop = activeCrop
             let suggestedURL = GIFExporter.uniqueOutputURL(basedOn: url)
-            guard let outputURL = ExportDestinationPicker.chooseDestination(
+            guard let outputURL = await ExportDestinationPicker.chooseDestination(
                 suggestedURL: suggestedURL,
                 contentType: .gif,
                 title: "Export GIF"
