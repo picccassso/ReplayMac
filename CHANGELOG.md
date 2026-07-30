@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- Make clip deletion discoverable in the library: right-click any row (or selection) for a context menu with Delete, press the Delete key on the selected clips, use the new Delete button in the single-clip detail bar, and double-click a row to preview; the Actions column is wider so the trash icon isn't clipped, and every action icon now has a tooltip
 - Add session recording: start→stop capture that writes continuously and saves one MP4 (screen + system audio + mic) when stopped — available from the menu bar and a new hotkey, independent of the instant-replay buffer
 - Publish the Mac App Store edition as ReplayCap after App Review rejected "Mac" in the app name (Guideline 5.2.5); the direct/GitHub build keeps the ReplayMac name via a launch-time branding constant shared across both builds
 - Share on-disk metadata and long-buffer names between both editions (`.ReplayCapClipLibrary.json`, `.ReplayCapLongBuffer`), migrating existing `.ReplayMac…` files automatically

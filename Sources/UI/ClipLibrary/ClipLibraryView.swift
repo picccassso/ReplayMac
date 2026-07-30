@@ -286,6 +286,7 @@ public struct ClipLibraryView: View {
                     IconActionButton(icon: "play.fill", color: AppTheme.accent) {
                         previewURL = row.info.fileURL
                     }
+                    .help("Quick preview")
 
                     IconActionButton(icon: "scissors", color: AppTheme.accentSecondary) {
                         trimURL = row.info.fileURL
@@ -300,19 +301,63 @@ public struct ClipLibraryView: View {
                     ) {
                         copyFile(row.info.fileURL)
                     }
+                    .help("Copy file to clipboard")
 
                     IconActionButton(icon: "folder", color: AppTheme.textSecondary) {
                         NSWorkspace.shared.activateFileViewerSelecting([row.info.fileURL])
                     }
+                    .help("Reveal in Finder")
 
                     IconActionButton(icon: "trash", color: AppTheme.danger) {
-                        deleteCandidate = row
+                        requestDelete([row])
                     }
+                    .help("Delete clip (moves it to Trash)")
                 }
             }
-            .width(min: 210, ideal: 240)
+            .width(min: 240, ideal: 260)
         }
         .tableStyle(.inset(alternatesRowBackgrounds: true))
+        .contextMenu(forSelectionType: ClipRow.ID.self) { ids in
+            let targets = rows(for: ids)
+            if !targets.isEmpty {
+                if let row = targets.first, targets.count == 1 {
+                    Button("Quick Preview") { previewURL = row.info.fileURL }
+                    Button("Trim & Export…") { trimURL = row.info.fileURL }
+                    Button("Copy File") { copyFile(row.info.fileURL) }
+                }
+                Button("Reveal in Finder") {
+                    NSWorkspace.shared.activateFileViewerSelecting(targets.map(\.info.fileURL))
+                }
+                Divider()
+                Button(targets.count == 1 ? "Delete Clip" : "Delete \(targets.count) Clips", role: .destructive) {
+                    requestDelete(targets)
+                }
+            }
+        } primaryAction: { ids in
+            if let row = rows(for: ids).first {
+                previewURL = row.info.fileURL
+            }
+        }
+        .onDeleteCommand {
+            requestDelete(selectedRows)
+        }
+    }
+
+    private func rows(for ids: Set<ClipRow.ID>) -> [ClipRow] {
+        model.rows.filter { ids.contains($0.id) }
+    }
+
+    /// Routes a delete request to the single- or bulk-confirmation alert.
+    /// Selection is synced first so the bulk alert (which reads `selectedRows`)
+    /// targets exactly what was right-clicked.
+    private func requestDelete(_ targets: [ClipRow]) {
+        guard !targets.isEmpty else { return }
+        if targets.count == 1 {
+            deleteCandidate = targets[0]
+        } else {
+            selection = Set(targets.map(\.id))
+            bulkDeletePresented = true
+        }
     }
 
     private func bottomBarView(for row: ClipRow) -> some View {
@@ -387,6 +432,17 @@ public struct ClipLibraryView: View {
                     .lineLimit(1)
 
                 Spacer()
+
+                Button(role: .destructive) {
+                    requestDelete([row])
+                } label: {
+                    Label("Delete", systemImage: "trash")
+                        .font(.system(size: 12, weight: .semibold, design: .rounded))
+                }
+                .buttonStyle(.bordered)
+                .controlSize(.small)
+                .tint(AppTheme.danger)
+                .help("Move this clip to Trash")
             }
 
             HStack(alignment: .top, spacing: 12) {
