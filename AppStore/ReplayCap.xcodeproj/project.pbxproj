@@ -8,6 +8,7 @@
 
 /* Begin PBXBuildFile section */
 		42D5F3CD02C6BACCDD74E93B /* AppDelegate+SessionRecording.swift in Sources */ = {isa = PBXBuildFile; fileRef = 811A90C8E108D370D41F2E14 /* AppDelegate+SessionRecording.swift */; };
+		44B98787BD2B1177B2FE0A9C /* ReplayBufferGate.swift in Sources */ = {isa = PBXBuildFile; fileRef = DD59C2C61612E96CE0131967 /* ReplayBufferGate.swift */; };
 		598657E41BBF2656BD8580DF /* ReplayCapApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = E502C57EAC829FFA49D1AEAA /* ReplayCapApp.swift */; };
 		59FC72A89D86D16E2601CA39 /* ReplayCap.icns in Resources */ = {isa = PBXBuildFile; fileRef = 559BD2D28A1E37FA72B57DF0 /* ReplayCap.icns */; };
 		70F1C5157C4605E0F4524886 /* AppDelegate+CapturePipeline.swift in Sources */ = {isa = PBXBuildFile; fileRef = FD15E173F82D19D367B3941E /* AppDelegate+CapturePipeline.swift */; };
@@ -39,6 +40,7 @@
 		B955C46510EBB27E8FF1F310 /* AppDelegate+RuntimeSettings.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "AppDelegate+RuntimeSettings.swift"; sourceTree = "<group>"; };
 		C188C46C55CF686576AD3FA7 /* AppDelegate+BufferMonitoring.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "AppDelegate+BufferMonitoring.swift"; sourceTree = "<group>"; };
 		CEDA418D306D1299AE9360AC /* ReplayCap.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = ReplayCap.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		DD59C2C61612E96CE0131967 /* ReplayBufferGate.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ReplayBufferGate.swift; sourceTree = "<group>"; };
 		E502C57EAC829FFA49D1AEAA /* ReplayCapApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ReplayCapApp.swift; sourceTree = "<group>"; };
 		F5702EA1CBB05618D37A878B /* AppDelegate+PipelineHandlers.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "AppDelegate+PipelineHandlers.swift"; sourceTree = "<group>"; };
 		FD15E173F82D19D367B3941E /* AppDelegate+CapturePipeline.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "AppDelegate+CapturePipeline.swift"; sourceTree = "<group>"; };
@@ -72,6 +74,7 @@
 				7422DD4CC1BD5CBE6D3C9DFB /* AppDelegate+UI.swift */,
 				2757777606E302889B063A23 /* AppDelegate+Updates.swift */,
 				82AD9C2256AEB70D6579213C /* GameActivityMonitor.swift */,
+				DD59C2C61612E96CE0131967 /* ReplayBufferGate.swift */,
 				E502C57EAC829FFA49D1AEAA /* ReplayCapApp.swift */,
 			);
 			name = App;
@@ -228,6 +231,7 @@
 				E0584D5F4C1713065639C581 /* AppDelegate+Updates.swift in Sources */,
 				8009A0BFB4ED8C95A6C8510A /* AppDelegate.swift in Sources */,
 				FBEACDC288E847EEAE143CE5 /* GameActivityMonitor.swift in Sources */,
+				44B98787BD2B1177B2FE0A9C /* ReplayBufferGate.swift in Sources */,
 				598657E41BBF2656BD8580DF /* ReplayCapApp.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;

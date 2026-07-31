@@ -13,7 +13,8 @@ It continuously buffers recent screen/audio capture and saves the last N seconds
 ## Features
 
 - **Instant replay** — Continuously buffers the last N seconds (15–300) of screen and audio; save retroactively with a click or hotkey.
-- **Session recording** — Record until you stop, then save one file with screen, system audio, and microphone (menu bar or hotkey).
+- **Session recording** — Record until you stop, then save one file with screen, system audio, and microphone (menu bar or hotkey). Video is saved without re-encoding, so saves are near-instant and keep the capture codec.
+- **Automatic game recording** — Opt in to stay idle until a game launches, record only while you're playing, and stop when the last game quits. Games are detected by their App Store category, with a manual bundle-identifier list for titles that don't declare one (many Steam games).
 - **Dual display support** — Capture one or two monitors, saved as a side-by-side composite or as separate files.
 - **Hardware-accelerated encoding** — HEVC or H.264 via VideoToolbox, with configurable resolution, frame rate, and bitrate.
 - **Retina-aware recording** — Record HiDPI displays at their backing pixel resolution while keeping the macOS UI at its comfortable scaled size.
@@ -22,13 +23,13 @@ It continuously buffers recent screen/audio capture and saves the last N seconds
 - **Ring buffer memory management** — Configurable memory cap (256 MB–4 GB) shared across all replay buffers, with automatic eviction under memory pressure.
 - **Extended replay buffer** — Optionally roll 5, 10, or 30 minute replay windows to disk, with SSD write and disk usage warnings before enabling.
 - **Configurable hotkeys** — Save clip, toggle recording, save last 15s, save last 60s, save extended replay, start/stop session recording, open clip library.
-- **Clip library** — Browse, preview, trim, crop, export, or export as GIF; rename, tag, favorite, and batch-act on multiple clips at once.
+- **Clip library** — Browse, preview, trim, crop, export, or export as GIF; rename, tag, favorite, delete, and batch-act on multiple clips at once.
 - **Crop on export** — Drag a crop area directly over the preview, or snap it to 16:9, 1:1, 4:3, or 9:16; the crop applies to both MP4 and GIF exports.
 - **Clip sharing** — Open the macOS share sheet or copy a clip file for pasting into another app.
 - **Clip organization** — Search clips, mark favorites, add display names, tags, and notes.
 - **Storage cleanup** — View total library size and move non-favorite clips to Trash by age or in bulk.
 - **Capture profiles** — Save named video/audio/buffer configurations and switch between them on demand.
-- **Customizable file-name templates** — Name clips with `{app}`, `{date}`, and `{time}` tokens, with a live preview in Settings > General.
+- **Customizable file-name templates** — Name clips with `{app}`, `{date}`, and `{time}` tokens, with selectable date and time formats and a live preview in Settings > General.
 - **Quality presets** — Performance, Quality, Ultra, and Custom modes that tune resolution, frame rate, and bitrate together.
 - **Live settings** — Capture, encoding, and audio changes apply while recording; no restart required.
 - **Reliable save flow** — Preflight checks block saves when not recording, while the buffer is filling, or when disk space is too low.
@@ -48,7 +49,7 @@ Grab the latest release from the [Releases](https://github.com/picccassso/Replay
 
 ReplayMac is notarized by Apple, so it opens like any other app — no Gatekeeper workarounds needed.
 
-> **Coming soon:** a Mac App Store version, published as **ReplayCap**. Buying it is a great way to help fund development.
+> Prefer the App Store? The same app is published there as **[ReplayCap](https://apps.apple.com/us/app/replaycap/id6789296427?mt=12)**, a one-time purchase that helps fund development and updates itself through the App Store.
 
 ## Build from source
 
