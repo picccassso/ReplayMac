@@ -26,7 +26,9 @@ public final class FrameCompositor: @unchecked Sendable {
     private var pixelBufferPool: CVPixelBufferPool?
     private var _outputHandler: OutputHandler?
     private let ciContext = CIContext(options: [.cacheIntermediates: false])
-    private let colorSpace = CGColorSpaceCreateDeviceRGB()
+    // Explicit sRGB rather than device RGB, so compositing stays in the same
+    // space as the sRGB capture and the BT.709 tags the encoder writes.
+    private let colorSpace = CGColorSpace(name: CGColorSpace.sRGB) ?? CGColorSpaceCreateDeviceRGB()
 
     private var primaryTimeoutCounter = 0
     private var secondaryTimeoutCounter = 0

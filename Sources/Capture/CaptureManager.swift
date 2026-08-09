@@ -28,6 +28,11 @@ public struct CaptureResolutionConfig: Sendable {
 public actor CaptureManager {
     private static let screenPixelFormat = kCVPixelFormatType_420YpCbCr8BiPlanarFullRange
 
+    // Pin capture to sRGB so it matches the BT.709 tags the encoder writes into
+    // the MP4. Without this the stream is untagged and players guess, which
+    // shows up as washed-out/desaturated clips on wide-gamut displays.
+    private static let screenColorSpace = CGColorSpace.sRGB
+
     // Single-display state
     private var stream: SCStream?
     private nonisolated let delegate = CaptureDelegate()
@@ -79,6 +84,7 @@ public actor CaptureManager {
         config.minimumFrameInterval = CMTime(value: 1, timescale: CMTimeScale(fps))
         config.queueDepth = queueDepth
         config.pixelFormat = currentConfig.pixelFormat
+        config.colorSpaceName = currentConfig.colorSpaceName
         config.capturesAudio = currentConfig.capturesAudio
         config.excludesCurrentProcessAudio = excludeOwnAppAudio
 
@@ -116,6 +122,7 @@ public actor CaptureManager {
         config1.minimumFrameInterval = CMTime(value: 1, timescale: CMTimeScale(fps))
         config1.queueDepth = queueDepth
         config1.pixelFormat = currentConfig1.pixelFormat
+        config1.colorSpaceName = currentConfig1.colorSpaceName
         config1.capturesAudio = currentConfig1.capturesAudio
         config1.excludesCurrentProcessAudio = excludeOwnAppAudio
 
@@ -125,6 +132,7 @@ public actor CaptureManager {
         config2.minimumFrameInterval = CMTime(value: 1, timescale: CMTimeScale(fps))
         config2.queueDepth = queueDepth
         config2.pixelFormat = currentConfig2.pixelFormat
+        config2.colorSpaceName = currentConfig2.colorSpaceName
         config2.capturesAudio = currentConfig2.capturesAudio
         config2.excludesCurrentProcessAudio = excludeOwnAppAudio
 
@@ -255,6 +263,7 @@ public actor CaptureManager {
         config.minimumFrameInterval = CMTime(value: 1, timescale: CMTimeScale(fps))
         config.queueDepth = queueDepth
         config.pixelFormat = Self.screenPixelFormat
+        config.colorSpaceName = Self.screenColorSpace
         config.capturesAudio = captureAudio
         config.excludesCurrentProcessAudio = excludeOwnAppAudio
 
@@ -347,6 +356,7 @@ public actor CaptureManager {
         config1.minimumFrameInterval = CMTime(value: 1, timescale: CMTimeScale(fps))
         config1.queueDepth = queueDepth
         config1.pixelFormat = Self.screenPixelFormat
+        config1.colorSpaceName = Self.screenColorSpace
         config1.capturesAudio = captureAudio
         config1.excludesCurrentProcessAudio = excludeOwnAppAudio
 
@@ -356,6 +366,7 @@ public actor CaptureManager {
         config2.minimumFrameInterval = CMTime(value: 1, timescale: CMTimeScale(fps))
         config2.queueDepth = queueDepth
         config2.pixelFormat = Self.screenPixelFormat
+        config2.colorSpaceName = Self.screenColorSpace
         config2.capturesAudio = false
 
         let newStream1 = SCStream(filter: filter1, configuration: config1, delegate: delegate1)

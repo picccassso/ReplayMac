@@ -127,7 +127,13 @@ public final class VideoEncoder: @unchecked Sendable {
             kVTCompressionPropertyKey_DataRateLimits: [
                 NSNumber(value: bytesPerSecond * 1.5),
                 NSNumber(value: 1.0)
-            ] as NSArray
+            ] as NSArray,
+            // Tag the output BT.709 (same primaries as the sRGB capture) so the
+            // MP4 tells players which matrix to use instead of leaving them to
+            // guess — an untagged stream is what made saved clips look drab.
+            kVTCompressionPropertyKey_ColorPrimaries: kCMFormatDescriptionColorPrimaries_ITU_R_709_2,
+            kVTCompressionPropertyKey_TransferFunction: kCMFormatDescriptionTransferFunction_ITU_R_709_2,
+            kVTCompressionPropertyKey_YCbCrMatrix: kCMFormatDescriptionYCbCrMatrix_ITU_R_709_2
         ]
 
         let propsStatus = VTSessionSetProperties(session, propertyDictionary: properties as CFDictionary)
