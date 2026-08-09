@@ -131,6 +131,39 @@ extension SettingsView {
             }
         }
         .formStyle(.grouped)
+        // The meters are fed by the capture pipeline while recording, and by
+        // AudioLevelPreview the rest of the time, so they stay live whenever
+        // the source is enabled.
+        .onAppear { refreshAudioLevelPreview() }
+        .onDisappear { AudioLevelPreview.shared.setConfiguration(nil) }
+        .onChange(of: selectedTab) { _, _ in refreshAudioLevelPreview() }
+        .onChange(of: captureSystemAudio) { _, _ in refreshAudioLevelPreview() }
+        .onChange(of: captureMicrophone) { _, _ in refreshAudioLevelPreview() }
+        .onChange(of: perAppAudioEnabled) { _, _ in refreshAudioLevelPreview() }
+        .onChange(of: perAppAudioBundleID) { _, _ in refreshAudioLevelPreview() }
+        .onChange(of: excludeOwnAppAudio) { _, _ in refreshAudioLevelPreview() }
+        .onChange(of: microphoneID) { _, _ in refreshAudioLevelPreview() }
+        .onChange(of: systemAudioVolume) { _, _ in refreshAudioLevelPreview() }
+        .onChange(of: microphoneVolume) { _, _ in refreshAudioLevelPreview() }
+    }
+
+    func refreshAudioLevelPreview() {
+        guard selectedTab == .audio else {
+            AudioLevelPreview.shared.setConfiguration(nil)
+            return
+        }
+
+        AudioLevelPreview.shared.setConfiguration(
+            AudioLevelPreview.Configuration(
+                monitorSystemAudio: captureSystemAudio,
+                monitorMicrophone: captureMicrophone,
+                microphoneDeviceID: microphoneID,
+                perAppAudioBundleID: perAppAudioEnabled && !perAppAudioBundleID.isEmpty ? perAppAudioBundleID : nil,
+                excludeOwnAppAudio: excludeOwnAppAudio,
+                systemAudioVolume: systemAudioVolume,
+                microphoneVolume: microphoneVolume
+            )
+        )
     }
 
     var selectedAppAudioHelpText: String {

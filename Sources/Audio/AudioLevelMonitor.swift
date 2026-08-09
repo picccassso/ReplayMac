@@ -17,6 +17,7 @@ public final class AudioLevelMonitor: @unchecked Sendable {
     private let lock = NSLock()
     private var systemAudio = LevelState()
     private var microphone = LevelState()
+    private var lastSnapshotAt: TimeInterval?
 
     private init() {}
 
@@ -28,15 +29,36 @@ public final class AudioLevelMonitor: @unchecked Sendable {
         record(sampleBuffer, source: .microphone)
     }
 
+    /// Feeds an already-normalized level (0...1). Used by the idle level
+    /// preview, which measures audio without running the capture pipeline.
+    public func recordSystemAudio(level: Double) {
+        record(level: level, source: .systemAudio)
+    }
+
+    public func recordMicrophone(level: Double) {
+        record(level: level, source: .microphone)
+    }
+
     public func snapshot() -> AudioLevelSnapshot {
         let now = ProcessInfo.processInfo.systemUptime
 
         lock.lock()
+        lastSnapshotAt = now
         let systemAudio = displayedLevel(for: systemAudio, now: now)
         let microphone = displayedLevel(for: microphone, now: now)
         lock.unlock()
 
         return AudioLevelSnapshot(systemAudio: systemAudio, microphone: microphone)
+    }
+
+    /// How long ago a meter last read the levels, or nil if none ever has.
+    /// The idle level preview uses this as a liveness signal: no reader means
+    /// nothing is displaying levels, so measuring them is wasted work.
+    public func secondsSinceLastSnapshot() -> TimeInterval? {
+        lock.lock()
+        defer { lock.unlock() }
+        guard let lastSnapshotAt else { return nil }
+        return max(0, ProcessInfo.processInfo.systemUptime - lastSnapshotAt)
     }
 
     public func reset() {
@@ -52,11 +74,20 @@ public final class AudioLevelMonitor: @unchecked Sendable {
         lock.unlock()
     }
 
+    public func resetSystemAudio() {
+        lock.lock()
+        systemAudio = LevelState()
+        lock.unlock()
+    }
+
     private func record(_ sampleBuffer: CMSampleBuffer, source: Source) {
         guard let level = Self.normalizedLevel(for: sampleBuffer) else {
             return
         }
+        record(level: level, source: source)
+    }
 
+    private func record(level: Double, source: Source) {
         let now = ProcessInfo.processInfo.systemUptime
 
         lock.lock()
@@ -82,7 +113,19 @@ public final class AudioLevelMonitor: @unchecked Sendable {
         return state.value * (1 - ((age - 0.2) / 0.6))
     }
 
-    private static func normalizedLevel(for sampleBuffer: CMSampleBuffer) -> Double? {
+    /// Maps a linear RMS amplitude onto the 0...1 meter scale (-60 dBFS and
+    /// below reads empty, 0 dBFS reads full).
+    public static func normalizedLevel(forRootMeanSquare rms: Double) -> Double {
+        guard rms.isFinite, rms > 0 else {
+            return 0
+        }
+        let decibels = 20 * log10(rms)
+        return min(1, max(0, (decibels + 60) / 60))
+    }
+
+    /// RMS amplitude of an interleaved float32 buffer, before any volume
+    /// scaling the caller wants to apply.
+    public static func rootMeanSquare(of sampleBuffer: CMSampleBuffer) -> Double? {
         guard let dataBuffer = CMSampleBufferGetDataBuffer(sampleBuffer) else {
             return nil
         }
@@ -113,13 +156,14 @@ public final class AudioLevelMonitor: @unchecked Sendable {
             return sum
         }
 
-        let rms = sqrt(sumOfSquares / Double(floatCount))
-        guard rms.isFinite, rms > 0 else {
-            return 0
-        }
+        return sqrt(sumOfSquares / Double(floatCount))
+    }
 
-        let decibels = 20 * log10(rms)
-        return min(1, max(0, (decibels + 60) / 60))
+    private static func normalizedLevel(for sampleBuffer: CMSampleBuffer) -> Double? {
+        guard let rms = rootMeanSquare(of: sampleBuffer) else {
+            return nil
+        }
+        return normalizedLevel(forRootMeanSquare: rms)
     }
 
     private enum Source {

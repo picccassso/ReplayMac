@@ -77,6 +77,10 @@ extension AppDelegate {
             return
         }
 
+        // Hand the audio devices over from the idle level preview before the
+        // pipeline claims them, rather than after it has already started.
+        AudioLevelPreview.shared.setCaptureActive(true)
+
         do {
             videoRingBuffer.clear()
             dualDisplay1VideoRingBuffer.clear()
@@ -301,6 +305,7 @@ extension AppDelegate {
         micAudioEncoder.stop()
         frameCompositor.reset()
         AudioLevelMonitor.shared.reset()
+        AudioLevelPreview.shared.setCaptureActive(false)
     }
 
     func startSingleDisplayCapture(

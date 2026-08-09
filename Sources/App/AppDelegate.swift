@@ -62,7 +62,14 @@ class AppDelegate: NSObject, NSApplicationDelegate, @unchecked Sendable {
     /// never a manual one.
     var recordingAutoStartedByGame = false
 
-    var isCaptureRunning = false
+    /// The capture pipeline owns the audio devices while it runs, so the idle
+    /// level preview stands down for exactly as long as this is true.
+    var isCaptureRunning = false {
+        didSet {
+            guard isCaptureRunning != oldValue else { return }
+            AudioLevelPreview.shared.setCaptureActive(isCaptureRunning)
+        }
+    }
     var isWorkspaceSessionActive = true
     var areScreensAwake = true
     var shouldResumeCaptureAfterInterruption = false
