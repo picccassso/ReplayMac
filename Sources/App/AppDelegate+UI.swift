@@ -163,6 +163,22 @@ extension AppDelegate {
         updateActivationPolicy(bringVisibleWindowToFront: true)
     }
 
+    /// Hotkey behaviour: a second press dismisses the library. The window is
+    /// only closed when it is already frontmost, so pressing the hotkey from
+    /// another app still brings it forward instead of hiding it.
+    func toggleClipLibraryWindow() {
+        if let window = clipLibraryWindowController?.window,
+           window.isVisible,
+           NSApp.isActive,
+           window.isKeyWindow || window.isMainWindow {
+            window.close()
+            updateActivationPolicy()
+            return
+        }
+
+        openClipLibraryWindow()
+    }
+
     func showOnboardingWindow() {
         if onboardingWindowController == nil {
             let hostingController = NSHostingController(rootView: OnboardingView { [weak self] in

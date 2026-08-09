@@ -22,7 +22,7 @@ extension AppDelegate {
             self?.toggleSessionRecording()
         }
         hotkeyManager.onOpenClipLibrary = { [weak self] in
-            self?.openClipLibraryWindow()
+            self?.toggleClipLibraryWindow()
         }
         hotkeyManager.start()
     }

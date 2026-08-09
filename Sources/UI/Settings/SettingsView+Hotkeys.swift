@@ -33,7 +33,7 @@ extension SettingsView {
             }
 
             Section {
-                KeyboardShortcuts.Recorder("Open clip library", name: .openClipLibrary)
+                KeyboardShortcuts.Recorder("Show or hide clip library", name: .openClipLibrary)
             } header: {
                 sectionHeader(icon: "film.stack", title: "Library")
             }
