@@ -41,6 +41,7 @@ It continuously buffers recent screen/audio capture and saves the last N seconds
 ## Requirements
 
 - macOS 15+
+- Apple Silicon or Intel — builds from 1.6.9 onward are universal binaries. Earlier releases are Apple Silicon only.
 - Swift 6
 
 ## Download
