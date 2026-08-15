@@ -165,6 +165,62 @@ final class CaptureHealthTests: XCTestCase {
         ))
     }
 
+    func testDetectsStalledSystemAudio() {
+        let start = Date(timeIntervalSinceReferenceDate: 1_000)
+
+        XCTAssertTrue(CaptureHealth.isAudioStalled(
+            isCaptureRunning: true,
+            isCapturingAudio: true,
+            isSessionActive: true,
+            monitoringStartedAt: start,
+            lastAudioSampleDate: start.addingTimeInterval(10),
+            now: start.addingTimeInterval(45),
+            timeout: 30
+        ))
+    }
+
+    func testRecentAudioSampleKeepsAudioHealthy() {
+        let start = Date(timeIntervalSinceReferenceDate: 1_000)
+
+        XCTAssertFalse(CaptureHealth.isAudioStalled(
+            isCaptureRunning: true,
+            isCapturingAudio: true,
+            isSessionActive: true,
+            monitoringStartedAt: start,
+            lastAudioSampleDate: start.addingTimeInterval(40),
+            now: start.addingTimeInterval(45),
+            timeout: 30
+        ))
+    }
+
+    func testAudioWatchdogIgnoresCaptureWithAudioDisabled() {
+        let start = Date(timeIntervalSinceReferenceDate: 1_000)
+
+        XCTAssertFalse(CaptureHealth.isAudioStalled(
+            isCaptureRunning: true,
+            isCapturingAudio: false,
+            isSessionActive: true,
+            monitoringStartedAt: start,
+            lastAudioSampleDate: nil,
+            now: start.addingTimeInterval(600),
+            timeout: 30
+        ))
+    }
+
+    func testAudioWatchdogHonoursStartupGracePeriod() {
+        let start = Date(timeIntervalSinceReferenceDate: 1_000)
+
+        XCTAssertFalse(CaptureHealth.isAudioStalled(
+            isCaptureRunning: true,
+            isCapturingAudio: true,
+            isSessionActive: true,
+            monitoringStartedAt: start,
+            lastAudioSampleDate: nil,
+            now: start.addingTimeInterval(20),
+            timeout: 30
+        ))
+    }
+
     func testRecoveryWaitsUntilSessionAndScreensAreActive() {
         XCTAssertFalse(CaptureRecoveryPolicy.shouldScheduleRecovery(
             automaticResumeEnabled: true,

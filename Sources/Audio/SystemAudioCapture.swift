@@ -5,6 +5,13 @@ import Foundation
 /// and forwards them to a handler. Detects gaps in the audio stream
 /// and emits silence buffers to maintain sync when the output device changes.
 public final class SystemAudioCapture: @unchecked Sendable {
+    /// Longest delivery gap that is worth papering over with silence.
+    static let maximumGapFillSeconds: TimeInterval = 5
+
+    /// Keeps any one synthesized buffer small enough that ring-buffer eviction
+    /// stays granular.
+    static let gapFillChunkSeconds: TimeInterval = 0.5
+
     private let lock = NSLock()
     private var handler: ((CMSampleBuffer) -> Void)?
     private var nextExpectedPTS: CMTime?
@@ -46,13 +53,12 @@ public final class SystemAudioCapture: @unchecked Sendable {
         if let nextExpected = nextExpectedPTS, pts > nextExpected {
             let gapSeconds = CMTimeGetSeconds(CMTimeSubtract(pts, nextExpected))
             if gapSeconds > 0.005, let format = copied.formatDescription {
-                if let silenceBuffer = makeSilenceBuffer(
-                    duration: gapSeconds,
+                fillGap(
+                    seconds: gapSeconds,
                     startingAt: nextExpected,
-                    formatDescription: format
-                ) {
-                    handler?(silenceBuffer)
-                }
+                    formatDescription: format,
+                    handler: handler
+                )
             }
         }
 
@@ -147,6 +153,41 @@ public final class SystemAudioCapture: @unchecked Sendable {
             for i in 0..<floatCount {
                 floatPtr[i] *= volumeFloat
             }
+        }
+    }
+
+    /// Emits silence across a delivery gap, in bounded chunks.
+    ///
+    /// A single buffer spanning the whole gap is a trap: an output-device change
+    /// mid-call can stall the tap for tens of seconds, and 20s of 48kHz stereo
+    /// float is one ~7.7MB allocation. Pushed into the ring buffer it exceeds
+    /// the audio memory cap by itself, so eviction drops every real sample
+    /// ahead of it and the recovered stream is all that survives — the outage
+    /// erases the audio that preceded it. Chunking keeps eviction granular, and
+    /// past `maximumGapFillSeconds` the gap is left as a genuine hole: the
+    /// save-time mixer already renders unwritten regions as silence.
+    private func fillGap(
+        seconds: TimeInterval,
+        startingAt startPTS: CMTime,
+        formatDescription: CMFormatDescription,
+        handler: ((CMSampleBuffer) -> Void)?
+    ) {
+        guard let handler else { return }
+
+        let fillSeconds = min(seconds, Self.maximumGapFillSeconds)
+        var emitted: TimeInterval = 0
+        while emitted < fillSeconds {
+            let chunkSeconds = min(Self.gapFillChunkSeconds, fillSeconds - emitted)
+            let chunkStart = CMTimeAdd(startPTS, CMTime(seconds: emitted, preferredTimescale: 48_000))
+            guard let silenceBuffer = makeSilenceBuffer(
+                duration: chunkSeconds,
+                startingAt: chunkStart,
+                formatDescription: formatDescription
+            ) else {
+                break
+            }
+            handler(silenceBuffer)
+            emitted += chunkSeconds
         }
     }
 

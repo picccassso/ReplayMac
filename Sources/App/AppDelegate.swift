@@ -108,6 +108,13 @@ class AppDelegate: NSObject, NSApplicationDelegate, @unchecked Sendable {
     var lastMicEnabled = false
     var lastMicDeviceID = ""
     var hasNotifiedMicDenied = false
+    /// Latches the system-audio stall warning so a persistent stall logs once
+    /// per outage instead of every monitoring tick.
+    var hasWarnedSystemAudioStalled = false
+    /// Whether system audio is coming from the main ScreenCaptureKit stream
+    /// this session. Per-app audio runs its own stream and reports no stats, so
+    /// the stall watchdog must not judge it by the main stream's samples.
+    var isCapturingMainSystemAudio = false
 
     override init() {
         // Branding must be set before anything builds user-facing strings or

@@ -72,6 +72,35 @@ extension AppDelegate {
                 self.systemAudioCapture.setVolume(AppSettings.systemAudioVolume)
                 self.micAudioCapture.setVolume(AppSettings.microphoneVolume)
 
+                let isSessionActive = self.isWorkspaceSessionActive && self.areScreensAwake
+
+                // A microphone that dies without posting a configuration change
+                // — the engine wedging on a device that went away mid-call —
+                // leaves the tap silent with nothing to notice it. Rebuilding
+                // just the mic engine is isolated from video, so unlike the
+                // capture watchdog above this recovers in place.
+                self.micAudioCapture.restartIfStalled(timeout: 10, isSessionActive: isSessionActive)
+
+                // Judged against the main SCK stream's samples, so it must be
+                // gated on the main stream actually carrying audio: per-app
+                // audio runs a separate stream that reports no stats here.
+                let systemAudioStalled = CaptureHealth.isAudioStalled(
+                    isCaptureRunning: self.isCaptureRunning,
+                    isCapturingAudio: self.isCapturingMainSystemAudio,
+                    isSessionActive: isSessionActive,
+                    monitoringStartedAt: monitoringStartedAt,
+                    lastAudioSampleDate: captureStats.lastAudioSampleDate,
+                    now: now
+                )
+                if systemAudioStalled, !self.hasWarnedSystemAudioStalled {
+                    self.hasWarnedSystemAudioStalled = true
+                    let age = captureStats.lastAudioSampleDate
+                        .map { String(format: "%.0fs ago", now.timeIntervalSince($0)) } ?? "never"
+                    print("Warning: system audio has not delivered a sample (\(age)). Output device may have changed mid-capture.")
+                } else if !systemAudioStalled {
+                    self.hasWarnedSystemAudioStalled = false
+                }
+
                 let videoDuration = self.videoRingBuffer.duration
                 let dualDisplay1Duration = self.dualDisplay1VideoRingBuffer.duration
                 let dualDisplay2Duration = self.dualDisplay2VideoRingBuffer.duration

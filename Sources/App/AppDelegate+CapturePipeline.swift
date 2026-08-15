@@ -124,6 +124,7 @@ extension AppDelegate {
                     }
                 }
                 let captureMainSystemAudio = captureSystemAudioForSession && !usePerAppAudio
+                isCapturingMainSystemAudio = captureMainSystemAudio
 
             if isDual {
                     let dualSaveMode = AppSettings.dualCaptureSaveModeEnum
@@ -293,6 +294,7 @@ extension AppDelegate {
     }
 
     func cleanupAfterFailedCaptureStart() async {
+        isCapturingMainSystemAudio = false
         await captureManager.stop()
         await perAppAudioCapture.stop()
         longBufferAppendPump.reset()
@@ -425,6 +427,8 @@ extension AppDelegate {
         AudioLevelMonitor.shared.reset()
 
         isCaptureRunning = false
+        isCapturingMainSystemAudio = false
+        hasWarnedSystemAudioStalled = false
         sessionOwnsCapturePipeline = false
         replayBufferGate.setEnabled(true)
         menuBarState.setRecording(false)
