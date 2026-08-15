@@ -17,6 +17,11 @@ ICON_PATH="$ROOT_DIR/Resources/ReplayCap.icns"
 # signing and a provisioning profile via Xcode/Transporter.
 APP_NAME="ReplayMac"
 APPSTORE_FLAG=""
+# Universal (arm64 + x86_64) so the app runs on Intel Macs too. Rosetta does
+# not help here — it translates Intel to ARM, not the reverse — so an Intel
+# Mac needs a real x86_64 slice. Multi-arch builds land in
+# .build/apple/Products/Release rather than the per-arch directory.
+ARCH_FLAGS="--arch arm64 --arch x86_64"
 if [ "${1:-}" = "--appstore" ]; then
   APP_NAME="ReplayCap"
   APPSTORE_FLAG="-Xswiftc -DAPPSTORE"
@@ -56,12 +61,20 @@ else
 fi
 
 # Build once so SPM generates resource bundle accessors
-# shellcheck disable=SC2086  # APPSTORE_FLAG intentionally word-splits into two args
-swift build -c release --package-path "$ROOT_DIR" $APPSTORE_FLAG
+# shellcheck disable=SC2086  # APPSTORE_FLAG/ARCH_FLAGS intentionally word-split
+swift build -c release --package-path "$ROOT_DIR" $ARCH_FLAGS $APPSTORE_FLAG
 
 # Patch generated accessors to load bundles from Contents/Resources
 # instead of the app root, which avoids breaking code signing.
-for accessor in "$ROOT_DIR"/.build/arm64-apple-macosx/release/*.build/DerivedSources/resource_bundle_accessor.swift; do
+#
+# This is a no-op while ARCH_FLAGS is set: passing --arch switches SwiftPM to
+# the Xcode build system, whose generated accessor already searches
+# Bundle.main.resourceURL (= Contents/Resources) before falling back to the
+# bundle root, and which builds under .build/apple/ rather than the per-arch
+# directories globbed below. Kept as a guard for thin builds (empty
+# ARCH_FLAGS), where the native build system emits the naive
+# Bundle.main.bundleURL form that does need patching.
+for accessor in "$ROOT_DIR"/.build/*-apple-macosx/release/*.build/DerivedSources/resource_bundle_accessor.swift; do
   if [ -f "$accessor" ]; then
     sed -i '' 's|Bundle.main.bundleURL.appendingPathComponent("\(.*\)_\1.bundle")|Bundle.main.bundleURL.appendingPathComponent("Contents/Resources/\1_\1.bundle")|g' "$accessor"
   fi
@@ -69,9 +82,12 @@ done
 
 # Rebuild so the patched accessors are compiled in
 # shellcheck disable=SC2086
-swift build -c release --package-path "$ROOT_DIR" $APPSTORE_FLAG
+swift build -c release --package-path "$ROOT_DIR" $ARCH_FLAGS $APPSTORE_FLAG
 
-BIN_DIR="$(swift build -c release --show-bin-path --package-path "$ROOT_DIR")"
+# ARCH_FLAGS must be repeated here: without them SwiftPM reports the per-arch
+# path and we would ship a thin binary out of a universal build.
+# shellcheck disable=SC2086
+BIN_DIR="$(swift build -c release --show-bin-path --package-path "$ROOT_DIR" $ARCH_FLAGS)"
 BIN_PATH="$BIN_DIR/$BIN_NAME"
 
 rm -rf "$APP_DIR"
