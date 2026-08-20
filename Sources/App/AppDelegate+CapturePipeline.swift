@@ -150,7 +150,6 @@ extension AppDelegate {
                             captureAudio: captureMainSystemAudio
                         )
                     } catch CaptureError.notEnoughDisplays {
-                        Defaults[.captureMode] = CaptureMode.single.rawValue
                         dualConfigs = nil
                         print("Dual capture unavailable; falling back to single display capture.")
                         try await startSingleDisplayCapture(

@@ -102,9 +102,12 @@ extension SettingsView {
     /// Entries standing in for selected displays that aren't attached right now, so the
     /// picker keeps showing the user's choice instead of silently jumping to another screen.
     func placeholdersForDisconnectedSelections(connected: [DisplayOption]) -> [DisplayOption] {
-        let connectedIDs = Set(connected.map(\.id))
+        let online = DisplayIdentity.onlineDisplayIDs()
         let selections = [captureDisplayID, captureDisplayID2]
-            .filter { !$0.isEmpty && !connectedIDs.contains($0) }
+            .filter { selection in
+                guard !selection.isEmpty else { return false }
+                return DisplayIdentity.resolve(selection, among: online) == nil
+            }
 
         return Array(Set(selections)).sorted().map { id in
             DisplayOption(

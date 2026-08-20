@@ -76,6 +76,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, @unchecked Sendable {
     var isPreparingCaptureRecovery = false
     var captureRecoveryAttempts = 0
     var captureRecoveryTask: Task<Void, Never>?
+    var displayReconfigurationTask: Task<Void, Never>?
     var monitoringTask: Task<Void, Never>?
     var clipLibraryWindowController: NSWindowController?
     var onboardingWindowController: NSWindowController?
@@ -197,6 +198,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, @unchecked Sendable {
 
         setupWindowObservers()
         setupPowerObservers()
+        setupDisplayObservers()
 
         // First launch: walk through the setup assistant before anything
         // records. Auto-start (and its screen-recording permission prompt)
@@ -237,6 +239,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, @unchecked Sendable {
         monitoringTask?.cancel()
         settingsReconcileTask?.cancel()
         captureRecoveryTask?.cancel()
+        displayReconfigurationTask?.cancel()
         if !isTerminatingAfterSessionSave {
             stopCapturePipeline()
         }

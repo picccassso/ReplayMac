@@ -57,6 +57,14 @@ public actor CaptureManager {
     private var dualConfiguration1: SCStreamConfiguration?
     private var dualConfiguration2: SCStreamConfiguration?
 
+    // Active display identities and fallback tracking
+    public private(set) var capturedDisplayID: CGDirectDisplayID?
+    public private(set) var capturedDisplayID1: CGDirectDisplayID?
+    public private(set) var capturedDisplayID2: CGDirectDisplayID?
+    public private(set) var isUsingFallbackDisplay: Bool = false
+    public private(set) var isUsingFallbackDisplay1: Bool = false
+    public private(set) var isUsingFallbackDisplay2: Bool = false
+
     private var isDualMode = false
     private var userInitiatedStop = false
 
@@ -239,10 +247,13 @@ public actor CaptureManager {
         let permissions = CapturePermissions()
         let content = try await permissions.requestAccess(interactive: interactivePermissionPrompt)
 
-        let selectedDisplay = content.displays.first { display in
-            DisplayIdentity.matches(captureDisplayID, displayID: display.displayID)
+        let availableIDs = content.displays.map { CGDirectDisplayID($0.displayID) }
+        let resolvedID = captureDisplayID.flatMap { DisplayIdentity.resolve($0, among: availableIDs) }
+        let selectedDisplay = resolvedID.flatMap { targetID in
+            content.displays.first { CGDirectDisplayID($0.displayID) == targetID }
         }
 
+        let usingFallback = (captureDisplayID != nil && !captureDisplayID!.isEmpty && selectedDisplay == nil)
         guard let display = selectedDisplay ?? content.displays.first else {
             throw CaptureError.noDisplay
         }
@@ -279,6 +290,8 @@ public actor CaptureManager {
         currentFilter = filter
         currentConfiguration = config
         self.stream = newStream
+        self.capturedDisplayID = displayID
+        self.isUsingFallbackDisplay = usingFallback
 
         return CaptureConfig(
             width: captureWidth,
@@ -318,13 +331,24 @@ public actor CaptureManager {
             throw CaptureError.notEnoughDisplays
         }
 
-        let selectedDisplay1 = displays.first { DisplayIdentity.matches(captureDisplayID1, displayID: $0.displayID) }
-            ?? displays.first
-        let remainingDisplays = displays.filter { $0.displayID != selectedDisplay1?.displayID }
-        let selectedDisplay2 = remainingDisplays.first { DisplayIdentity.matches(captureDisplayID2, displayID: $0.displayID) }
-            ?? remainingDisplays.first
+        let availableIDs = displays.map { CGDirectDisplayID($0.displayID) }
+        let resolvedID1 = captureDisplayID1.flatMap { DisplayIdentity.resolve($0, among: availableIDs) }
+        let selectedDisplay1 = resolvedID1.flatMap { targetID in
+            displays.first { CGDirectDisplayID($0.displayID) == targetID }
+        }
+        let usingFallback1 = (captureDisplayID1 != nil && !captureDisplayID1!.isEmpty && selectedDisplay1 == nil)
+        let resolvedDisplay1 = selectedDisplay1 ?? displays.first
 
-        guard let display1 = selectedDisplay1, let display2 = selectedDisplay2 else {
+        let remainingDisplays = displays.filter { $0.displayID != resolvedDisplay1?.displayID }
+        let remainingIDs = remainingDisplays.map { CGDirectDisplayID($0.displayID) }
+        let resolvedID2 = captureDisplayID2.flatMap { DisplayIdentity.resolve($0, among: remainingIDs) }
+        let selectedDisplay2 = resolvedID2.flatMap { targetID in
+            remainingDisplays.first { CGDirectDisplayID($0.displayID) == targetID }
+        }
+        let usingFallback2 = (captureDisplayID2 != nil && !captureDisplayID2!.isEmpty && selectedDisplay2 == nil)
+        let resolvedDisplay2 = selectedDisplay2 ?? remainingDisplays.first
+
+        guard let display1 = resolvedDisplay1, let display2 = resolvedDisplay2 else {
             throw CaptureError.noDisplay
         }
 
@@ -368,6 +392,7 @@ public actor CaptureManager {
         config2.pixelFormat = Self.screenPixelFormat
         config2.colorSpaceName = Self.screenColorSpace
         config2.capturesAudio = false
+        config2.excludesCurrentProcessAudio = excludeOwnAppAudio
 
         let newStream1 = SCStream(filter: filter1, configuration: config1, delegate: delegate1)
         try newStream1.addStreamOutput(delegate1, type: .screen, sampleHandlerQueue: videoQueue)
@@ -388,6 +413,10 @@ public actor CaptureManager {
         dualConfiguration2 = config2
         self.stream1 = newStream1
         self.stream2 = newStream2
+        self.capturedDisplayID1 = displayID1
+        self.capturedDisplayID2 = displayID2
+        self.isUsingFallbackDisplay1 = usingFallback1
+        self.isUsingFallbackDisplay2 = usingFallback2
 
         return (
             config1: CaptureConfig(
@@ -413,10 +442,10 @@ public actor CaptureManager {
         )
     }
 
-    // MARK: - Stop
+    // MARK: - Stop capture
 
     public func stop() async {
-        await performStop()
+        await performStop(requestStreamStop: true)
     }
 
     private func performStop(requestStreamStop: Bool = true) async {
@@ -444,12 +473,21 @@ public actor CaptureManager {
 
         isDualMode = false
         userInitiatedStop = false
+        capturedDisplayID = nil
+        capturedDisplayID1 = nil
+        capturedDisplayID2 = nil
+        isUsingFallbackDisplay = false
+        isUsingFallbackDisplay1 = false
+        isUsingFallbackDisplay2 = false
     }
 
     // MARK: - Stream stopped handler
 
     private func handleStreamStopped(error: Error) async {
         guard !userInitiatedStop else {
+            return
+        }
+        guard stream != nil || stream1 != nil || stream2 != nil else {
             return
         }
 

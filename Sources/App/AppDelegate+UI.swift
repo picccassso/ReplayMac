@@ -1,4 +1,5 @@
 import Branding
+import Capture
 import Cocoa
 import SwiftUI
 import UI
@@ -59,6 +60,73 @@ extension AppDelegate {
             name: NSWorkspace.sessionDidBecomeActiveNotification,
             object: nil
         )
+    }
+
+    func setupDisplayObservers() {
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(screenParametersDidChange(_:)),
+            name: NSApplication.didChangeScreenParametersNotification,
+            object: nil
+        )
+    }
+
+    @objc private func screenParametersDidChange(_ notification: Notification) {
+        displayReconfigurationTask?.cancel()
+        displayReconfigurationTask = Task { @MainActor [weak self] in
+            // Debounce slightly so displays and ScreenCaptureKit have time to settle after reconnect or wake
+            try? await Task.sleep(for: .milliseconds(350))
+            guard !Task.isCancelled, let self else { return }
+            await self.handleDisplayConfigurationChange()
+        }
+    }
+
+    func handleDisplayConfigurationChange() async {
+        guard isCaptureRunning else { return }
+
+        let online = DisplayIdentity.onlineDisplayIDs()
+        guard !online.isEmpty else { return }
+
+        let isDual = AppSettings.captureMode == CaptureMode.dualSideBySide.rawValue
+
+        if isDual {
+            let pref1 = AppSettings.captureDisplayID
+            let pref2 = AppSettings.captureDisplayID2
+            let resolved1 = DisplayIdentity.resolve(pref1, among: online)
+            let remainingOnline = online.filter { $0 != resolved1 }
+            let resolved2 = DisplayIdentity.resolve(pref2, among: remainingOnline) ?? remainingOnline.first
+
+            let captured1 = await captureManager.capturedDisplayID1
+            let captured2 = await captureManager.capturedDisplayID2
+            let fallback1 = await captureManager.isUsingFallbackDisplay1
+            let fallback2 = await captureManager.isUsingFallbackDisplay2
+
+            let targetChanged1 = resolved1 != nil && resolved1 != captured1
+            let targetChanged2 = resolved2 != nil && resolved2 != captured2
+            let fallbackActive = fallback1 || fallback2
+
+            if (targetChanged1 || targetChanged2 || fallbackActive),
+               let resolved1, let resolved2, resolved1 != resolved2 {
+                captureRecoveryLogger.info(
+                    "Display configuration changed; re-targeting dual capture to preferred displays (\(resolved1), \(resolved2))"
+                )
+                await restartFullPipeline()
+            }
+        } else {
+            let pref = AppSettings.captureDisplayID
+            guard !pref.isEmpty else { return }
+
+            let resolved = DisplayIdentity.resolve(pref, among: online)
+            let captured = await captureManager.capturedDisplayID
+            let isFallback = await captureManager.isUsingFallbackDisplay
+
+            if let resolved, (isFallback || resolved != captured) {
+                captureRecoveryLogger.info(
+                    "Preferred display is online (ID: \(resolved), previous: \(String(describing: captured)), wasFallback: \(isFallback)); re-targeting capture"
+                )
+                await restartFullPipeline()
+            }
+        }
     }
 
     @objc private func systemWillSleep(_ notification: Notification) {
