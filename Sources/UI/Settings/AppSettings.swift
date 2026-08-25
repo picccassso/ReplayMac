@@ -210,6 +210,15 @@ public enum AppSettings {
         Defaults[.captureDisplayID2]
     }
 
+    public static var captureDisplayPriorities: [String] {
+        let stored = Defaults[.captureDisplayPriorities]
+        if !stored.isEmpty {
+            return stored
+        }
+        let single = Defaults[.captureDisplayID]
+        return single.isEmpty ? [] : [single]
+    }
+
     /// Upgrade display selections that were saved as raw `CGDirectDisplayID`s.
     ///
     /// Runs at launch. A value can only be migrated while the display it points at is
@@ -224,6 +233,21 @@ public enum AppSettings {
             let stored = Defaults[key]
             if let migrated = DisplayIdentity.migratedKey(forLegacyValue: stored, among: online) {
                 Defaults[key] = migrated
+            }
+        }
+
+        let priorities = Defaults[.captureDisplayPriorities]
+        if !priorities.isEmpty {
+            var updated = priorities
+            var changed = false
+            for (idx, key) in priorities.enumerated() {
+                if let migrated = DisplayIdentity.migratedKey(forLegacyValue: key, among: online) {
+                    updated[idx] = migrated
+                    changed = true
+                }
+            }
+            if changed {
+                Defaults[.captureDisplayPriorities] = updated
             }
         }
     }
@@ -345,6 +369,7 @@ public extension Defaults.Keys {
     static let captureMode = Key<String>("captureMode", default: "single")
     static let captureDisplayID = Key<String>("captureDisplayID", default: "")
     static let captureDisplayID2 = Key<String>("captureDisplayID2", default: "")
+    static let captureDisplayPriorities = Key<[String]>("captureDisplayPriorities", default: [])
     static let dualCaptureSaveMode = Key<String>("dualCaptureSaveMode", default: DualCaptureSaveMode.sideBySide.rawValue)
     static let captureResolution = Key<String>("captureResolution", default: CaptureResolution.native.rawValue)
     static let customCaptureWidth = Key<Int>("customCaptureWidth", default: 1920)

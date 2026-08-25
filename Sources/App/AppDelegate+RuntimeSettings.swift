@@ -86,6 +86,9 @@ extension AppDelegate {
         settingsObservations.append(Defaults.observe(.captureDisplayID2) { [weak self] _ in
             self?.scheduleRuntimeSettingsReconcile(needsFullRestart: true)
         })
+        settingsObservations.append(Defaults.observe(.captureDisplayPriorities) { [weak self] _ in
+            self?.scheduleRuntimeSettingsReconcile(needsFullRestart: true)
+        })
     }
 
     // MARK: - Runtime settings reconciler handlers

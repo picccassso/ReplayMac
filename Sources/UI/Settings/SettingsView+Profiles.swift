@@ -145,6 +145,20 @@ extension SettingsView {
                 migrated[index].captureDisplayID2 = key
                 didChange = true
             }
+            if let priorities = migrated[index].captureDisplayPriorities, !priorities.isEmpty {
+                var updatedPriorities = priorities
+                var prioritiesChanged = false
+                for (pIdx, pKey) in priorities.enumerated() {
+                    if let key = DisplayIdentity.migratedKey(forLegacyValue: pKey, among: online) {
+                        updatedPriorities[pIdx] = key
+                        prioritiesChanged = true
+                    }
+                }
+                if prioritiesChanged {
+                    migrated[index].captureDisplayPriorities = updatedPriorities
+                    didChange = true
+                }
+            }
         }
 
         if didChange {
@@ -227,6 +241,11 @@ extension SettingsView {
         captureModeRawValue = profile.captureModeRawValue
         captureDisplayID = profile.captureDisplayID
         captureDisplayID2 = profile.captureDisplayID2
+        if let priorities = profile.captureDisplayPriorities, !priorities.isEmpty {
+            captureDisplayPriorities = priorities
+        } else if !profile.captureDisplayID.isEmpty {
+            captureDisplayPriorities = [profile.captureDisplayID]
+        }
         dualCaptureSaveModeRawValue = profile.dualCaptureSaveModeRawValue
         captureResolutionRawValue = profile.captureResolutionRawValue
         customCaptureWidth = profile.customCaptureWidth
@@ -264,6 +283,7 @@ extension SettingsView {
             captureModeRawValue: captureModeRawValue,
             captureDisplayID: captureDisplayID,
             captureDisplayID2: captureDisplayID2,
+            captureDisplayPriorities: captureDisplayPriorities,
             dualCaptureSaveModeRawValue: dualCaptureSaveModeRawValue,
             captureResolutionRawValue: captureResolutionRawValue,
             customCaptureWidth: customCaptureWidth,

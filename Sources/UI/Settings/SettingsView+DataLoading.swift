@@ -60,6 +60,7 @@ extension SettingsView {
                 // here is what used to lose the user's screen choice whenever a display ID
                 // changed or an external monitor was slow to wake after login.
                 migrateLegacyDisplaySelections(connected: connected)
+                syncDisplayPriorities(connected: connected)
                 displays = connected + placeholdersForDisconnectedSelections(connected: connected)
                 displayLoadError = nil
                 updateAudioApplications(from: shareableContent.applications)
@@ -85,6 +86,30 @@ extension SettingsView {
         }
     }
 
+    /// Synchronizes the ordered display priorities list with connected displays.
+    func syncDisplayPriorities(connected: [DisplayOption]) {
+        var currentPriorities = captureDisplayPriorities.filter { !$0.isEmpty }
+
+        if currentPriorities.isEmpty {
+            if !captureDisplayID.isEmpty {
+                currentPriorities.append(captureDisplayID)
+            }
+            for display in connected where !currentPriorities.contains(display.id) {
+                currentPriorities.append(display.id)
+            }
+        } else {
+            // Append any newly attached displays not already in the list
+            for display in connected where !currentPriorities.contains(display.id) {
+                currentPriorities.append(display.id)
+            }
+        }
+
+        captureDisplayPriorities = currentPriorities
+        if let top = currentPriorities.first {
+            captureDisplayID = top
+        }
+    }
+
     /// Rewrite raw-`CGDirectDisplayID` selections saved by older builds into stable keys,
     /// while the display they point at is still attached to identify it.
     func migrateLegacyDisplaySelections(connected: [DisplayOption]) {
@@ -97,13 +122,25 @@ extension SettingsView {
         if let migrated = DisplayIdentity.migratedKey(forLegacyValue: captureDisplayID2, among: online) {
             captureDisplayID2 = migrated
         }
+
+        var migratedPriorities = captureDisplayPriorities
+        var prioritiesChanged = false
+        for (index, item) in migratedPriorities.enumerated() {
+            if let migrated = DisplayIdentity.migratedKey(forLegacyValue: item, among: online) {
+                migratedPriorities[index] = migrated
+                prioritiesChanged = true
+            }
+        }
+        if prioritiesChanged {
+            captureDisplayPriorities = migratedPriorities
+        }
     }
 
     /// Entries standing in for selected displays that aren't attached right now, so the
     /// picker keeps showing the user's choice instead of silently jumping to another screen.
     func placeholdersForDisconnectedSelections(connected: [DisplayOption]) -> [DisplayOption] {
         let online = DisplayIdentity.onlineDisplayIDs()
-        let selections = [captureDisplayID, captureDisplayID2]
+        let selections = (captureDisplayPriorities + [captureDisplayID, captureDisplayID2])
             .filter { selection in
                 guard !selection.isEmpty else { return false }
                 return DisplayIdentity.resolve(selection, among: online) == nil

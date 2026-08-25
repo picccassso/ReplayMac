@@ -113,16 +113,17 @@ extension AppDelegate {
                 await restartFullPipeline()
             }
         } else {
-            let pref = AppSettings.captureDisplayID
-            guard !pref.isEmpty else { return }
+            let priorities = AppSettings.captureDisplayPriorities
+            let effectivePriorities = !priorities.isEmpty ? priorities : [AppSettings.captureDisplayID].filter { !$0.isEmpty }
+            guard !effectivePriorities.isEmpty else { return }
 
-            let resolved = DisplayIdentity.resolve(pref, among: online)
+            let resolved = DisplayIdentity.resolveFirst(in: effectivePriorities, among: online)
             let captured = await captureManager.capturedDisplayID
             let isFallback = await captureManager.isUsingFallbackDisplay
 
             if let resolved, (isFallback || resolved != captured) {
                 captureRecoveryLogger.info(
-                    "Preferred display is online (ID: \(resolved), previous: \(String(describing: captured)), wasFallback: \(isFallback)); re-targeting capture"
+                    "Display priority resolution changed (resolved: \(resolved), previous: \(String(describing: captured)), wasFallback: \(isFallback)); re-targeting capture"
                 )
                 await restartFullPipeline()
             }

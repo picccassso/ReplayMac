@@ -87,8 +87,17 @@ extension SettingsView {
         }
     }
 
+    var resolvedPriorityDisplay: DisplayOption? {
+        for priority in captureDisplayPriorities where !priority.isEmpty {
+            if let match = connectedDisplay(matching: priority) {
+                return match
+            }
+        }
+        return connectedDisplay(matching: captureDisplayID) ?? connectedDisplays.first
+    }
+
     var selectedCaptureDisplays: [DisplayOption] {
-        let display1 = connectedDisplay(matching: captureDisplayID) ?? connectedDisplays.first
+        let display1 = resolvedPriorityDisplay
         guard captureModeRawValue == CaptureMode.dualSideBySide.rawValue else {
             return display1.map { [$0] } ?? []
         }

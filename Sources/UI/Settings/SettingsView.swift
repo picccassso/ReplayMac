@@ -20,6 +20,7 @@ public struct SettingsView: View {
     @Default(.captureMode) var captureModeRawValue
     @Default(.captureDisplayID) var captureDisplayID
     @Default(.captureDisplayID2) var captureDisplayID2
+    @Default(.captureDisplayPriorities) var captureDisplayPriorities
     @Default(.dualCaptureSaveMode) var dualCaptureSaveModeRawValue
     @Default(.captureResolution) var captureResolutionRawValue
     @Default(.customCaptureWidth) var customCaptureWidth
@@ -145,6 +146,13 @@ public struct SettingsView: View {
             updateBitrateForCurrentPresetIfNeeded()
         }
         .onChange(of: captureDisplayID2) { _, _ in
+            validateCaptureResolutionSelection()
+            updateBitrateForCurrentPresetIfNeeded()
+        }
+        .onChange(of: captureDisplayPriorities) { _, newValue in
+            if let first = newValue.first(where: { !$0.isEmpty }), captureDisplayID != first {
+                captureDisplayID = first
+            }
             validateCaptureResolutionSelection()
             updateBitrateForCurrentPresetIfNeeded()
         }

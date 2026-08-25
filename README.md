@@ -60,6 +60,24 @@ ReplayMac is notarized by Apple, so it opens like any other app — no Gatekeepe
 
 This compiles the app and outputs `dist/ReplayMac.app`.
 
+For repeated local development installs, use:
+
+```bash
+./scripts/install-dev.sh
+```
+
+That builds and replaces `/Applications/ReplayMac.app` while preserving its
+settings and macOS permissions. To test the complete first-run flow again:
+
+```bash
+./scripts/install-dev.sh --fresh
+```
+
+Fresh mode clears ReplayMac's onboarding state and cache, resets Screen
+Recording and Microphone access, preserves saved clips, and leaves the app
+closed. Add `--launch` when you want it opened after installation, or
+`--no-build` to install the existing `dist/ReplayMac.app`.
+
 ## Output directory
 
 Saved clips are written to:

@@ -22,3 +22,6 @@ App Store Photos/
 
 # Scripts directory
 scripts/
+!scripts/
+scripts/*
+!scripts/install-dev.sh

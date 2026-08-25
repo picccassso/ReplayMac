@@ -236,6 +236,7 @@ public actor CaptureManager {
     public func start(
         interactivePermissionPrompt: Bool = true,
         captureDisplayID: String? = nil,
+        captureDisplayPriorities: [String]? = nil,
         fps: Int,
         queueDepth: Int,
         outputWidth: Int? = nil,
@@ -248,12 +249,30 @@ public actor CaptureManager {
         let content = try await permissions.requestAccess(interactive: interactivePermissionPrompt)
 
         let availableIDs = content.displays.map { CGDirectDisplayID($0.displayID) }
-        let resolvedID = captureDisplayID.flatMap { DisplayIdentity.resolve($0, among: availableIDs) }
+        let priorities: [String]
+        if let captureDisplayPriorities, !captureDisplayPriorities.isEmpty {
+            priorities = captureDisplayPriorities.filter { !$0.isEmpty }
+        } else if let captureDisplayID, !captureDisplayID.isEmpty {
+            priorities = [captureDisplayID]
+        } else {
+            priorities = []
+        }
+
+        let priorityResult = DisplayIdentity.resolvePriority(in: priorities, among: availableIDs)
+        let resolvedID = priorityResult?.displayID
+            ?? (captureDisplayID.flatMap { DisplayIdentity.resolve($0, among: availableIDs) })
         let selectedDisplay = resolvedID.flatMap { targetID in
             content.displays.first { CGDirectDisplayID($0.displayID) == targetID }
         }
 
-        let usingFallback = (captureDisplayID != nil && !captureDisplayID!.isEmpty && selectedDisplay == nil)
+        let usingFallback: Bool
+        if !priorities.isEmpty {
+            usingFallback = (priorityResult == nil || !priorityResult!.isTopPriority || selectedDisplay == nil)
+        } else if let captureDisplayID, !captureDisplayID.isEmpty {
+            usingFallback = (selectedDisplay == nil)
+        } else {
+            usingFallback = false
+        }
         guard let display = selectedDisplay ?? content.displays.first else {
             throw CaptureError.noDisplay
         }

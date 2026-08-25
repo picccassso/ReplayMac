@@ -260,6 +260,10 @@ extension AppDelegate {
                     shouldResumeCaptureAfterInterruption = false
                     captureRecoveryAttempts = 0
                 }
+                let capturedID = await captureManager.capturedDisplayID
+                let isFallback = await captureManager.isUsingFallbackDisplay
+                let displayName = capturedID.map { DisplayIdentity.localizedDisplayName(for: $0) }
+                menuBarState.setCapturedDisplay(name: displayName, isFallback: isFallback)
                 menuBarState.setRecording(replayBufferGate.isEnabled)
                 menuBarState.setExtendedBufferRecording(
                     replayBufferGate.isEnabled
@@ -294,6 +298,7 @@ extension AppDelegate {
 
     func cleanupAfterFailedCaptureStart() async {
         isCapturingMainSystemAudio = false
+        menuBarState.setCapturedDisplay(name: nil, isFallback: false)
         await captureManager.stop()
         await perAppAudioCapture.stop()
         longBufferAppendPump.reset()
@@ -324,6 +329,7 @@ extension AppDelegate {
         let config = try await captureManager.start(
             interactivePermissionPrompt: userInitiated,
             captureDisplayID: AppSettings.captureDisplayID.isEmpty ? nil : AppSettings.captureDisplayID,
+            captureDisplayPriorities: AppSettings.captureDisplayPriorities,
             fps: fps,
             queueDepth: queueDepth,
             excludeOwnAppAudio: excludeOwnAppAudio,
@@ -434,6 +440,7 @@ extension AppDelegate {
         menuBarState.setExtendedBufferRecording(false)
         menuBarState.setSessionRecording(false)
         menuBarState.setBufferedSeconds(0)
+        menuBarState.setCapturedDisplay(name: nil, isFallback: false)
         statusItemController.refreshPresentation()
     }
 

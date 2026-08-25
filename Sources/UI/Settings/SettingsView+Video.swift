@@ -28,25 +28,52 @@ extension SettingsView {
                         Text(displayLoadError ?? "No displays available yet")
                             .foregroundStyle(AppTheme.textSecondary)
                     }
-                } else {
+                } else if captureModeRawValue == CaptureMode.dualSideBySide.rawValue {
                     Picker("Display 1", selection: $captureDisplayID) {
                         ForEach(displays) { display in
                             Text(display.name).tag(display.id)
                         }
                     }
 
-                    if captureModeRawValue == CaptureMode.dualSideBySide.rawValue {
-                        Picker("Display 2", selection: $captureDisplayID2) {
-                            ForEach(dualDisplayOptions) { display in
-                                Text(display.name).tag(display.id)
+                    Picker("Display 2", selection: $captureDisplayID2) {
+                        ForEach(dualDisplayOptions) { display in
+                            Text(display.name).tag(display.id)
+                        }
+                    }
+
+                    Picker("Save dual recording as", selection: $dualCaptureSaveModeRawValue) {
+                        ForEach(DualCaptureSaveMode.allCases) { mode in
+                            Text(mode.title).tag(mode.rawValue)
+                        }
+                    }
+                } else {
+                    VStack(alignment: .leading, spacing: 8) {
+                        HStack {
+                            Text("Capture display priority")
+                                .font(.system(size: 13, weight: .medium))
+                            Spacer()
+                            if prioritizedDisplayOptions.count > 1 {
+                                Text("Top connected display is recorded")
+                                    .font(.system(size: 11))
+                                    .foregroundStyle(AppTheme.textSecondary)
                             }
                         }
 
-                        Picker("Save dual recording as", selection: $dualCaptureSaveModeRawValue) {
-                            ForEach(DualCaptureSaveMode.allCases) { mode in
-                                Text(mode.title).tag(mode.rawValue)
+                        VStack(spacing: 6) {
+                            ForEach(Array(prioritizedDisplayOptions.enumerated()), id: \.element.id) { index, display in
+                                displayPriorityRow(index: index, display: display, count: prioritizedDisplayOptions.count)
                             }
                         }
+                        .padding(8)
+                        .background(Color(nsColor: .controlBackgroundColor).opacity(0.6))
+                        .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+
+                        Label(
+                            "When recording starts, the highest-priority connected display is captured. If disconnected, capture falls back to the next available screen automatically.",
+                            systemImage: "arrow.triangle.branch"
+                        )
+                        .foregroundStyle(AppTheme.textSecondary)
+                        .font(.system(size: 11, design: .rounded))
                     }
                 }
             } header: {
@@ -192,5 +219,109 @@ extension SettingsView {
         let totalMbps = videoMbps + audioMbps
         let bytes = totalMbps * 1_000_000 / 8 * Double(minutes * 60)
         return String(format: "%.1f", bytes / 1_000_000_000)
+    }
+
+    var prioritizedDisplayOptions: [DisplayOption] {
+        var result: [DisplayOption] = []
+        var seen = Set<String>()
+        for id in captureDisplayPriorities where !id.isEmpty {
+            if let match = displays.first(where: { $0.id == id }) {
+                result.append(match)
+                seen.insert(id)
+            }
+        }
+        for display in displays where !seen.contains(display.id) {
+            result.append(display)
+            seen.insert(display.id)
+        }
+        return result
+    }
+
+    @ViewBuilder
+    func displayPriorityRow(index: Int, display: DisplayOption, count: Int) -> some View {
+        HStack(spacing: 8) {
+            Text("\(index + 1)")
+                .font(.system(size: 11, weight: .bold, design: .rounded))
+                .foregroundStyle(AppTheme.accent)
+                .frame(width: 20, height: 20)
+                .background(AppTheme.accent.opacity(0.12))
+                .clipShape(Circle())
+
+            VStack(alignment: .leading, spacing: 2) {
+                Text(display.name)
+                    .font(.system(size: 12, weight: .medium))
+                    .foregroundStyle(display.isConnected ? AppTheme.textPrimary : AppTheme.textSecondary)
+            }
+
+            Spacer()
+
+            if display.id == resolvedPriorityDisplay?.id {
+                Text("Active")
+                    .font(.system(size: 10, weight: .semibold, design: .rounded))
+                    .padding(.horizontal, 6)
+                    .padding(.vertical, 2)
+                    .background(AppTheme.accent.opacity(0.18))
+                    .foregroundStyle(AppTheme.accent)
+                    .clipShape(Capsule())
+            } else if display.isConnected {
+                Text("Connected")
+                    .font(.system(size: 10, weight: .medium, design: .rounded))
+                    .padding(.horizontal, 6)
+                    .padding(.vertical, 2)
+                    .background(Color.secondary.opacity(0.12))
+                    .foregroundStyle(AppTheme.textSecondary)
+                    .clipShape(Capsule())
+            } else {
+                Text("Offline")
+                    .font(.system(size: 10, weight: .medium, design: .rounded))
+                    .padding(.horizontal, 6)
+                    .padding(.vertical, 2)
+                    .background(Color.orange.opacity(0.15))
+                    .foregroundStyle(.orange)
+                    .clipShape(Capsule())
+            }
+
+            HStack(spacing: 2) {
+                Button {
+                    moveDisplayPriority(from: index, to: index - 1)
+                } label: {
+                    Image(systemName: "chevron.up")
+                        .font(.system(size: 10, weight: .bold))
+                        .frame(width: 20, height: 20)
+                }
+                .buttonStyle(.borderless)
+                .disabled(index == 0)
+
+                Button {
+                    moveDisplayPriority(from: index, to: index + 1)
+                } label: {
+                    Image(systemName: "chevron.down")
+                        .font(.system(size: 10, weight: .bold))
+                        .frame(width: 20, height: 20)
+                }
+                .buttonStyle(.borderless)
+                .disabled(index == count - 1)
+            }
+        }
+        .padding(.vertical, 4)
+        .padding(.horizontal, 6)
+        .background(
+            RoundedRectangle(cornerRadius: 6)
+                .fill(display.id == resolvedPriorityDisplay?.id ? AppTheme.accent.opacity(0.06) : Color.clear)
+        )
+    }
+
+    func moveDisplayPriority(from sourceIndex: Int, to destinationIndex: Int) {
+        var list = prioritizedDisplayOptions.map(\.id)
+        guard sourceIndex >= 0, sourceIndex < list.count,
+              destinationIndex >= 0, destinationIndex < list.count,
+              sourceIndex != destinationIndex else { return }
+
+        let item = list.remove(at: sourceIndex)
+        list.insert(item, at: destinationIndex)
+        captureDisplayPriorities = list
+        if let top = list.first {
+            captureDisplayID = top
+        }
     }
 }

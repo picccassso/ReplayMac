@@ -17,6 +17,7 @@ public final class StatusItemController: NSObject, NSMenuDelegate, @unchecked Se
     private var openLastClipItem: NSMenuItem?
     private var recordingDurationItem: NSMenuItem?
     private var sessionDurationItem: NSMenuItem?
+    private var displayItem: NSMenuItem?
     private var bufferUsageItem: NSMenuItem?
     private var longBufferUsageItem: NSMenuItem?
     private var hotkeyHintItem: NSMenuItem?
@@ -130,6 +131,10 @@ public final class StatusItemController: NSObject, NSMenuDelegate, @unchecked Se
         sessionDurationItem.isEnabled = false
         menu.addItem(sessionDurationItem)
 
+        let displayItem = NSMenuItem(title: "", action: nil, keyEquivalent: "")
+        displayItem.isEnabled = false
+        menu.addItem(displayItem)
+
         let bufferUsageItem = NSMenuItem(title: "", action: nil, keyEquivalent: "")
         bufferUsageItem.isEnabled = false
         menu.addItem(bufferUsageItem)
@@ -162,6 +167,7 @@ public final class StatusItemController: NSObject, NSMenuDelegate, @unchecked Se
         self.revealLastClipItem = revealLastClipItem
         self.recordingDurationItem = recordingDurationItem
         self.sessionDurationItem = sessionDurationItem
+        self.displayItem = displayItem
         self.bufferUsageItem = bufferUsageItem
         self.longBufferUsageItem = longBufferUsageItem
         self.hotkeyHintItem = hotkeyHintItem
@@ -214,6 +220,14 @@ public final class StatusItemController: NSObject, NSMenuDelegate, @unchecked Se
         sessionDurationItem?.title = "Session: \(state.formattedSessionDuration)"
         sessionDurationItem?.isHidden = !state.isSessionRecording
 
+        if let displayName = state.capturedDisplayName, (state.isRecording || state.isSessionRecording) {
+            let fallbackSuffix = state.isUsingFallbackDisplay ? " (Fallback)" : ""
+            displayItem?.title = "Display: \(displayName)\(fallbackSuffix)"
+            displayItem?.isHidden = false
+        } else {
+            displayItem?.isHidden = true
+        }
+
         let quickReplayCap = TimeInterval(replaySeconds)
         let capLabel = MenuBarState.formattedDuration(quickReplayCap)
         // The buffer retains headroom beyond the replay window; don't surface more
@@ -256,17 +270,18 @@ public final class StatusItemController: NSObject, NSMenuDelegate, @unchecked Se
     private func updateTooltip() {
         guard let button = statusItem?.button else { return }
 
+        let displayDetail = state.capturedDisplayName.map { " (\($0))" } ?? ""
         if state.isSessionRecording {
-            button.toolTip = "\(AppBranding.name) — Session \(state.formattedSessionDuration) (stop to save)"
+            button.toolTip = "\(AppBranding.name) — Session\(displayDetail) \(state.formattedSessionDuration) (stop to save)"
         } else if state.isRecording {
             if AppSettings.longBufferEnabled {
                 let longReplayCap = TimeInterval(AppSettings.longBufferDurationSeconds)
                 let available = min(state.extendedBufferElapsedSeconds, longReplayCap)
-                button.toolTip = "\(AppBranding.name) — Recording \(state.formattedRecordingDuration) · Extended replay \(MenuBarState.formattedDuration(available))/\(MenuBarState.formattedDuration(longReplayCap))"
+                button.toolTip = "\(AppBranding.name) — Recording\(displayDetail) \(state.formattedRecordingDuration) · Extended replay \(MenuBarState.formattedDuration(available))/\(MenuBarState.formattedDuration(longReplayCap))"
             } else {
                 let cap = TimeInterval(AppSettings.bufferDurationSeconds)
                 let buffered = MenuBarState.formattedDuration(min(state.bufferedSeconds, cap))
-                button.toolTip = "\(AppBranding.name) — Recording \(state.formattedRecordingDuration) · Quick replay \(buffered)/\(MenuBarState.formattedDuration(cap))"
+                button.toolTip = "\(AppBranding.name) — Recording\(displayDetail) \(state.formattedRecordingDuration) · Quick replay \(buffered)/\(MenuBarState.formattedDuration(cap))"
             }
         } else {
             button.toolTip = "\(AppBranding.name) — Not recording"

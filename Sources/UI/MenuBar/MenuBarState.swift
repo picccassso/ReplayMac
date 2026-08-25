@@ -19,6 +19,8 @@ public final class MenuBarState: ObservableObject {
     @Published public private(set) var bufferedSeconds: TimeInterval = 0
     @Published public private(set) var bufferMemoryBytes: Int = 0
     @Published public private(set) var availableUpdate: AvailableUpdate?
+    @Published public private(set) var capturedDisplayName: String?
+    @Published public private(set) var isUsingFallbackDisplay = false
 
     private var saveStatusResetTask: Task<Void, Never>?
     private var recordingStartedAt: Date?
@@ -85,6 +87,11 @@ public final class MenuBarState: ObservableObject {
 
     public func setAvailableUpdate(_ update: AvailableUpdate?) {
         availableUpdate = update
+    }
+
+    public func setCapturedDisplay(name: String?, isFallback: Bool = false) {
+        capturedDisplayName = name
+        isUsingFallbackDisplay = isFallback
     }
 
     @discardableResult

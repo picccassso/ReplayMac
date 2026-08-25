@@ -1,3 +1,4 @@
+import AppKit
 import CoreGraphics
 import Foundation
 
@@ -212,5 +213,71 @@ public enum DisplayIdentity {
             return nil
         }
         return stableKey(for: displayID)
+    }
+
+    /// Resolve the first matching display from an ordered priority list of keys.
+    ///
+    /// Iterates through `priorities` in order. Returns the first attached display matching
+    /// a key in the list. Returns `nil` if none of the priority keys match any currently
+    /// attached display.
+    public static func resolveFirst(
+        in priorities: [String],
+        among displayIDs: [CGDirectDisplayID] = onlineDisplayIDs()
+    ) -> CGDirectDisplayID? {
+        for key in priorities where !key.isEmpty {
+            if let resolved = resolve(key, among: displayIDs) {
+                return resolved
+            }
+        }
+        return nil
+    }
+
+    /// Result of resolving a display from a priority list.
+    public struct PriorityResolution: Sendable, Equatable {
+        public let displayID: CGDirectDisplayID
+        public let isTopPriority: Bool
+        public let matchedKey: String
+        public let priorityIndex: Int
+
+        public init(displayID: CGDirectDisplayID, isTopPriority: Bool, matchedKey: String, priorityIndex: Int) {
+            self.displayID = displayID
+            self.isTopPriority = isTopPriority
+            self.matchedKey = matchedKey
+            self.priorityIndex = priorityIndex
+        }
+    }
+
+    /// Resolve an ordered priority list to an attached display with priority metadata.
+    public static func resolvePriority(
+        in priorities: [String],
+        among displayIDs: [CGDirectDisplayID] = onlineDisplayIDs()
+    ) -> PriorityResolution? {
+        let validPriorities = priorities.filter { !$0.isEmpty }
+        guard !validPriorities.isEmpty else { return nil }
+
+        for (index, key) in validPriorities.enumerated() {
+            if let resolved = resolve(key, among: displayIDs) {
+                return PriorityResolution(
+                    displayID: resolved,
+                    isTopPriority: index == 0,
+                    matchedKey: key,
+                    priorityIndex: index
+                )
+            }
+        }
+        return nil
+    }
+
+    /// Human-readable name for a display (e.g. "Dell U2720Q", "Built-in Display").
+    public static func localizedDisplayName(for displayID: CGDirectDisplayID) -> String {
+        if let screen = NSScreen.screens.first(where: { screen in
+            (screen.deviceDescription[NSDeviceDescriptionKey("NSScreenNumber")] as? NSNumber)?.uint32Value == displayID
+        }) {
+            return screen.localizedName
+        }
+        if isBuiltin(displayID: displayID) {
+            return "Built-in Display"
+        }
+        return "Display \(displayID)"
     }
 }

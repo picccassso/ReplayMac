@@ -83,6 +83,7 @@ struct CaptureProfile: Identifiable, Codable, Equatable {
     var captureModeRawValue: String
     var captureDisplayID: String
     var captureDisplayID2: String
+    var captureDisplayPriorities: [String]? = []
     var dualCaptureSaveModeRawValue: String
     var captureResolutionRawValue: String
     var customCaptureWidth: Int

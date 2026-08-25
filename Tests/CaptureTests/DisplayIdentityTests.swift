@@ -112,4 +112,73 @@ final class DisplayIdentityTests: XCTestCase {
             }
         }
     }
+
+    func testResolveFirstPicksFirstAvailablePriority() {
+        let attached: [CGDirectDisplayID] = [10, 20, 30]
+
+        // Top choice is online
+        XCTAssertEqual(
+            DisplayIdentity.resolveFirst(in: ["raw:10", "raw:20", "raw:30"], among: attached),
+            10
+        )
+
+        // Top choice is offline; fallback to second choice
+        XCTAssertEqual(
+            DisplayIdentity.resolveFirst(in: ["raw:99", "raw:20", "raw:30"], among: attached),
+            20
+        )
+
+        // First two offline; fallback to third choice
+        XCTAssertEqual(
+            DisplayIdentity.resolveFirst(in: ["raw:99", "raw:88", "raw:30"], among: attached),
+            30
+        )
+
+        // All offline
+        XCTAssertNil(
+            DisplayIdentity.resolveFirst(in: ["raw:99", "raw:88"], among: attached)
+        )
+
+        // Empty list
+        XCTAssertNil(
+            DisplayIdentity.resolveFirst(in: [], among: attached)
+        )
+    }
+
+    func testResolvePriorityReturnsMetadata() {
+        let attached: [CGDirectDisplayID] = [10, 20]
+
+        // Top priority match
+        let topResult = DisplayIdentity.resolvePriority(in: ["raw:10", "raw:20"], among: attached)
+        XCTAssertNotNil(topResult)
+        XCTAssertEqual(topResult?.displayID, 10)
+        XCTAssertEqual(topResult?.isTopPriority, true)
+        XCTAssertEqual(topResult?.priorityIndex, 0)
+        XCTAssertEqual(topResult?.matchedKey, "raw:10")
+
+        // Fallback match (second item in priority list)
+        let fallbackResult = DisplayIdentity.resolvePriority(in: ["raw:99", "raw:20"], among: attached)
+        XCTAssertNotNil(fallbackResult)
+        XCTAssertEqual(fallbackResult?.displayID, 20)
+        XCTAssertEqual(fallbackResult?.isTopPriority, false)
+        XCTAssertEqual(fallbackResult?.priorityIndex, 1)
+        XCTAssertEqual(fallbackResult?.matchedKey, "raw:20")
+
+        // No match
+        let noMatchResult = DisplayIdentity.resolvePriority(in: ["raw:99", "raw:88"], among: attached)
+        XCTAssertNil(noMatchResult)
+    }
+
+    func testResolveFirstSkipsEmptyKeys() {
+        let attached: [CGDirectDisplayID] = [10, 20]
+        XCTAssertEqual(
+            DisplayIdentity.resolveFirst(in: ["", "raw:20"], among: attached),
+            20
+        )
+    }
+
+    func testLocalizedDisplayNameProvidesFallback() {
+        let name = DisplayIdentity.localizedDisplayName(for: 999999)
+        XCTAssertFalse(name.isEmpty)
+    }
 }
