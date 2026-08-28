@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.7.0
+
+- Add capture display priorities for single-display recording: order your preferred screens in Settings > Video and ReplayMac records the highest-priority one that is currently connected. If an external monitor is unavailable, manual, session, and automatic game recording fall back to the next screen without losing the preference; offline displays remain in the list, capture profiles preserve the order, and the menu bar identifies the active display and when a fallback is in use
+- Restore capture to the preferred display automatically after wake, reconnect, dock/KVM changes, and clamshell transitions. ReplayMac now observes live display reconfiguration, waits for slower external monitors to finish waking, and re-targets the capture pipeline when the preferred screen returns instead of remaining on the built-in fallback
+- Make saved display choices more resilient across reboots and hardware changes by matching persistent display identities with EDID, physical-size, built-in-screen, and role-aware fallbacks. Dual-display recovery no longer overwrites the saved capture mode when only one screen is temporarily available, and identical external displays are disambiguated where macOS exposes enough information
+
 ## 1.6.9
 
 - Keep recording the microphone when a call reconfigures the audio devices: joining a Discord or Zoom call changes the default input, the sample rate, or flips Bluetooth headphones into HFP mode, which stops `AVAudioEngine` and invalidates its taps — the mic went silent for the rest of the session while the app still reported it as recording. The engine is now rebuilt on configuration changes with bounded retries, plus a watchdog for an engine that dies without posting one (capped at three consecutive rebuilds with no sample in between, so a device that is genuinely gone is left alone, while real audio arriving clears the budget)

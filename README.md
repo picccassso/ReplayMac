@@ -15,7 +15,8 @@ It continuously buffers recent screen/audio capture and saves the last N seconds
 - **Instant replay** — Continuously buffers the last N seconds (15–300) of screen and audio; save retroactively with a click or hotkey.
 - **Session recording** — Record until you stop, then save one file with screen, system audio, and microphone (menu bar or hotkey). Video is saved without re-encoding, so saves are near-instant and keep the capture codec.
 - **Automatic game recording** — Opt in to stay idle until a game launches, record only while you're playing, and stop when the last game quits. Games are detected by their App Store category, with a manual bundle-identifier list for titles that don't declare one (many Steam games).
-- **Dual display support** — Capture one or two monitors, saved as a side-by-side composite or as separate files.
+- **Display priorities and recovery** — Rank preferred screens for single-display capture. ReplayMac uses the highest-priority connected display, falls back automatically when it is unavailable, and returns to it after wake, reconnect, dock/KVM, or clamshell changes.
+- **Dual display support** — Capture one or two monitors, saved as a side-by-side composite or as separate files; temporary single-screen fallbacks do not overwrite the saved dual-display setup.
 - **Hardware-accelerated encoding** — HEVC or H.264 via VideoToolbox, with configurable resolution, frame rate, and bitrate.
 - **Retina-aware recording** — Record HiDPI displays at their backing pixel resolution while keeping the macOS UI at its comfortable scaled size.
 - **System audio + microphone** — Capture all apps, no audio, or one selected app. Mic and system audio merge into a single track by default; optionally keep as separate tracks inside the MP4.
@@ -100,6 +101,12 @@ ReplayMac shows display sizes as macOS logical resolutions, which can be lower t
 - **Custom** forces the saved video to the exact width and height you choose, rescaling the capture if needed.
 
 For dual-display recording, Retina is applied per display. HiDPI displays use their backing pixel size, while non-Retina displays stay at their current size before ReplayMac saves either a side-by-side composite or separate files.
+
+## Capture display priority
+
+For single-display recording, Settings > Video lists connected and remembered displays in priority order. Use the arrow controls to rank them. ReplayMac records the first connected display in that list, whether capture starts manually, at login, for a session recording, or automatically when a game launches.
+
+Disconnected displays stay in the list as offline placeholders. If the preferred display is unavailable, ReplayMac uses the next connected screen and marks it as a fallback in the menu bar. When a higher-priority display reconnects or finishes waking, capture re-targets it automatically. The priority order is included in capture profiles and survives reboots, docking changes, and display ID reassignment.
 
 <details>
 <summary>Screenshots</summary>
