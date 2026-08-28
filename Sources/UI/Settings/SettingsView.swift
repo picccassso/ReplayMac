@@ -15,6 +15,7 @@ public struct SettingsView: View {
     @Default(.autoRecordGamesEnabled) var autoRecordGamesEnabled
     @Default(.autoRecordStopWhenGameCloses) var autoRecordStopWhenGameCloses
     @Default(.autoRecordGameBundleIDs) var autoRecordGameBundleIDs
+    @Default(.autoRecordExcludedBundleIDs) var autoRecordExcludedBundleIDs
 
     @Default(.videoCodec) var videoCodecRawValue
     @Default(.captureMode) var captureModeRawValue

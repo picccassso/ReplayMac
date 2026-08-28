@@ -22,6 +22,9 @@ extension AppDelegate {
         settingsObservations.append(Defaults.observe(.autoRecordGameBundleIDs) { [weak self] _ in
             self?.gameActivityMonitor.refreshManualGameList()
         })
+        settingsObservations.append(Defaults.observe(.autoRecordExcludedBundleIDs) { [weak self] _ in
+            self?.gameActivityMonitor.refreshManualGameList()
+        })
 
         syncGameAutoRecordMonitoringState()
     }

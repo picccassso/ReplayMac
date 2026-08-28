@@ -109,34 +109,49 @@ final class GameActivityMonitor: NSObject {
     // MARK: - Detection
 
     private func scanRunningApplications() {
+        var currentMatchingPIDs = Set<pid_t>()
         for app in workspace.runningApplications {
-            registerIfGame(app)
+            if registerIfGame(app) {
+                currentMatchingPIDs.insert(app.processIdentifier)
+            }
+        }
+
+        let previousPIDs = activeGamePIDs
+        activeGamePIDs.formIntersection(currentMatchingPIDs)
+        if !previousPIDs.isEmpty && activeGamePIDs.isEmpty {
+            logger.info("All active games closed or excluded; stopping game recording")
+            onGameActivityStopped?()
         }
     }
 
-    private func registerIfGame(_ app: NSRunningApplication) {
+    @discardableResult
+    private func registerIfGame(_ app: NSRunningApplication) -> Bool {
         // Only user-facing apps: skip menu-bar agents, daemons, and ourselves.
-        guard app.activationPolicy == .regular else { return }
-        guard app.bundleIdentifier != Bundle.main.bundleIdentifier else { return }
-        guard isGame(app) else { return }
+        guard app.activationPolicy == .regular else { return false }
+        guard app.bundleIdentifier != Bundle.main.bundleIdentifier else { return false }
+        guard isGame(app) else { return false }
 
         let pid = app.processIdentifier
-        guard !activeGamePIDs.contains(pid) else { return }
-
         let wasIdle = activeGamePIDs.isEmpty
-        activeGamePIDs.insert(pid)
-        logger.info("Detected game \(app.bundleIdentifier ?? "?", privacy: .public) (pid \(pid, privacy: .public))")
-        if wasIdle {
-            onGameActivityStarted?(app.localizedName ?? app.bundleIdentifier ?? "a game")
+        let inserted = activeGamePIDs.insert(pid).inserted
+        if inserted {
+            logger.info("Detected game \(app.bundleIdentifier ?? "?", privacy: .public) (pid \(pid, privacy: .public))")
+            if wasIdle {
+                onGameActivityStarted?(app.localizedName ?? app.bundleIdentifier ?? "a game")
+            }
         }
+        return true
     }
 
     private func isGame(_ app: NSRunningApplication) -> Bool {
         let manualBundleIDs = Set(AppSettings.autoRecordGameBundleIDs)
-        if let bundleID = app.bundleIdentifier, manualBundleIDs.contains(bundleID) {
-            return true
-        }
-        return GameAppClassifier.isGameCategory(declaredCategory(of: app))
+        let excludedBundleIDs = Set(AppSettings.autoRecordExcludedBundleIDs)
+        return GameAppClassifier.isGame(
+            bundleIdentifier: app.bundleIdentifier,
+            category: declaredCategory(of: app),
+            manualBundleIDs: manualBundleIDs,
+            excludedBundleIDs: excludedBundleIDs
+        )
     }
 
     /// Reads and caches the app's declared App Store category. Returns nil when

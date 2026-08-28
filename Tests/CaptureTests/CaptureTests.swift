@@ -410,4 +410,61 @@ final class GameAppClassifierTests: XCTestCase {
             )
         )
     }
+
+    func testExcludedBundleIDOverridesGameCategory() {
+        // Epic Games Launcher or launcher that declares games category is excluded
+        XCTAssertFalse(
+            GameAppClassifier.isGame(
+                bundleIdentifier: "com.epicgames.EpicGamesLauncher",
+                category: "public.app-category.games",
+                manualBundleIDs: [],
+                excludedBundleIDs: ["com.epicgames.EpicGamesLauncher"]
+            )
+        )
+    }
+
+    func testExcludedBundleIDOverridesManualList() {
+        XCTAssertFalse(
+            GameAppClassifier.isGame(
+                bundleIdentifier: "com.valvesoftware.steam.game",
+                category: nil,
+                manualBundleIDs: ["com.valvesoftware.steam.game"],
+                excludedBundleIDs: ["com.valvesoftware.steam.game"]
+            )
+        )
+    }
+
+    func testNonExcludedAppsStillMatchCategoriesAndManualList() {
+        XCTAssertTrue(
+            GameAppClassifier.isGame(
+                bundleIdentifier: "com.valvesoftware.steam.game",
+                category: nil,
+                manualBundleIDs: ["com.valvesoftware.steam.game"],
+                excludedBundleIDs: ["com.epicgames.EpicGamesLauncher"]
+            )
+        )
+        XCTAssertTrue(
+            GameAppClassifier.isGame(
+                bundleIdentifier: "com.feralinteractive.game",
+                category: "public.app-category.action-games",
+                manualBundleIDs: [],
+                excludedBundleIDs: ["com.epicgames.EpicGamesLauncher"]
+            )
+        )
+    }
+
+    func testDefaultExclusionPresetsAreValidAndContainEpicGamesLauncher() {
+        XCTAssertFalse(GameAutoRecordPresets.defaultExclusionPresets.isEmpty)
+        let epicPreset = GameAutoRecordPresets.defaultExclusionPresets.first { $0.name == "Epic Games Launcher" }
+        XCTAssertNotNil(epicPreset)
+        XCTAssertTrue(epicPreset?.bundleIDs.contains("com.epicgames.EpicGamesLauncher") == true)
+
+        for preset in GameAutoRecordPresets.defaultExclusionPresets {
+            XCTAssertFalse(preset.name.isEmpty)
+            XCTAssertFalse(preset.bundleIDs.isEmpty)
+            for bundleID in preset.bundleIDs {
+                XCTAssertFalse(bundleID.isEmpty)
+            }
+        }
+    }
 }
