@@ -65,4 +65,15 @@ final class AppSettingsMemoryCapTests: XCTestCase {
             3024
         )
     }
+
+    func testAudioRingBufferHeadroomMatchesVideoRingBufferHeadroom() {
+        XCTAssertGreaterThanOrEqual(
+            AppSettings.ringBufferHeadroomSeconds, 2.0,
+            "Audio and video ring buffer headroom must be at least one full GOP interval (~2s)"
+        )
+        XCTAssertEqual(
+            AppSettings.ringBufferTimeCapSeconds,
+            TimeInterval(AppSettings.bufferDurationSeconds) + AppSettings.ringBufferHeadroomSeconds
+        )
+    }
 }

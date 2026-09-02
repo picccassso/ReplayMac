@@ -44,7 +44,11 @@ enum AudioTrackMixer {
 
         let maxFramesPerBuffer = 2_048
         var outputBuffers: [CMSampleBuffer] = []
-        var currentFrame = firstFrame
+        // Anchor mixed audio to timeline zero (or firstFrame if earlier).
+        // If the first audio chunk starts after video start (frame 0),
+        // starting at 0 pads the lead-in with silence so the audio track in the MP4
+        // always begins synchronously with video at t = 0, preventing muted lead-ins.
+        var currentFrame = min(firstFrame, 0)
         var systemIndex = 0
         var micIndex = 0
 

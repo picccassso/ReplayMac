@@ -112,11 +112,17 @@ public actor ClipSaver {
             throw ClipSaveError.noSamples
         }
 
-        let videoEndPTS = CMSampleBufferGetPresentationTimeStamp(videoSamples.last!).seconds
-        let requestedWindowStartPTS = videoEndPTS - lastSeconds
+        guard let firstVideoSample = videoSamples.first,
+              let videoFormatDescription = firstVideoSample.formatDescription else {
+            throw ClipSaveError.missingFormatDescription
+        }
 
-        let systemAudioSamples = systemAudioRingBuffer?.samples(between: requestedWindowStartPTS, and: videoEndPTS) ?? []
-        let micAudioSamples = micRingBuffer?.samples(between: requestedWindowStartPTS, and: videoEndPTS) ?? []
+        let videoStartPTS = CMSampleBufferGetPresentationTimeStamp(firstVideoSample)
+        let videoEndPTS = CMSampleBufferGetPresentationTimeStamp(videoSamples.last!)
+        let audioRange = Self.audioExtractionRange(videoStartPTS: videoStartPTS, videoEndPTS: videoEndPTS)
+
+        let systemAudioSamples = systemAudioRingBuffer?.samples(between: audioRange.startPTS, and: audioRange.endPTS) ?? []
+        let micAudioSamples = micRingBuffer?.samples(between: audioRange.startPTS, and: audioRange.endPTS) ?? []
         let firstAudioTimingCount = systemAudioSamples.first.flatMap { try? $0.sampleTimingInfos().count } ?? -1
         print("[SAVE] video=\(videoSamples.count) sysAudio=\(systemAudioSamples.count) mic=\(micAudioSamples.count)")
         print("[SAVE] first audio timing count: \(firstAudioTimingCount)")
@@ -135,11 +141,6 @@ public actor ClipSaver {
         let writer = try AVAssetWriter(outputURL: fileURL, fileType: .mp4)
         writer.metadata = ClipMetadata.makeMetadataItems()
 
-        guard let firstVideoSample = videoSamples.first,
-              let videoFormatDescription = firstVideoSample.formatDescription else {
-            throw ClipSaveError.missingFormatDescription
-        }
-
         // Video input
         let videoInput = AVAssetWriterInput(
             mediaType: .video,
@@ -153,7 +154,6 @@ public actor ClipSaver {
         }
         writer.add(videoInput)
 
-        let videoStartPTS = CMSampleBufferGetPresentationTimeStamp(firstVideoSample)
         let systemAudioStartPTS = systemAudioSamples.first.map { CMSampleBufferGetPresentationTimeStamp($0) }
         let micAudioStartPTS = micAudioSamples.first.map { CMSampleBufferGetPresentationTimeStamp($0) }
         let offset = Self.timelineOffset(
@@ -171,6 +171,12 @@ public actor ClipSaver {
             .filter { CMSampleBufferGetPresentationTimeStamp($0).seconds >= 0 }
 
         logger.info("Saving clip: video=\(retimedVideo.count) audio=\(retimedSystemAudio.count) mic=\(retimedMicAudio.count)")
+        if let audioStart = [systemAudioStartPTS, micAudioStartPTS].compactMap({ $0 }).filter(\.isValid).min(by: { $0 < $1 }) {
+            let delta = audioStart.seconds - videoStartPTS.seconds
+            if delta > 0.05 {
+                logger.warning("Audio capture started \(delta, format: .fixed(precision: 3))s after video start; lead-in will be padded with silence")
+            }
+        }
         let earliestTrackStart = [videoStartPTS, systemAudioStartPTS, micAudioStartPTS]
             .compactMap { $0 }
             .filter(\.isValid)
@@ -232,6 +238,20 @@ public actor ClipSaver {
 
     // MARK: - Helpers
 
+    /// Audio extraction window aligned to the selected video frames.
+    /// Video samples start at a keyframe that may precede the requested duration cutoff,
+    /// so audio must start at `videoStartPTS` rather than an arbitrary duration cutoff
+    /// to prevent a leading muted gap in the saved clip.
+    static func audioExtractionRange(
+        videoStartPTS: CMTime,
+        videoEndPTS: CMTime
+    ) -> (startPTS: Double, endPTS: Double) {
+        (
+            startPTS: videoStartPTS.isValid ? videoStartPTS.seconds : 0,
+            endPTS: videoEndPTS.isValid ? videoEndPTS.seconds : 0
+        )
+    }
+
     static func timelineOffset(
         videoStartPTS: CMTime,
         systemAudioStartPTS: CMTime?,
@@ -278,12 +298,89 @@ public actor ClipSaver {
 
         var plans: [AudioAppendPlan] = []
         if !systemAudioSamples.isEmpty {
-            plans.append(AudioAppendPlan(label: "sysAudio", samples: systemAudioSamples))
+            let padded = Self.padLeadingSilenceIfNeeded(systemAudioSamples)
+            plans.append(AudioAppendPlan(label: "sysAudio", samples: padded))
         }
         if !micAudioSamples.isEmpty {
-            plans.append(AudioAppendPlan(label: "mic", samples: micAudioSamples))
+            let padded = Self.padLeadingSilenceIfNeeded(micAudioSamples)
+            plans.append(AudioAppendPlan(label: "mic", samples: padded))
         }
         return plans
+    }
+
+    /// Prepend silence buffers starting at timeline zero if unmerged audio samples begin
+    /// after video start (> 20ms). This ensures every individual audio track in the MP4
+    /// file starts synchronously with video at t = 0, preventing muted lead-ins.
+    private static func padLeadingSilenceIfNeeded(_ samples: [CMSampleBuffer]) -> [CMSampleBuffer] {
+        guard let first = samples.first else { return samples }
+        let firstPTS = CMSampleBufferGetPresentationTimeStamp(first)
+        guard firstPTS.isValid, firstPTS.seconds > 0.02,
+              let formatDesc = first.formatDescription,
+              let asbdPointer = CMAudioFormatDescriptionGetStreamBasicDescription(formatDesc) else {
+            return samples
+        }
+        let asbd = asbdPointer.pointee
+        let sampleRate = asbd.mSampleRate
+        guard sampleRate > 0 else { return samples }
+
+        let gapDuration = firstPTS.seconds
+        let totalFrames = Int(gapDuration * sampleRate)
+        guard totalFrames > 0 else { return samples }
+
+        let bytesPerFrame = Int(asbd.mBytesPerFrame)
+        let maxFramesPerChunk = 2048
+        var silenceBuffers: [CMSampleBuffer] = []
+        var currentFrame = 0
+
+        while currentFrame < totalFrames {
+            let chunkFrames = min(maxFramesPerChunk, totalFrames - currentFrame)
+            let byteCount = chunkFrames * bytesPerFrame
+            var blockBuffer: CMBlockBuffer?
+            guard CMBlockBufferCreateWithMemoryBlock(
+                allocator: kCFAllocatorDefault,
+                memoryBlock: nil,
+                blockLength: byteCount,
+                blockAllocator: kCFAllocatorDefault,
+                customBlockSource: nil,
+                offsetToData: 0,
+                dataLength: byteCount,
+                flags: kCMBlockBufferAssureMemoryNowFlag,
+                blockBufferOut: &blockBuffer
+            ) == noErr, let blockBuffer else { break }
+
+            guard CMBlockBufferFillDataBytes(
+                with: 0,
+                blockBuffer: blockBuffer,
+                offsetIntoDestination: 0,
+                dataLength: byteCount
+            ) == noErr else { break }
+
+            var timing = CMSampleTimingInfo(
+                duration: CMTime(value: 1, timescale: CMTimeScale(sampleRate)),
+                presentationTimeStamp: CMTime(value: Int64(currentFrame), timescale: CMTimeScale(sampleRate)),
+                decodeTimeStamp: .invalid
+            )
+            var silenceBuffer: CMSampleBuffer?
+            guard CMSampleBufferCreate(
+                allocator: kCFAllocatorDefault,
+                dataBuffer: blockBuffer,
+                dataReady: true,
+                makeDataReadyCallback: nil,
+                refcon: nil,
+                formatDescription: formatDesc,
+                sampleCount: CMItemCount(chunkFrames),
+                sampleTimingEntryCount: 1,
+                sampleTimingArray: &timing,
+                sampleSizeEntryCount: 0,
+                sampleSizeArray: nil,
+                sampleBufferOut: &silenceBuffer
+            ) == noErr, let silenceBuffer else { break }
+
+            silenceBuffers.append(silenceBuffer)
+            currentFrame += chunkFrames
+        }
+
+        return silenceBuffers + samples
     }
 
     private func makeAudioInput(for samples: [CMSampleBuffer], writer: AVAssetWriter) throws -> AVAssetWriterInput {

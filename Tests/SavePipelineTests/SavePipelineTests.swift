@@ -111,6 +111,59 @@ final class SavePipelineTests: XCTestCase {
         XCTAssertEqual(offset.seconds, systemAudioStart.seconds, accuracy: 0.0001)
     }
 
+    func testAudioExtractionRangeAlignsToVideoStartAndEnd() {
+        let timescale: CMTimeScale = 600
+        let videoStart = CMTime(seconds: 18.5, preferredTimescale: timescale)
+        let videoEnd = CMTime(seconds: 50.0, preferredTimescale: timescale)
+
+        let range = ClipSaver.audioExtractionRange(videoStartPTS: videoStart, videoEndPTS: videoEnd)
+
+        XCTAssertEqual(range.startPTS, 18.5, accuracy: 0.0001)
+        XCTAssertEqual(range.endPTS, 50.0, accuracy: 0.0001)
+    }
+
+    func testAudioExtractionRangePreventsLeadingMutedGapWhenVideoSnapsToKeyframe() throws {
+        // Suppose replay window requested is 30s and video ends at 50.0s.
+        // Due to keyframe snapping (GOP ~2s), video starts at 18.5s rather than 20.0s.
+        let timescale: CMTimeScale = 600
+        let videoStart = CMTime(seconds: 18.5, preferredTimescale: timescale)
+        let videoEnd = CMTime(seconds: 50.0, preferredTimescale: timescale)
+
+        let audioBuffer = AudioRingBuffer(timeCap: 35.0, memoryCap: 50_000_000)
+        // Add audio samples from 18.0s to 50.0s every 0.5s
+        for second in stride(from: 18.0, through: 50.0, by: 0.5) {
+            let sample = try makePCMSampleBuffer(
+                samples: [0.1, 0.1],
+                channels: 2,
+                startFrame: Int64(second * 48_000)
+            )
+            audioBuffer.append(sample)
+        }
+
+        // Aligning audio to videoStartPTS (18.5s)
+        let range = ClipSaver.audioExtractionRange(videoStartPTS: videoStart, videoEndPTS: videoEnd)
+        let extractedAudio = audioBuffer.samples(between: range.startPTS, and: range.endPTS)
+
+        guard let firstAudio = extractedAudio.first else {
+            XCTFail("Expected extracted audio samples")
+            return
+        }
+
+        let firstAudioPTS = CMSampleBufferGetPresentationTimeStamp(firstAudio)
+        XCTAssertEqual(firstAudioPTS.seconds, 18.5, accuracy: 0.0001)
+
+        // Retiming with timelineOffset anchored to videoStart
+        let offset = ClipSaver.timelineOffset(
+            videoStartPTS: videoStart,
+            systemAudioStartPTS: firstAudioPTS,
+            micAudioStartPTS: nil
+        )
+        let retimedAudioStartPTS = CMTimeSubtract(firstAudioPTS, offset)
+
+        // Retimed audio must start at 0.0s alongside video, not with a 1.5s muted lead-in
+        XCTAssertEqual(retimedAudioStartPTS.seconds, 0.0, accuracy: 0.0001)
+    }
+
     func testAudioTrackMixerCombinesOverlappingTracks() throws {
         let system = try makePCMSampleBuffer(
             samples: [0.25, 0.25, 0.25, 0.25],
@@ -165,6 +218,37 @@ final class SavePipelineTests: XCTestCase {
         let merged = try AudioTrackMixer.merge(systemAudioSamples: [system], micAudioSamples: [mic])
 
         XCTAssertEqual(floatSamples(in: merged[0]), [0.1, 0.3, 0.2, 0.4])
+    }
+
+    func testAudioTrackMixerPadsLeadInSilenceWhenAllChunksStartAfterZero() throws {
+        // Both system and mic start at frame 2 (delay after timeline zero)
+        let system = try makePCMSampleBuffer(
+            samples: [0.3, 0.3],
+            channels: 2,
+            startFrame: 2
+        )
+        let mic = try makePCMSampleBuffer(
+            samples: [0.2],
+            channels: 1,
+            startFrame: 2
+        )
+
+        let merged = try AudioTrackMixer.merge(systemAudioSamples: [system], micAudioSamples: [mic])
+
+        XCTAssertFalse(merged.isEmpty)
+        // First buffer must start at frame 0 (t = 0.0s)
+        let firstPTS = CMSampleBufferGetPresentationTimeStamp(merged[0])
+        XCTAssertEqual(firstPTS.seconds, 0.0, accuracy: 0.0001)
+
+        // Frames 0 and 1 must be silence [0, 0, 0, 0], and frame 2 should be mixed [0.5, 0.5]
+        let samples = floatSamples(in: merged[0])
+        XCTAssertEqual(samples.count, 6) // 3 frames * 2 channels
+        XCTAssertEqual(samples[0], 0.0, accuracy: 0.0001) // frame 0 left
+        XCTAssertEqual(samples[1], 0.0, accuracy: 0.0001) // frame 0 right
+        XCTAssertEqual(samples[2], 0.0, accuracy: 0.0001) // frame 1 left
+        XCTAssertEqual(samples[3], 0.0, accuracy: 0.0001) // frame 1 right
+        XCTAssertEqual(samples[4], 0.5, accuracy: 0.0001) // frame 2 left
+        XCTAssertEqual(samples[5], 0.5, accuracy: 0.0001) // frame 2 right
     }
 
     private func makePCMSampleBuffer(
