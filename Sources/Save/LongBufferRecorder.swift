@@ -524,9 +524,10 @@ public actor LongBufferRecorder {
         to outputURL: URL,
         mergeAudioTracks: Bool
     ) async throws {
+        let preset = try await HDRVideoExport.transcodePreset(for: composition)
         guard let exportSession = AVAssetExportSession(
             asset: composition,
-            presetName: AVAssetExportPresetHighestQuality
+            presetName: preset
         ) else {
             throw LongBufferRecorderError.cannotCreateExportSession
         }

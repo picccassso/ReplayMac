@@ -30,6 +30,9 @@ extension AppDelegate {
             self?.scheduleRuntimeSettingsReconcile()
         })
 
+        settingsObservations.append(Defaults.observe(.captureHDR) { [weak self] _ in
+            self?.scheduleRuntimeSettingsReconcile(needsFullRestart: true)
+        })
         settingsObservations.append(Defaults.observe(.videoCodec) { [weak self] _ in
             self?.scheduleRuntimeSettingsReconcile()
         })
@@ -65,7 +68,7 @@ extension AppDelegate {
             self?.scheduleRuntimeSettingsReconcile(needsFullRestart: true)
         })
         settingsObservations.append(Defaults.observe(.dualCaptureSaveMode) { [weak self] _ in
-            self?.scheduleRuntimeSettingsReconcile()
+            self?.scheduleRuntimeSettingsReconcile(needsFullRestart: true)
         })
         settingsObservations.append(Defaults.observe(.longBufferEnabled) { [weak self] _ in
             self?.scheduleRuntimeSettingsReconcile(needsFullRestart: false)
@@ -158,7 +161,9 @@ extension AppDelegate {
     }
 
     func applyPipelineShapeChanges() async throws {
-        let codec: Encode.VideoCodec = AppSettings.videoCodec == "hevc" ? .hevc : .h264
+        // Keep stream and encoder in the same range until a full HDR restart.
+        let captureHDR = (isDualMode ? dualDisplay1VideoEncoder.currentConfiguration : videoEncoder.currentConfiguration)?.captureHDR ?? false
+        let codec: Encode.VideoCodec = captureHDR || AppSettings.videoCodec == "hevc" ? .hevc : .h264
         let bitrate = Int(AppSettings.bitrateMbps * 1_000_000)
         let fps = AppSettings.frameRate
 
@@ -224,7 +229,8 @@ extension AppDelegate {
                 display2Height: scaled2.height,
                 fps: fps,
                 codec: codec,
-                bitrate: bitrate
+                bitrate: bitrate,
+                captureHDR: captureHDR
             )
         } else {
             let scaled = AppSettings.scaledDimensions(
@@ -243,7 +249,7 @@ extension AppDelegate {
             )
 
             // Restart encoder with new codec/bitrate/resolution
-            try videoEncoder.start(width: scaled.width, height: scaled.height, fps: fps, codec: codec, bitrate: bitrate)
+            try videoEncoder.start(width: scaled.width, height: scaled.height, fps: fps, codec: codec, bitrate: bitrate, captureHDR: captureHDR)
         }
 
         currentFPS = fps
@@ -270,7 +276,8 @@ extension AppDelegate {
         display2Height: Int,
         fps: Int,
         codec: Encode.VideoCodec,
-        bitrate: Int
+        bitrate: Int,
+        captureHDR: Bool
     ) throws {
         switch saveMode {
         case .sideBySide:
@@ -279,7 +286,8 @@ extension AppDelegate {
                 height: compositeHeight,
                 fps: fps,
                 codec: codec,
-                bitrate: bitrate
+                bitrate: bitrate,
+                captureHDR: captureHDR
             )
         case .separateFiles:
             try dualDisplay1VideoEncoder.start(
@@ -287,14 +295,16 @@ extension AppDelegate {
                 height: display1Height,
                 fps: fps,
                 codec: codec,
-                bitrate: bitrate
+                bitrate: bitrate,
+                captureHDR: captureHDR
             )
             try dualDisplay2VideoEncoder.start(
                 width: display2Width,
                 height: display2Height,
                 fps: fps,
                 codec: codec,
-                bitrate: bitrate
+                bitrate: bitrate,
+                captureHDR: captureHDR
             )
         }
     }

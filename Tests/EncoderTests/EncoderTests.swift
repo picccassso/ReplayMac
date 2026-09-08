@@ -2,6 +2,16 @@ import XCTest
 @testable import Encode
 
 final class EncoderTests: XCTestCase {
+    func testHDRRejectsH264() {
+        let encoder = VideoEncoder()
+        defer { encoder.stop() }
+        XCTAssertThrowsError(try encoder.start(width: 128, height: 64, fps: 30, codec: .h264, captureHDR: true)) { error in
+            guard case VideoEncoderError.hdrRequiresHEVC = error else {
+                return XCTFail("Unexpected error: \(error)")
+            }
+        }
+    }
+
     func testHEVCInitialization() throws {
         let encoder = VideoEncoder()
         try encoder.start(width: 1920, height: 1080, fps: 60, codec: .hevc, bitrate: 20_000_000)

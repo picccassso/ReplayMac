@@ -116,6 +116,12 @@ enum VideoCropper {
 
         let composition = AVMutableVideoComposition()
         composition.renderSize = cropRect.size
+        if try await track.load(.mediaCharacteristics).contains(.containsHDRVideo),
+           let format = try await track.load(.formatDescriptions).first {
+            composition.colorPrimaries = CMFormatDescriptionGetExtension(format, extensionKey: kCMFormatDescriptionExtension_ColorPrimaries) as? String
+            composition.colorTransferFunction = CMFormatDescriptionGetExtension(format, extensionKey: kCMFormatDescriptionExtension_TransferFunction) as? String
+            composition.colorYCbCrMatrix = CMFormatDescriptionGetExtension(format, extensionKey: kCMFormatDescriptionExtension_YCbCrMatrix) as? String
+        }
         let nominalFrameRate = try await track.load(.nominalFrameRate)
         let frameRate = nominalFrameRate.isFinite && nominalFrameRate > 0 ? nominalFrameRate : 30
         composition.frameDuration = CMTime(value: 1, timescale: CMTimeScale(frameRate.rounded()))

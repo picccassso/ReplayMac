@@ -264,6 +264,13 @@ public enum AppSettings {
     public static var systemAudioVolume: Double { Defaults[.systemAudioVolume] }
     public static var microphoneVolume: Double { Defaults[.microphoneVolume] }
 
+    public static var captureHDR: Bool { Defaults[.captureHDR] }
+    public static var isHDRCaptureActive: Bool {
+        captureHDR && CaptureManager.supportsHDRCapture
+            && (captureMode != CaptureMode.dualSideBySide.rawValue || dualCaptureSaveModeEnum == .separateFiles)
+    }
+    public static var effectiveVideoCodec: String { isHDRCaptureActive ? "hevc" : videoCodec }
+
     public static var videoCodec: String { Defaults[.videoCodec] }
     public static var bitrateMbps: Double { Defaults[.bitrateMbps] }
     public static var captureResolution: String { Defaults[.captureResolution] }
@@ -367,6 +374,7 @@ public extension Defaults.Keys {
     static let autoRecordGameBundleIDs = Key<[String]>("autoRecordGameBundleIDs", default: [])
     static let autoRecordExcludedBundleIDs = Key<[String]>("autoRecordExcludedBundleIDs", default: [])
 
+    static let captureHDR = Key<Bool>("captureHDR", default: false)
     static let videoCodec = Key<String>("videoCodec", default: VideoCodec.hevc.rawValue)
     static let captureMode = Key<String>("captureMode", default: "single")
     static let captureDisplayID = Key<String>("captureDisplayID", default: "")

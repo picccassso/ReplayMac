@@ -109,7 +109,7 @@ let package = Package(
         ),
         .testTarget(name: "RingBufferTests", dependencies: ["RingBuffer"], path: "Tests/RingBufferTests"),
         .testTarget(name: "EncoderTests", dependencies: ["Encode"], path: "Tests/EncoderTests"),
-        .testTarget(name: "SavePipelineTests", dependencies: ["Save", "RingBuffer"], path: "Tests/SavePipelineTests"),
+        .testTarget(name: "SavePipelineTests", dependencies: ["Save", "RingBuffer", "Encode", "UI"], path: "Tests/SavePipelineTests"),
         .testTarget(name: "CaptureTests", dependencies: ["Capture"], path: "Tests/CaptureTests"),
         .testTarget(name: "AudioTests", dependencies: ["Audio"], path: "Tests/AudioTests"),
         .testTarget(name: "UITests", dependencies: ["UI"], path: "Tests/UITests")

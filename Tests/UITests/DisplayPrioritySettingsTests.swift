@@ -74,16 +74,19 @@ final class DisplayPrioritySettingsTests: XCTestCase {
 
         let decoder = JSONDecoder()
         let decodedLegacy = try decoder.decode(CaptureProfile.self, from: Data(legacyJSON.utf8))
+        XCTAssertFalse(decodedLegacy.captureHDR ?? false)
         XCTAssertEqual(decodedLegacy.captureDisplayID, "builtin:main")
         XCTAssertEqual(decodedLegacy.captureDisplayPriorities ?? [], [])
 
         // New profile with priorities
         var newProfile = decodedLegacy
+        newProfile.captureHDR = true
         newProfile.captureDisplayPriorities = ["edid:999:888:777", "builtin:main"]
 
         let encoder = JSONEncoder()
         let encodedData = try encoder.encode(newProfile)
         let roundTripped = try decoder.decode(CaptureProfile.self, from: encodedData)
+        XCTAssertEqual(roundTripped.captureHDR, true)
         XCTAssertEqual(roundTripped.captureDisplayPriorities, ["edid:999:888:777", "builtin:main"])
     }
 }

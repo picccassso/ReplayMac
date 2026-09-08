@@ -1,7 +1,27 @@
 import SwiftUI
 import Defaults
+import Capture
 
 extension SettingsView {
+    var isSideBySideCapture: Bool {
+        captureModeRawValue == CaptureMode.dualSideBySide.rawValue
+            && dualCaptureSaveModeRawValue == DualCaptureSaveMode.sideBySide.rawValue
+    }
+
+    var hdrCaptureEnabled: Bool {
+        captureHDR && CaptureManager.supportsHDRCapture && !isSideBySideCapture
+    }
+
+    var hdrCaptureHelp: String {
+        if !CaptureManager.supportsHDRCapture {
+            return "HDR recording requires an Apple silicon Mac. This Mac records in SDR."
+        }
+        if isSideBySideCapture {
+            return "Combined side-by-side video records in SDR. Choose separate files or a single display to record in HDR."
+        }
+        return "Preserves HDR highlights using 10-bit HEVC. For HDR gameplay, enable HDR on your display. Playback appearance depends on the display and player."
+    }
+
     var dualDisplayOptions: [DisplayOption] {
         displays.filter { $0.id != captureDisplayID }
     }
@@ -9,11 +29,21 @@ extension SettingsView {
     var videoTab: some View {
         Form {
             Section {
-                Picker("Codec", selection: $videoCodecRawValue) {
+                Toggle("Record in HDR", isOn: $captureHDR)
+                    .disabled(!CaptureManager.supportsHDRCapture || isSideBySideCapture)
+                Text(hdrCaptureHelp)
+                    .font(.system(size: 12, design: .rounded))
+                    .foregroundStyle(AppTheme.textSecondary)
+
+                Picker("Codec", selection: Binding(
+                    get: { hdrCaptureEnabled ? VideoCodec.hevc.rawValue : videoCodecRawValue },
+                    set: { videoCodecRawValue = $0 }
+                )) {
                     ForEach(VideoCodec.allCases) { codec in
                         Text(codec.title).tag(codec.rawValue)
                     }
                 }
+                .disabled(hdrCaptureEnabled)
 
                 Picker("Capture mode", selection: $captureModeRawValue) {
                     ForEach(CaptureMode.allCases) { mode in

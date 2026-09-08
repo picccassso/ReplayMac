@@ -237,6 +237,7 @@ extension SettingsView {
 
         isApplyingQualityPreset = true
 
+        captureHDR = profile.captureHDR ?? false
         videoCodecRawValue = profile.videoCodecRawValue
         captureModeRawValue = profile.captureModeRawValue
         captureDisplayID = profile.captureDisplayID
@@ -279,6 +280,7 @@ extension SettingsView {
             name: name,
             createdAt: createdAt,
             updatedAt: Date(),
+            captureHDR: captureHDR,
             videoCodecRawValue: videoCodecRawValue,
             captureModeRawValue: captureModeRawValue,
             captureDisplayID: captureDisplayID,

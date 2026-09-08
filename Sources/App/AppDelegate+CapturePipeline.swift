@@ -98,7 +98,8 @@ extension AppDelegate {
                 }
 
                 let isDual = AppSettings.captureMode == CaptureMode.dualSideBySide.rawValue
-                let codec: Encode.VideoCodec = AppSettings.videoCodec == "hevc" ? .hevc : .h264
+                let captureHDR = AppSettings.isHDRCaptureActive
+                let codec: Encode.VideoCodec = captureHDR || AppSettings.videoCodec == "hevc" ? .hevc : .h264
                 let bitrate = Int(AppSettings.bitrateMbps * 1_000_000)
                 let fps = AppSettings.frameRate
                 let queueDepth = AppSettings.queueDepth
@@ -147,7 +148,8 @@ extension AppDelegate {
                             outputWidth2: nil,
                             outputHeight2: nil,
                             excludeOwnAppAudio: excludeOwn,
-                            captureAudio: captureMainSystemAudio
+                            captureAudio: captureMainSystemAudio,
+                            captureHDR: captureHDR
                         )
                     } catch CaptureError.notEnoughDisplays {
                         dualConfigs = nil
@@ -159,7 +161,8 @@ extension AppDelegate {
                             excludeOwnAppAudio: excludeOwn,
                             codec: codec,
                             bitrate: bitrate,
-                            captureAudio: captureMainSystemAudio
+                            captureAudio: captureMainSystemAudio,
+                            captureHDR: captureHDR
                         )
                     }
 
@@ -219,7 +222,8 @@ extension AppDelegate {
                             display2Height: scaled2.height,
                             fps: fps,
                             codec: codec,
-                            bitrate: bitrate
+                            bitrate: bitrate,
+                            captureHDR: captureHDR
                         )
 
                         isDualMode = true
@@ -235,7 +239,8 @@ extension AppDelegate {
                         excludeOwnAppAudio: excludeOwn,
                         codec: codec,
                         bitrate: bitrate,
-                        captureAudio: captureMainSystemAudio
+                        captureAudio: captureMainSystemAudio,
+                        captureHDR: captureHDR
                     )
                 }
 
@@ -321,7 +326,8 @@ extension AppDelegate {
         excludeOwnAppAudio: Bool,
         codec: Encode.VideoCodec,
         bitrate: Int,
-        captureAudio: Bool
+        captureAudio: Bool,
+        captureHDR: Bool
     ) async throws {
         await captureManager.setVideoHandler(replayCapVideoEncodeHandler(videoEncoder))
         await captureManager.setAudioHandler(replayCapSystemAudioProcessHandler(systemAudioCapture))
@@ -333,7 +339,8 @@ extension AppDelegate {
             fps: fps,
             queueDepth: queueDepth,
             excludeOwnAppAudio: excludeOwnAppAudio,
-            captureAudio: captureAudio
+            captureAudio: captureAudio,
+            captureHDR: captureHDR
         )
 
         originalDisplayWidth = config.sourceWidth
@@ -362,7 +369,8 @@ extension AppDelegate {
             height: scaled.height,
             fps: fps,
             codec: codec,
-            bitrate: bitrate
+            bitrate: bitrate,
+            captureHDR: captureHDR
         )
 
         isDualMode = false

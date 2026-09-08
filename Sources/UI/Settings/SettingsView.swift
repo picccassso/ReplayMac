@@ -17,6 +17,7 @@ public struct SettingsView: View {
     @Default(.autoRecordGameBundleIDs) var autoRecordGameBundleIDs
     @Default(.autoRecordExcludedBundleIDs) var autoRecordExcludedBundleIDs
 
+    @Default(.captureHDR) var captureHDR
     @Default(.videoCodec) var videoCodecRawValue
     @Default(.captureMode) var captureModeRawValue
     @Default(.captureDisplayID) var captureDisplayID

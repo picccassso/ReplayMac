@@ -79,6 +79,7 @@ struct CaptureProfile: Identifiable, Codable, Equatable {
     var createdAt: Date
     var updatedAt: Date
 
+    var captureHDR: Bool? = false
     var videoCodecRawValue: String
     var captureModeRawValue: String
     var captureDisplayID: String

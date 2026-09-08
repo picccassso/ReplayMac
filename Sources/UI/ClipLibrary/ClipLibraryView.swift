@@ -1608,7 +1608,7 @@ private struct ClipTrimView: View {
 
             let preset: String
             if crop != nil {
-                preset = AVAssetExportPresetHighestQuality
+                preset = try await HDRVideoExport.transcodePreset(for: exportAsset)
             } else if await AVAssetExportSession.compatibility(
                 ofExportPreset: AVAssetExportPresetPassthrough,
                 with: exportAsset,
@@ -1616,7 +1616,7 @@ private struct ClipTrimView: View {
             ) {
                 preset = AVAssetExportPresetPassthrough
             } else {
-                preset = AVAssetExportPresetHighestQuality
+                preset = try await HDRVideoExport.transcodePreset(for: exportAsset)
             }
 
             guard let exportSession = AVAssetExportSession(asset: exportAsset, presetName: preset) else {

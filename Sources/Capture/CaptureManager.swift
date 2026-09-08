@@ -73,6 +73,37 @@ public actor CaptureManager {
 
     public init() {}
 
+    public nonisolated static var supportsHDRCapture: Bool {
+        #if arch(arm64)
+        return true
+        #else
+        return false
+        #endif
+    }
+
+    // Canonical HDR is portable across displays. Pin Rec.2020 HLG explicitly
+    // so capture and the HEVC encoder agree even if Apple's preset changes.
+    nonisolated static func makeStreamConfiguration(captureHDR: Bool) -> SCStreamConfiguration {
+        if captureHDR && supportsHDRCapture {
+            let config = SCStreamConfiguration(preset: .captureHDRStreamCanonicalDisplay)
+            config.pixelFormat = kCVPixelFormatType_420YpCbCr10BiPlanarVideoRange
+            config.colorSpaceName = CGColorSpace.itur_2100_HLG
+            config.colorMatrix = kCVImageBufferYCbCrMatrix_ITU_R_2020
+            return config
+        }
+        let config = SCStreamConfiguration()
+        config.pixelFormat = screenPixelFormat
+        config.colorSpaceName = screenColorSpace
+        return config
+    }
+
+    nonisolated static func copyColorConfiguration(from source: SCStreamConfiguration, to destination: SCStreamConfiguration) {
+        destination.captureDynamicRange = source.captureDynamicRange
+        destination.pixelFormat = source.pixelFormat
+        destination.colorSpaceName = source.colorSpaceName
+        destination.colorMatrix = source.colorMatrix
+    }
+
     // MARK: - SCK Configuration updates
 
     public func updateStreamConfiguration(
@@ -91,8 +122,7 @@ public actor CaptureManager {
         config.height = resolution?.height ?? currentConfig.height
         config.minimumFrameInterval = CMTime(value: 1, timescale: CMTimeScale(fps))
         config.queueDepth = queueDepth
-        config.pixelFormat = currentConfig.pixelFormat
-        config.colorSpaceName = currentConfig.colorSpaceName
+        Self.copyColorConfiguration(from: currentConfig, to: config)
         config.capturesAudio = currentConfig.capturesAudio
         config.excludesCurrentProcessAudio = excludeOwnAppAudio
 
@@ -129,8 +159,7 @@ public actor CaptureManager {
         config1.height = resolution1?.height ?? currentConfig1.height
         config1.minimumFrameInterval = CMTime(value: 1, timescale: CMTimeScale(fps))
         config1.queueDepth = queueDepth
-        config1.pixelFormat = currentConfig1.pixelFormat
-        config1.colorSpaceName = currentConfig1.colorSpaceName
+        Self.copyColorConfiguration(from: currentConfig1, to: config1)
         config1.capturesAudio = currentConfig1.capturesAudio
         config1.excludesCurrentProcessAudio = excludeOwnAppAudio
 
@@ -139,8 +168,7 @@ public actor CaptureManager {
         config2.height = resolution2?.height ?? currentConfig2.height
         config2.minimumFrameInterval = CMTime(value: 1, timescale: CMTimeScale(fps))
         config2.queueDepth = queueDepth
-        config2.pixelFormat = currentConfig2.pixelFormat
-        config2.colorSpaceName = currentConfig2.colorSpaceName
+        Self.copyColorConfiguration(from: currentConfig2, to: config2)
         config2.capturesAudio = currentConfig2.capturesAudio
         config2.excludesCurrentProcessAudio = excludeOwnAppAudio
 
@@ -242,7 +270,8 @@ public actor CaptureManager {
         outputWidth: Int? = nil,
         outputHeight: Int? = nil,
         excludeOwnAppAudio: Bool = false,
-        captureAudio: Bool = true
+        captureAudio: Bool = true,
+        captureHDR: Bool = false
     ) async throws -> CaptureConfig {
         delegate.resetStats()
         let permissions = CapturePermissions()
@@ -287,13 +316,11 @@ public actor CaptureManager {
         let captureWidth = outputWidth ?? Int(display.width)
         let captureHeight = outputHeight ?? Int(display.height)
 
-        let config = SCStreamConfiguration()
+        let config = Self.makeStreamConfiguration(captureHDR: captureHDR)
         config.width = captureWidth
         config.height = captureHeight
         config.minimumFrameInterval = CMTime(value: 1, timescale: CMTimeScale(fps))
         config.queueDepth = queueDepth
-        config.pixelFormat = Self.screenPixelFormat
-        config.colorSpaceName = Self.screenColorSpace
         config.capturesAudio = captureAudio
         config.excludesCurrentProcessAudio = excludeOwnAppAudio
 
@@ -338,7 +365,8 @@ public actor CaptureManager {
         outputWidth2: Int? = nil,
         outputHeight2: Int? = nil,
         excludeOwnAppAudio: Bool = false,
-        captureAudio: Bool = true
+        captureAudio: Bool = true,
+        captureHDR: Bool = false
     ) async throws -> (config1: CaptureConfig, config2: CaptureConfig) {
         delegate1.resetStats()
         delegate2.resetStats()
@@ -393,23 +421,19 @@ public actor CaptureManager {
         let capWidth2 = outputWidth2 ?? Int(display2.width)
         let capHeight2 = outputHeight2 ?? Int(display2.height)
 
-        let config1 = SCStreamConfiguration()
+        let config1 = Self.makeStreamConfiguration(captureHDR: captureHDR)
         config1.width = capWidth1
         config1.height = capHeight1
         config1.minimumFrameInterval = CMTime(value: 1, timescale: CMTimeScale(fps))
         config1.queueDepth = queueDepth
-        config1.pixelFormat = Self.screenPixelFormat
-        config1.colorSpaceName = Self.screenColorSpace
         config1.capturesAudio = captureAudio
         config1.excludesCurrentProcessAudio = excludeOwnAppAudio
 
-        let config2 = SCStreamConfiguration()
+        let config2 = Self.makeStreamConfiguration(captureHDR: captureHDR)
         config2.width = capWidth2
         config2.height = capHeight2
         config2.minimumFrameInterval = CMTime(value: 1, timescale: CMTimeScale(fps))
         config2.queueDepth = queueDepth
-        config2.pixelFormat = Self.screenPixelFormat
-        config2.colorSpaceName = Self.screenColorSpace
         config2.capturesAudio = false
         config2.excludesCurrentProcessAudio = excludeOwnAppAudio
 

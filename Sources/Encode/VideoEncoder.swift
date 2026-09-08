@@ -2,6 +2,7 @@ import Foundation
 import VideoToolbox
 @preconcurrency import CoreMedia
 import CoreVideo
+import os.log
 
 public enum VideoCodec: Sendable {
     case hevc
@@ -14,9 +15,11 @@ public struct VideoEncoderConfiguration: Equatable, Sendable {
     public let fps: Int
     public let codec: VideoCodec
     public let bitrate: Int
+    public var captureHDR: Bool = false
 }
 
 public enum VideoEncoderError: Error {
+    case hdrRequiresHEVC
     case failedToCreateSession(OSStatus)
     case failedToSetProperties(OSStatus)
     case failedToPrepare(OSStatus)
@@ -37,6 +40,7 @@ private func compressionOutputCallback(
 public final class VideoEncoder: @unchecked Sendable {
     public typealias OutputHandler = @Sendable (CMSampleBuffer) -> Void
 
+    private let logger = Logger(subsystem: "com.replaycap", category: "VideoEncoder")
     private var compressionSession: VTCompressionSession?
     private let stateLock = NSLock()
     private var _outputHandler: OutputHandler?
@@ -77,8 +81,10 @@ public final class VideoEncoder: @unchecked Sendable {
         height: Int,
         fps: Int,
         codec: VideoCodec = .hevc,
-        bitrate: Int = 20_000_000
+        bitrate: Int = 20_000_000,
+        captureHDR: Bool = false
     ) throws {
+        guard !captureHDR || codec == .hevc else { throw VideoEncoderError.hdrRequiresHEVC }
         stop()
 
         let codecType: CMVideoCodecType
@@ -106,7 +112,9 @@ public final class VideoEncoder: @unchecked Sendable {
             height: Int32(height),
             codecType: codecType,
             encoderSpecification: encoderSpecification,
-            imageBufferAttributes: nil,
+            imageBufferAttributes: captureHDR ? [
+                kCVPixelBufferPixelFormatTypeKey: kCVPixelFormatType_420YpCbCr10BiPlanarVideoRange
+            ] as CFDictionary : nil,
             compressedDataAllocator: nil,
             outputCallback: compressionOutputCallback,
             refcon: Unmanaged.passUnretained(self).toOpaque(),
@@ -118,7 +126,7 @@ public final class VideoEncoder: @unchecked Sendable {
         }
 
         let bytesPerSecond = Double(bitrate) / 8.0
-        let properties: [NSString: AnyObject] = [
+        var properties: [NSString: AnyObject] = [
             kVTCompressionPropertyKey_RealTime: kCFBooleanTrue,
             kVTCompressionPropertyKey_AllowFrameReordering: kCFBooleanFalse,
             kVTCompressionPropertyKey_MaxKeyFrameInterval: NSNumber(value: fps * 2),
@@ -135,6 +143,18 @@ public final class VideoEncoder: @unchecked Sendable {
             kVTCompressionPropertyKey_TransferFunction: kCMFormatDescriptionTransferFunction_ITU_R_709_2,
             kVTCompressionPropertyKey_YCbCrMatrix: kCMFormatDescriptionYCbCrMatrix_ITU_R_709_2
         ]
+
+        if captureHDR {
+            // Record portable HLG, without synthesizing optional Dolby Vision
+            // metadata. Auto invokes HDR image statistics on live SCK buffers;
+            // that path can reject frames with kVTParameterErr (-12902).
+            // Main 10 and the Rec.2020/HLG colour tags still signal HDR.
+            properties[kVTCompressionPropertyKey_HDRMetadataInsertionMode] = kVTHDRMetadataInsertionMode_None
+            properties[kVTCompressionPropertyKey_ProfileLevel] = kVTProfileLevel_HEVC_Main10_AutoLevel
+            properties[kVTCompressionPropertyKey_ColorPrimaries] = kCMFormatDescriptionColorPrimaries_ITU_R_2020
+            properties[kVTCompressionPropertyKey_TransferFunction] = kCMFormatDescriptionTransferFunction_ITU_R_2100_HLG
+            properties[kVTCompressionPropertyKey_YCbCrMatrix] = kCMFormatDescriptionYCbCrMatrix_ITU_R_2020
+        }
 
         let propsStatus = VTSessionSetProperties(session, propertyDictionary: properties as CFDictionary)
         guard propsStatus == noErr else {
@@ -155,7 +175,8 @@ public final class VideoEncoder: @unchecked Sendable {
             height: height,
             fps: fps,
             codec: codec,
-            bitrate: bitrate
+            bitrate: bitrate,
+            captureHDR: captureHDR
         )
         stateLock.unlock()
     }
@@ -188,9 +209,17 @@ public final class VideoEncoder: @unchecked Sendable {
         stateLock.lock()
         expectedPTSQueue.append(pts)
         encodeCount += 1
+        let isFirstFrame = encodeCount == 1
         let forcesKeyframe = forcesKeyframeOnNextFrame
         forcesKeyframeOnNextFrame = false
         stateLock.unlock()
+
+        if isFirstFrame {
+            let format = CVPixelBufferGetPixelFormatType(pixelBuffer)
+            let width = CVPixelBufferGetWidth(pixelBuffer)
+            let height = CVPixelBufferGetHeight(pixelBuffer)
+            logger.notice("First input frame: \(width, privacy: .public)x\(height, privacy: .public), pixelFormat=\(format, privacy: .public)")
+        }
 
         let frameProperties: CFDictionary? = forcesKeyframe
             ? [kVTEncodeFrameOptionKey_ForceKeyFrame: kCFBooleanTrue] as CFDictionary

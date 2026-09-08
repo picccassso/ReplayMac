@@ -243,7 +243,7 @@ extension SettingsView {
         let referencePixels = Double(2560 * 1440)
         let pixelScale = max(Double(dimensions.width * dimensions.height) / referencePixels, 0.25)
         let fpsScale = max(Double(frameRate) / 60.0, 0.5)
-        let codecScale = videoCodecRawValue == VideoCodec.h264.rawValue ? 1.3 : 1.0
+        let codecScale = !hdrCaptureEnabled && videoCodecRawValue == VideoCodec.h264.rawValue ? 1.3 : 1.0
 
         let baseMbps: Double
         switch preset {
