@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.7.1
+
+- Add optional HDR recording on Apple silicon: enable Record in HDR in Settings > Video to capture 10-bit HEVC with Rec.2020 HLG colour. HDR works with a single display or dual displays saved as separate files, stays off by default, persists in capture profiles, and is preserved through saved clips and cropped video exports; combined side-by-side recordings remain SDR
+- Add application exclusions for automatic game recording, so launchers and tools can stay open without starting or extending a recording session. Choose a running app or an app bundle from disk, or use built-in presets for Steam, Epic Games Launcher, Battle.net, Heroic, GOG Galaxy, EA App, Unreal Editor, Unity Editor, and Roblox Player; changing exclusions takes effect while ReplayMac is running
+- Fix clips beginning with one or two seconds of silence after video saving moved the start back to the preceding keyframe. Audio extraction now uses the same keyframe-aligned start as video, and genuine microphone or system-audio startup gaps are padded with silence so tracks begin at zero and remain synchronized
+
 ## 1.7.0
 
 - Add capture display priorities for single-display recording: order your preferred screens in Settings > Video and ReplayMac records the highest-priority one that is currently connected. If an external monitor is unavailable, manual, session, and automatic game recording fall back to the next screen without losing the preference; offline displays remain in the list, capture profiles preserve the order, and the menu bar identifies the active display and when a fallback is in use
