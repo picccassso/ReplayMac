@@ -90,7 +90,10 @@ let package = Package(
                 .product(name: "KeyboardShortcuts", package: "KeyboardShortcuts"),
                 .product(name: "Defaults", package: "Defaults")
             ],
-            path: "Sources/UI"
+            path: "Sources/UI",
+            linkerSettings: [
+                .linkedFramework("VideoToolbox")
+            ]
         ),
         .target(
             name: "Hotkeys",

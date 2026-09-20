@@ -6,6 +6,56 @@ import ImageIO
 @testable import UI
 
 final class VideoCropTests: XCTestCase {
+    func test1440pLandscapeFitsExactlyInto1080p() {
+        let output = TrimExportResolution.fullHD.outputSize(
+            for: CGSize(width: 2560, height: 1440)
+        )
+
+        XCTAssertEqual(output, CGSize(width: 1920, height: 1080))
+    }
+
+    func testPortrait1080pPreservesOrientation() {
+        let output = TrimExportResolution.fullHD.outputSize(
+            for: CGSize(width: 1440, height: 2560)
+        )
+
+        XCTAssertEqual(output, CGSize(width: 1080, height: 1920))
+    }
+
+    func test1080pHighEstimateKeepsSixtySecondClipUnderDiscordLimit() {
+        let output = CGSize(width: 1920, height: 1080)
+        let estimate = TrimExportEstimate.bytes(
+            durationSeconds: 60,
+            quality: .high,
+            outputSize: output,
+            audioTrackCount: 1,
+            sourceTotalBitrateMbps: 0
+        )
+
+        XCTAssertLessThan(estimate, TrimExportEstimate.discordLimitBytes)
+        XCTAssertGreaterThan(estimate, 90_000_000)
+    }
+
+    func testEstimateAccountsForEveryRetainedAudioTrack() {
+        let output = CGSize(width: 1920, height: 1080)
+        let oneTrack = TrimExportEstimate.bytes(
+            durationSeconds: 60,
+            quality: .balanced,
+            outputSize: output,
+            audioTrackCount: 1,
+            sourceTotalBitrateMbps: 0
+        )
+        let twoTracks = TrimExportEstimate.bytes(
+            durationSeconds: 60,
+            quality: .balanced,
+            outputSize: output,
+            audioTrackCount: 2,
+            sourceTotalBitrateMbps: 0
+        )
+
+        XCTAssertGreaterThan(twoTracks, oneTrack)
+    }
+
     func testNormalizedCropClampsToVideoBounds() {
         let crop = NormalizedVideoCrop(CGRect(x: -0.2, y: 0.25, width: 0.7, height: 1))
 
@@ -108,6 +158,49 @@ final class VideoCropTests: XCTestCase {
         let resultGeometry = try await VideoCropper.geometry(for: AVURLAsset(url: outputURL))
         XCTAssertEqual(resultGeometry.displaySize.width, 80, accuracy: 0.5)
         XCTAssertEqual(resultGeometry.displaySize.height, 120, accuracy: 0.5)
+    }
+
+    @MainActor
+    func testControlledExportWritesHEVCAtRequestedSize() async throws {
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("ReplayCapControlledExportTests-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+
+        let sourceURL = directory.appendingPathComponent("source.mp4")
+        let outputURL = directory.appendingPathComponent("output.mp4")
+        try await writeTestVideo(to: sourceURL, size: CGSize(width: 2560, height: 1440))
+
+        let asset = AVURLAsset(url: sourceURL)
+        let duration = try await asset.load(.duration)
+        let outputSize = TrimExportResolution.fullHD.outputSize(
+            for: CGSize(width: 2560, height: 1440)
+        )
+        let composition = try await VideoCropper.videoComposition(
+            for: asset,
+            crop: .fullFrame,
+            outputSize: outputSize
+        )
+        try await TrimVideoTranscoder().export(
+            asset: asset,
+            timeRange: CMTimeRange(start: .zero, duration: duration),
+            videoComposition: composition,
+            outputSize: outputSize,
+            videoBitrateMbps: 8,
+            to: outputURL
+        )
+
+        let outputAsset = AVURLAsset(url: outputURL)
+        let resultGeometry = try await VideoCropper.geometry(for: outputAsset)
+        let tracks = try await outputAsset.loadTracks(withMediaType: .video)
+        let track = try XCTUnwrap(tracks.first)
+        let formatDescriptions = try await track.load(.formatDescriptions)
+        let description = try XCTUnwrap(formatDescriptions.first)
+        let codec = CMFormatDescriptionGetMediaSubType(description)
+
+        XCTAssertEqual(resultGeometry.displaySize.width, 1920, accuracy: 0.5)
+        XCTAssertEqual(resultGeometry.displaySize.height, 1080, accuracy: 0.5)
+        XCTAssertTrue(codec == kCMVideoCodecType_HEVC)
     }
 
     @MainActor

@@ -28,14 +28,14 @@ public struct AccentButtonStyle: ButtonStyle {
             .foregroundStyle(.white)
             .padding(.horizontal, 14)
             .padding(.vertical, 8)
-            .background(
+            .background {
                 LinearGradient(
                     colors: [AppTheme.accent, AppTheme.accentSecondary],
                     startPoint: .leading,
                     endPoint: .trailing
                 )
-                .opacity(isEnabled ? (configuration.isPressed ? 0.8 : 1.0) : 0.28)
-            )
+                .opacity(Double(isEnabled ? (configuration.isPressed ? 0.8 : 1.0) : 0.28))
+            }
             .clipShape(RoundedRectangle(cornerRadius: AppTheme.cornerRadiusSmall, style: .continuous))
             .scaleEffect(configuration.isPressed && isEnabled ? 0.97 : 1.0)
             .animation(.easeOut(duration: 0.15), value: configuration.isPressed)

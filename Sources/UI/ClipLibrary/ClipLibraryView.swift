@@ -1374,12 +1374,38 @@ private struct ClipTrimView: View {
     @State private var cropAspect: CropAspectPreset = .free
     @State private var videoDisplaySize = CGSize(width: 16, height: 9)
     @State private var activeExportSession: AVAssetExportSession?
+    @State private var activeCustomExporter: TrimVideoTranscoder?
+    @State private var exportResolution: TrimExportResolution = .source
+    @State private var exportQuality: TrimExportQuality = .source
+    @State private var sourceTotalBitrateMbps: Double = 0
+    @State private var sourceAudioTrackCount = 0
 
     private var isBusy: Bool { isExporting || isExportingGIF }
     private var activeCrop: NormalizedVideoCrop? {
         guard cropEnabled else { return nil }
         let crop = NormalizedVideoCrop(cropRect)
         return crop.isFullFrame ? nil : crop
+    }
+    private var exportInputSize: CGSize {
+        guard let crop = activeCrop else { return videoDisplaySize }
+        return VideoCropper.pixelRect(for: crop, displaySize: videoDisplaySize).size
+    }
+    private var exportOutputSize: CGSize {
+        exportResolution.outputSize(for: exportInputSize)
+    }
+    private var exportedAudioTrackCount: Int {
+        selectedAudioTrackID == AudioTrackChoice.allTracksID
+            ? sourceAudioTrackCount
+            : min(1, sourceAudioTrackCount)
+    }
+    private var estimatedExportBytes: Int64 {
+        TrimExportEstimate.bytes(
+            durationSeconds: max(0, trimEnd - trimStart),
+            quality: exportQuality,
+            outputSize: exportOutputSize,
+            audioTrackCount: exportedAudioTrackCount,
+            sourceTotalBitrateMbps: sourceTotalBitrateMbps
+        )
     }
 
     var body: some View {
@@ -1438,6 +1464,8 @@ private struct ClipTrimView: View {
 
             cropControls
 
+            exportControls
+
             if !audioTrackChoices.isEmpty {
                 AudioTrackPickerView(
                     choices: audioTrackChoices,
@@ -1476,11 +1504,12 @@ private struct ClipTrimView: View {
 
                 Spacer()
 
-                if isExporting, let session = activeExportSession {
+                if isExporting && (activeExportSession != nil || activeCustomExporter != nil) {
                     // An escape hatch while an export is running, so a wedged
                     // export never leaves the sheet with no way out.
                     Button("Cancel Export", role: .cancel) {
-                        session.cancelExport()
+                        activeExportSession?.cancelExport()
+                        activeCustomExporter?.cancel()
                     }
                     .help("Stop the export in progress")
                 }
@@ -1534,6 +1563,16 @@ private struct ClipTrimView: View {
             guard newValue != .free else { return }
             cropRect = newValue.cropRect(for: videoDisplaySize)
         }
+        .onChange(of: exportResolution) { _, newValue in
+            if newValue != .source && exportQuality == .source {
+                exportQuality = .balanced
+            }
+        }
+        .onChange(of: exportQuality) { _, newValue in
+            if newValue == .source && exportResolution != .source {
+                exportResolution = .source
+            }
+        }
         .onDisappear {
             player?.pause()
             player = nil
@@ -1545,14 +1584,25 @@ private struct ClipTrimView: View {
         let loadedDuration = (try? await asset.load(.duration)) ?? .zero
         let seconds = max(CMTimeGetSeconds(loadedDuration), 0)
         let choices = await ClipAudioTracks.choices(for: asset)
+        let audioTrackCount = ((try? await asset.loadTracks(withMediaType: .audio)) ?? []).count
         let displaySize = (try? await VideoCropper.geometry(for: asset).displaySize)
             ?? CGSize(width: 16, height: 9)
+        let sourceBitrateMbps: Double
+        if seconds > 0,
+           let fileSize = try? url.resourceValues(forKeys: [.fileSizeKey]).fileSize,
+           fileSize > 0 {
+            sourceBitrateMbps = Double(fileSize) * 8 / seconds / 1_000_000
+        } else {
+            sourceBitrateMbps = 0
+        }
 
         await MainActor.run {
             duration = seconds
             trimStart = 0
             trimEnd = seconds
             audioTrackChoices = choices
+            sourceAudioTrackCount = audioTrackCount
+            sourceTotalBitrateMbps = sourceBitrateMbps
             videoDisplaySize = displaySize
             let newPlayer = AVPlayer(playerItem: AVPlayerItem(asset: asset))
             ClipAudioTracks.apply(selection: selectedAudioTrackID, choices: choices, to: newPlayer.currentItem)
@@ -1590,6 +1640,12 @@ private struct ClipTrimView: View {
             if let soloChoice {
                 suffixParts.append(soloChoice.label.filter { !$0.isWhitespace })
             }
+            if let resolutionLabel = exportResolution.filenameLabel {
+                suffixParts.append(resolutionLabel)
+            }
+            if let qualityLabel = exportQuality.filenameLabel {
+                suffixParts.append(qualityLabel)
+            }
             let suffix = suffixParts.joined(separator: "_")
             let suggestedURL = try ClipMetadata.generateUniqueFileURL(
                 in: url.deletingLastPathComponent(),
@@ -1606,37 +1662,64 @@ private struct ClipTrimView: View {
             let end = CMTime(seconds: trimEnd, preferredTimescale: 600)
             let range = CMTimeRangeFromTimeToTime(start: start, end: end)
 
-            let preset: String
-            if crop != nil {
-                preset = try await HDRVideoExport.transcodePreset(for: exportAsset)
-            } else if await AVAssetExportSession.compatibility(
-                ofExportPreset: AVAssetExportPresetPassthrough,
-                with: exportAsset,
-                outputFileType: .mp4
-            ) {
-                preset = AVAssetExportPresetPassthrough
-            } else {
-                preset = try await HDRVideoExport.transcodePreset(for: exportAsset)
-            }
-
-            guard let exportSession = AVAssetExportSession(asset: exportAsset, presetName: preset) else {
-                throw TrimExportError.cannotCreateSession
-            }
-
-            exportSession.timeRange = range
-            if let crop {
-                exportSession.videoComposition = try await VideoCropper.videoComposition(
+            let needsControlledTranscode = exportResolution != .source || exportQuality != .source
+            if needsControlledTranscode {
+                let outputSize = exportOutputSize
+                let selectedQuality = exportQuality == .source ? TrimExportQuality.balanced : exportQuality
+                guard let videoBitrateMbps = selectedQuality.videoBitrateMbps(for: outputSize) else {
+                    throw TrimExportError.cannotCreateSession
+                }
+                let composition = try await VideoCropper.videoComposition(
                     for: exportAsset,
-                    crop: crop
+                    crop: crop ?? .fullFrame,
+                    outputSize: outputSize
                 )
+                let exporter = TrimVideoTranscoder()
+                activeCustomExporter = exporter
+                defer { activeCustomExporter = nil }
+                try await exporter.export(
+                    asset: exportAsset,
+                    timeRange: range,
+                    videoComposition: composition,
+                    outputSize: outputSize,
+                    videoBitrateMbps: videoBitrateMbps,
+                    to: outputURL
+                )
+            } else {
+                let preset: String
+                if crop != nil {
+                    preset = try await HDRVideoExport.transcodePreset(for: exportAsset)
+                } else if await AVAssetExportSession.compatibility(
+                    ofExportPreset: AVAssetExportPresetPassthrough,
+                    with: exportAsset,
+                    outputFileType: .mp4
+                ) {
+                    preset = AVAssetExportPresetPassthrough
+                } else {
+                    preset = try await HDRVideoExport.transcodePreset(for: exportAsset)
+                }
+
+                guard let exportSession = AVAssetExportSession(asset: exportAsset, presetName: preset) else {
+                    throw TrimExportError.cannotCreateSession
+                }
+
+                exportSession.timeRange = range
+                if let crop {
+                    exportSession.videoComposition = try await VideoCropper.videoComposition(
+                        for: exportAsset,
+                        crop: crop
+                    )
+                }
+                exportSession.shouldOptimizeForNetworkUse = true
+                activeExportSession = exportSession
+                defer { activeExportSession = nil }
+                try await ExportWatchdog.runExport(exportSession, to: outputURL, as: .mp4)
             }
-            exportSession.shouldOptimizeForNetworkUse = true
-            activeExportSession = exportSession
-            defer { activeExportSession = nil }
-            try await ExportWatchdog.runExport(exportSession, to: outputURL, as: .mp4)
 
             onExport()
             dismiss()
+        } catch is CancellationError {
+            errorMessage = nil
         } catch {
             errorMessage = error.localizedDescription
         }
@@ -1719,6 +1802,99 @@ private struct ClipTrimView: View {
 
             Spacer()
         }
+    }
+
+    private var exportControls: some View {
+        VStack(spacing: 8) {
+            HStack(spacing: 8) {
+                Label("Resolution", systemImage: "rectangle.arrowtriangle.2.outward")
+                    .font(.system(size: 12, weight: .medium, design: .rounded))
+                    .foregroundStyle(AppTheme.textSecondary)
+                    .frame(width: 82, alignment: .leading)
+                Picker("Export resolution", selection: $exportResolution) {
+                    ForEach(TrimExportResolution.allCases) { resolution in
+                        Text(resolution.title).tag(resolution)
+                    }
+                }
+                .pickerStyle(.segmented)
+                .labelsHidden()
+                .frame(maxWidth: 320)
+                .disabled(isBusy)
+
+                Text("\(Int(exportOutputSize.width)) × \(Int(exportOutputSize.height))")
+                    .font(.system(size: 11, design: .monospaced))
+                    .foregroundStyle(AppTheme.textSecondary)
+
+                Spacer()
+            }
+
+            HStack(spacing: 8) {
+                Label("Quality", systemImage: "slider.horizontal.3")
+                    .font(.system(size: 12, weight: .medium, design: .rounded))
+                    .foregroundStyle(AppTheme.textSecondary)
+                    .frame(width: 82, alignment: .leading)
+                Picker("Export quality", selection: $exportQuality) {
+                    ForEach(TrimExportQuality.allCases) { quality in
+                        Text(quality.title)
+                            .tag(quality)
+                            .disabled(quality == .source && exportResolution != .source)
+                    }
+                }
+                .pickerStyle(.segmented)
+                .labelsHidden()
+                .frame(maxWidth: 420)
+                .disabled(isBusy)
+
+                if let bitrate = exportQuality.videoBitrateMbps(for: exportOutputSize) {
+                    Text("HEVC • \(bitrate, specifier: "%.2g") Mbps")
+                        .font(.system(size: 11, design: .monospaced))
+                        .foregroundStyle(AppTheme.textSecondary)
+                } else {
+                    Text("Fast passthrough when possible")
+                        .font(.system(size: 11, design: .rounded))
+                        .foregroundStyle(AppTheme.textSecondary)
+                }
+
+                Spacer()
+            }
+
+            HStack(spacing: 8) {
+                Image(systemName: "externaldrive")
+                    .foregroundStyle(AppTheme.textSecondary)
+                if estimatedExportBytes > 0 {
+                    Text("Estimated size: ~\(estimatedSizeLabel)")
+                        .font(.system(size: 12, weight: .medium, design: .rounded))
+                    Text(discordEstimateLabel)
+                        .font(.system(size: 12, weight: .semibold, design: .rounded))
+                        .foregroundStyle(
+                            estimatedExportBytes <= TrimExportEstimate.discordLimitBytes
+                                ? .green
+                                : .orange
+                        )
+                } else {
+                    Text("Estimated size unavailable")
+                        .font(.system(size: 12, design: .rounded))
+                        .foregroundStyle(AppTheme.textSecondary)
+                }
+                Spacer()
+                Text("Estimate includes audio and container headroom")
+                    .font(.system(size: 10, design: .rounded))
+                    .foregroundStyle(AppTheme.textSecondary)
+            }
+        }
+    }
+
+    private var estimatedSizeLabel: String {
+        ByteCountFormatter.string(
+            fromByteCount: estimatedExportBytes,
+            countStyle: .decimal
+        )
+    }
+
+    private var discordEstimateLabel: String {
+        estimatedExportBytes <= TrimExportEstimate.discordLimitBytes
+            ? "• under Discord 100 MB"
+            : "• over Discord 100 MB"
     }
 
     private func timeLabel(_ seconds: Double) -> String {

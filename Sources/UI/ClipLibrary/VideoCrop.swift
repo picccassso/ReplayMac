@@ -97,7 +97,8 @@ enum VideoCropper {
     /// their properties, and none of it needs the main thread.
     nonisolated static func videoComposition(
         for asset: AVAsset,
-        crop: NormalizedVideoCrop
+        crop: NormalizedVideoCrop,
+        outputSize requestedOutputSize: CGSize? = nil
     ) async throws -> AVMutableVideoComposition {
         guard let track = try await asset.loadTracks(withMediaType: .video).first else {
             throw VideoCropError.noVideoTrack
@@ -114,8 +115,13 @@ enum VideoCropper {
             throw VideoCropError.invalidCrop
         }
 
+        let outputSize = requestedOutputSize ?? cropRect.size
+        guard outputSize.width > 0, outputSize.height > 0 else {
+            throw VideoCropError.invalidCrop
+        }
+
         let composition = AVMutableVideoComposition()
-        composition.renderSize = cropRect.size
+        composition.renderSize = outputSize
         if try await track.load(.mediaCharacteristics).contains(.containsHDRVideo),
            let format = try await track.load(.formatDescriptions).first {
             composition.colorPrimaries = CMFormatDescriptionGetExtension(format, extensionKey: kCMFormatDescriptionExtension_ColorPrimaries) as? String
@@ -127,10 +133,14 @@ enum VideoCropper {
         composition.frameDuration = CMTime(value: 1, timescale: CMTimeScale(frameRate.rounded()))
 
         let layerInstruction = AVMutableVideoCompositionLayerInstruction(assetTrack: track)
-        let cropTransform = geometry.orientationTransform.concatenating(
-            CGAffineTransform(translationX: -cropRect.minX, y: -cropRect.minY)
-        )
-        layerInstruction.setTransform(cropTransform, at: .zero)
+        let scaleX = outputSize.width / cropRect.width
+        let scaleY = outputSize.height / cropRect.height
+        let cropAndScaleTransform = geometry.orientationTransform
+            .concatenating(
+                CGAffineTransform(translationX: -cropRect.minX, y: -cropRect.minY)
+            )
+            .concatenating(CGAffineTransform(scaleX: scaleX, y: scaleY))
+        layerInstruction.setTransform(cropAndScaleTransform, at: .zero)
 
         let instruction = AVMutableVideoCompositionInstruction()
         instruction.timeRange = CMTimeRange(start: .zero, duration: try await asset.load(.duration))
