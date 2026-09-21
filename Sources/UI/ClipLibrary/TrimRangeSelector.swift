@@ -82,11 +82,14 @@ struct TrimRangeSelector: View {
 
     private func trimHandle(isActive: Bool) -> some View {
         RoundedRectangle(cornerRadius: 2.5, style: .continuous)
-            .fill(Color(nsColor: .controlBackgroundColor))
+            // `primary` is deliberately adaptive: white/light grey in dark
+            // mode and dark grey in light mode, keeping the handle opposite
+            // the surrounding system background in either appearance.
+            .fill(Color.primary.opacity(isActive ? 0.98 : 0.82))
             .frame(width: TrackMetrics.thumbWidth, height: isActive ? 22 : 19)
             .overlay {
                 RoundedRectangle(cornerRadius: 2.5, style: .continuous)
-                    .stroke(Color.primary.opacity(0.22), lineWidth: 0.75)
+                    .stroke(Color(nsColor: .controlBackgroundColor).opacity(0.7), lineWidth: 0.75)
             }
             .shadow(color: .black.opacity(isActive ? 0.25 : 0.14), radius: isActive ? 3 : 2, y: 1)
             .animation(.easeOut(duration: 0.12), value: isActive)
