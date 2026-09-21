@@ -1379,6 +1379,8 @@ private struct ClipTrimView: View {
     @State private var exportQuality: TrimExportQuality = .source
     @State private var sourceTotalBitrateMbps: Double = 0
     @State private var sourceAudioTrackCount = 0
+    @State private var previewSourceStart: Double = 0
+    @State private var previewBuildID = UUID()
 
     private var isBusy: Bool { isExporting || isExportingGIF }
     private var activeCrop: NormalizedVideoCrop? {
@@ -1433,34 +1435,25 @@ private struct ClipTrimView: View {
                 .clipShape(RoundedRectangle(cornerRadius: AppTheme.cornerRadiusMedium, style: .continuous))
             }
 
-            VStack(spacing: 10) {
-                HStack {
-                    Text("Start")
-                    Slider(value: $trimStart, in: 0...max(duration, 0.1), step: 0.1)
-                        .onChange(of: trimStart) { _, newValue in
-                            if newValue >= trimEnd {
-                                trimEnd = min(duration, newValue + 0.1)
-                            }
-                            seek(to: newValue)
-                        }
-                    Text(timeLabel(trimStart))
-                        .frame(width: 52, alignment: .trailing)
+            TrimRangeSelector(
+                start: $trimStart,
+                end: $trimEnd,
+                bounds: 0...max(duration, 0.1),
+                onSeek: seek,
+                onEditingChanged: { isEditing in
+                    if !isEditing {
+                        playSelectedRange()
+                    }
                 }
-
-                HStack {
-                    Text("End")
-                    Slider(value: $trimEnd, in: 0...max(duration, 0.1), step: 0.1)
-                        .onChange(of: trimEnd) { _, newValue in
-                            if newValue <= trimStart {
-                                trimStart = max(0, newValue - 0.1)
-                            }
-                            seek(to: newValue)
-                        }
-                    Text(timeLabel(trimEnd))
-                        .frame(width: 52, alignment: .trailing)
-                }
+            )
+            .padding(.horizontal, 12)
+            .padding(.vertical, 10)
+            .background {
+                RoundedRectangle(cornerRadius: AppTheme.cornerRadiusSmall, style: .continuous)
+                    .fill(AppTheme.backgroundSecondary)
             }
-            .font(.system(size: 12, weight: .medium, design: .rounded))
+            .disabled(isBusy)
+            .help("Drag either handle to choose the portion of the clip to export")
 
             cropControls
 
@@ -1573,7 +1566,15 @@ private struct ClipTrimView: View {
                 exportResolution = .source
             }
         }
+        .onReceive(NotificationCenter.default.publisher(for: .AVPlayerItemDidPlayToEndTime)) { notification in
+            guard let endedItem = notification.object as? AVPlayerItem,
+                  endedItem === player?.currentItem else {
+                return
+            }
+            loopSelectedPreview()
+        }
         .onDisappear {
+            previewBuildID = UUID()
             player?.pause()
             player = nil
         }
@@ -1604,6 +1605,7 @@ private struct ClipTrimView: View {
             sourceAudioTrackCount = audioTrackCount
             sourceTotalBitrateMbps = sourceBitrateMbps
             videoDisplaySize = displaySize
+            previewSourceStart = 0
             let newPlayer = AVPlayer(playerItem: AVPlayerItem(asset: asset))
             ClipAudioTracks.apply(selection: selectedAudioTrackID, choices: choices, to: newPlayer.currentItem)
             player = newPlayer
@@ -1614,6 +1616,7 @@ private struct ClipTrimView: View {
     private func exportTrimmedClip() async {
         isExporting = true
         errorMessage = nil
+        previewBuildID = UUID()
         // Stop the preview so the export isn't decoding the same file as the
         // player, and so playback isn't left running under the save panel.
         player?.pause()
@@ -1729,6 +1732,7 @@ private struct ClipTrimView: View {
     private func exportGIF() async {
         isExportingGIF = true
         errorMessage = nil
+        previewBuildID = UUID()
         player?.pause()
         defer { isExportingGIF = false }
 
@@ -1762,8 +1766,51 @@ private struct ClipTrimView: View {
     }
 
     private func seek(to seconds: Double) {
-        let time = CMTime(seconds: seconds, preferredTimescale: 600)
+        let previewSeconds = max(0, seconds - previewSourceStart)
+        let time = CMTime(seconds: previewSeconds, preferredTimescale: 600)
         player?.seek(to: time, toleranceBefore: .zero, toleranceAfter: .zero)
+    }
+
+    /// Replaces the full source item with a zero-based composition of exactly
+    /// the cyan range. This makes AVPlayerView's own duration and scrubber agree
+    /// with the selected length instead of continuing to show the full clip.
+    private func playSelectedRange() {
+        guard trimEnd > trimStart else { return }
+        let selectedStart = trimStart
+        let selectedEnd = trimEnd
+        let buildID = UUID()
+        previewBuildID = buildID
+
+        Task {
+            do {
+                let previewAsset = try await TrimPreviewAsset.make(
+                    from: AVURLAsset(url: url),
+                    startSeconds: selectedStart,
+                    endSeconds: selectedEnd
+                )
+                guard previewBuildID == buildID, let player else { return }
+
+                let item = AVPlayerItem(asset: previewAsset)
+                player.pause()
+                player.replaceCurrentItem(with: item)
+                previewSourceStart = selectedStart
+                ClipAudioTracks.apply(
+                    selection: selectedAudioTrackID,
+                    choices: audioTrackChoices,
+                    to: item
+                )
+                errorMessage = nil
+                player.play()
+            } catch {
+                guard previewBuildID == buildID else { return }
+                errorMessage = error.localizedDescription
+            }
+        }
+    }
+
+    private func loopSelectedPreview() {
+        player?.seek(to: .zero, toleranceBefore: .zero, toleranceAfter: .zero)
+        player?.play()
     }
 
     private var cropControls: some View {
@@ -1897,10 +1944,6 @@ private struct ClipTrimView: View {
             : "• over Discord 100 MB"
     }
 
-    private func timeLabel(_ seconds: Double) -> String {
-        let total = Int(seconds.rounded(.down))
-        return String(format: "%02d:%02d", total / 60, total % 60)
-    }
 }
 
 private enum TrimExportError: LocalizedError {

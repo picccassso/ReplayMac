@@ -231,6 +231,33 @@ final class VideoCropTests: XCTestCase {
     }
 
     @MainActor
+    func testTrimPreviewAssetUsesSelectedDurationAndZeroBasedTimeline() async throws {
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("ReplayCapTrimPreviewTests-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+
+        let sourceURL = directory.appendingPathComponent("source.mp4")
+        try await writeTestVideo(to: sourceURL, size: CGSize(width: 160, height: 120))
+
+        let source = AVURLAsset(url: sourceURL)
+        let preview = try await TrimPreviewAsset.make(
+            from: source,
+            startSeconds: 0.01,
+            endSeconds: 0.04
+        )
+        let previewDuration = try await preview.load(.duration)
+        let previewTracks = try await preview.loadTracks(withMediaType: .video)
+        let sourceTracks = try await source.loadTracks(withMediaType: .video)
+        let previewTrackRange = try await previewTracks.first?.load(.timeRange)
+
+        XCTAssertEqual(CMTimeGetSeconds(previewDuration), 0.03, accuracy: 0.001)
+        XCTAssertEqual(previewTracks.count, 1)
+        XCTAssertEqual(previewTrackRange?.start, .zero)
+        XCTAssertEqual(previewTracks.first?.trackID, sourceTracks.first?.trackID)
+    }
+
+    @MainActor
     private func writeTestVideo(to url: URL, size: CGSize) async throws {
         let writer = try AVAssetWriter(outputURL: url, fileType: .mp4)
         let input = AVAssetWriterInput(
