@@ -25,8 +25,9 @@ It continuously buffers recent screen/audio capture and saves the last N seconds
 - **Ring buffer memory management** — Configurable memory cap (256 MB–4 GB) shared across all replay buffers, with automatic eviction under memory pressure.
 - **Extended replay buffer** — Optionally roll 5, 10, or 30 minute replay windows to disk, with SSD write and disk usage warnings before enabling.
 - **Configurable hotkeys** — Save clip, toggle recording, save last 15s, save last 60s, save extended replay, start/stop session recording, open clip library.
-- **Clip library** — Browse, preview, trim, crop, export, or export as GIF; rename, tag, favorite, delete, and batch-act on multiple clips at once.
+- **Clip library** — Browse, preview, trim, crop, export, or export as GIF; rename, tag, favorite, delete, and batch-act on multiple clips at once. The dual-handle trim selector previews and loops exactly the selected range.
 - **Crop on export** — Drag a crop area directly over the preview, or snap it to 16:9, 1:1, 4:3, or 9:16; the crop applies to both MP4 and GIF exports.
+- **Configurable trim exports** — Keep the original resolution or scale to 1080p/720p, choose Source, Compact, Balanced, or High quality, and see a live estimated file size with a Discord 100 MB indicator. Unchanged exports retain the fast passthrough path; controlled exports use hardware-accelerated HEVC while preserving supported colour and HDR metadata.
 - **Clip sharing** — Open the macOS share sheet or copy a clip file for pasting into another app.
 - **Clip organization** — Search clips, mark favorites, add display names, tags, and notes.
 - **Storage cleanup** — View total library size and move non-favorite clips to Trash by age or in bulk.

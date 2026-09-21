@@ -1,5 +1,12 @@
 # Changelog
 
+## 1.7.2
+
+- Redesign Trim & Export around a single dual-handle range selector with a cyan selected-range bar, adaptive high-contrast handles, and clearer Start, Selected, and End timing labels
+- Preview only the selected trim range after either handle moves: playback now starts at the chosen beginning, the native player timeline shows the selected duration, and the preview loops within that range
+- Add configurable MP4 export resolution and quality: keep the original resolution or scale to 1080p/720p, choose Source, Compact, Balanced, or High quality, and see a live estimated file size with a Discord 100 MB indicator
+- Preserve fast passthrough for unchanged exports while using hardware-accelerated HEVC for controlled exports, retaining crop geometry, orientation, separate audio tracks, BT.709 colour metadata, and 10-bit HLG HDR where present
+
 ## 1.7.1
 
 - Add optional HDR recording on Apple silicon: enable Record in HDR in Settings > Video to capture 10-bit HEVC with Rec.2020 HLG colour. HDR works with a single display or dual displays saved as separate files, stays off by default, persists in capture profiles, and is preserved through saved clips and cropped video exports; combined side-by-side recordings remain SDR
