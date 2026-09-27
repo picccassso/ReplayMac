@@ -148,7 +148,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, @unchecked Sendable {
         // App Store builds intentionally have no blanket Movies-folder
         // entitlement. Existing installs from an older build may therefore
         // need to choose their output folder once to create a bookmark.
-        if !restoredOutputDirectoryAccess {
+        if !restoredOutputDirectoryAccess, !OutputDirectoryAccess.hasPendingBookmark {
             // Do not carry an unbookmarked path forward as a proposed location.
             // The user must make a fresh choice through the standard picker.
             Defaults.reset(.outputDirectoryPath)

@@ -195,4 +195,100 @@ final class SavePreflightTests: XCTestCase {
 
         XCTAssertNil(failure)
     }
+
+    func testResolvedCapacityFallsBackToStandardCapacityWhenImportantUsageIsZero() {
+        // External APFS volumes report 0 for volumeAvailableCapacityForImportantUsage
+        // while reporting their true free space in volumeAvailableCapacity.
+        let fiveHundredGB = 500 * 1024 * 1024 * 1024
+        let capacity = SavePreflight.resolvedAvailableCapacityBytes(
+            importantUsage: 0,
+            standardCapacity: fiveHundredGB
+        )
+
+        XCTAssertEqual(capacity, Int64(fiveHundredGB))
+        XCTAssertNil(SavePreflight.diskFailure(
+            estimatedClipBytes: 150 * 1024 * 1024,
+            availableCapacityBytes: capacity ?? 0
+        ))
+    }
+
+    func testResolvedCapacityPreservesZeroWhenVolumeIsGenuinelyFull() {
+        let capacity = SavePreflight.resolvedAvailableCapacityBytes(
+            importantUsage: 0,
+            standardCapacity: 0
+        )
+
+        XCTAssertEqual(capacity, 0)
+        XCTAssertEqual(
+            SavePreflight.diskFailure(
+                estimatedClipBytes: 50 * 1024 * 1024,
+                availableCapacityBytes: capacity ?? 0
+            ),
+            .insufficientDiskSpace
+        )
+    }
+
+    func testResolvedCapacityUsesImportantUsageWhenGreaterThanStandardCapacity() {
+        let important: Int64 = 120 * 1024 * 1024 * 1024
+        let standard: Int = 80 * 1024 * 1024 * 1024
+
+        XCTAssertEqual(
+            SavePreflight.resolvedAvailableCapacityBytes(
+                importantUsage: important,
+                standardCapacity: standard
+            ),
+            important
+        )
+    }
+
+    func testExistingProbeURLWalksUpToMountedVolumeRootInsteadOfFallback() throws {
+        let sandboxRoot = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        let fakeVolumesRoot = sandboxRoot.appendingPathComponent("Volumes", isDirectory: true)
+        let mountedDrive = fakeVolumesRoot.appendingPathComponent("ExternalAPFS", isDirectory: true)
+        let uncreatedLeaf = mountedDrive
+            .appendingPathComponent("Clips", isDirectory: true)
+            .appendingPathComponent("ReplayMac", isDirectory: true)
+        let fallbackHome = sandboxRoot.appendingPathComponent("Home", isDirectory: true)
+
+        try FileManager.default.createDirectory(at: mountedDrive, withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(at: fallbackHome, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: sandboxRoot) }
+
+        let probe = SavePreflight.existingProbeURL(
+            for: uncreatedLeaf,
+            fallbackURL: fallbackHome,
+            volumesRootURL: fakeVolumesRoot
+        )
+
+        XCTAssertEqual(probe, mountedDrive.standardizedFileURL)
+    }
+
+    func testUnmountedExternalVolumeNameDetectsMissingMountAndAllowsMountedVolume() throws {
+        let sandboxRoot = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        let fakeVolumesRoot = sandboxRoot.appendingPathComponent("Volumes", isDirectory: true)
+        let mountedDrive = fakeVolumesRoot.appendingPathComponent("MountedSSD", isDirectory: true)
+        try FileManager.default.createDirectory(at: mountedDrive, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: sandboxRoot) }
+
+        let mountedClipFolder = mountedDrive.appendingPathComponent("ReplayMac", isDirectory: true)
+        XCTAssertNil(
+            SavePreflight.unmountedExternalVolumeName(
+                for: mountedClipFolder,
+                volumesRootURL: fakeVolumesRoot
+            )
+        )
+
+        let unmountedClipFolder = fakeVolumesRoot
+            .appendingPathComponent("DisconnectedSSD", isDirectory: true)
+            .appendingPathComponent("ReplayMac", isDirectory: true)
+        XCTAssertEqual(
+            SavePreflight.unmountedExternalVolumeName(
+                for: unmountedClipFolder,
+                volumesRootURL: fakeVolumesRoot
+            ),
+            "DisconnectedSSD"
+        )
+    }
 }

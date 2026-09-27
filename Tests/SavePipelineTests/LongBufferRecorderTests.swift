@@ -663,4 +663,46 @@ final class LongBufferRecorderTests: XCTestCase {
 
         return LongBufferSample(sampleBuffer)
     }
+
+    func testReconfiguringOutputDirectoryCleansPreviousSegmentsAndWritesToNewDirectory() async throws {
+        let firstDirectory = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        let secondDirectory = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        defer {
+            try? FileManager.default.removeItem(at: firstDirectory)
+            try? FileManager.default.removeItem(at: secondDirectory)
+        }
+
+        let recorder = makeFileBackedRecorder { segments, _, outputDirectory, _, _, _ in
+            let outputURL = outputDirectory.appendingPathComponent("Exported_\(segments.count).mp4")
+            try Data("export".utf8).write(to: outputURL)
+            return outputURL
+        }
+
+        await recorder.configure(
+            enabled: true,
+            maxDurationSeconds: 300,
+            outputDirectory: firstDirectory
+        )
+        await recorder.appendVideo(try makeVideoSample(pts: 0))
+        await recorder.appendVideo(try makeVideoSample(pts: 61))
+        XCTAssertFalse(try segmentFiles(in: firstDirectory).isEmpty)
+
+        // Switching to a new output directory (e.g., an external drive) while
+        // enabled must clean up the old directory's segments and record new
+        // segments in the new directory.
+        await recorder.configure(
+            enabled: true,
+            maxDurationSeconds: 300,
+            outputDirectory: secondDirectory
+        )
+        XCTAssertTrue(try segmentFiles(in: firstDirectory).isEmpty)
+
+        await recorder.appendVideo(try makeVideoSample(pts: 122))
+        await recorder.stop()
+        XCTAssertEqual(try segmentFiles(in: secondDirectory).count, 1)
+
+        await recorder.stop(deleteSegments: true)
+    }
 }

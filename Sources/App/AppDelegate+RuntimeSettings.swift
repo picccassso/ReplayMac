@@ -76,6 +76,14 @@ extension AppDelegate {
         settingsObservations.append(Defaults.observe(.longBufferDurationMinutes) { [weak self] _ in
             self?.scheduleRuntimeSettingsReconcile(needsFullRestart: false)
         })
+        // No `.initial` fire: capture start configures the long buffer itself.
+        // Access is restored inside configureLongBufferForCurrentSettings, after
+        // the folder picker has adopted the new bookmark.
+        settingsObservations.append(Defaults.observe(.outputDirectoryPath, options: []) { [weak self] _ in
+            Task { @MainActor [weak self] in
+                await self?.configureLongBufferForCurrentSettings()
+            }
+        })
 
         // Capture mode and display selection trigger full pipeline restart
         settingsObservations.append(Defaults.observe(.captureMode) { [weak self] _ in

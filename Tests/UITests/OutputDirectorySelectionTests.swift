@@ -49,4 +49,43 @@ final class OutputDirectorySelectionTests: XCTestCase {
             directory.standardizedFileURL
         )
     }
+
+    func testPreservesUnresolvedBookmarkOnlyWhenExternalVolumeIsUnmounted() throws {
+        let sandboxRoot = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        let fakeVolumesRoot = sandboxRoot.appendingPathComponent("Volumes", isDirectory: true)
+        let mountedDrive = fakeVolumesRoot.appendingPathComponent("MountedSSD", isDirectory: true)
+        try FileManager.default.createDirectory(at: mountedDrive, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: sandboxRoot) }
+
+        let unmountedPath = fakeVolumesRoot
+            .appendingPathComponent("UnpluggedSSD/ReplayMac", isDirectory: true)
+            .path(percentEncoded: false)
+        XCTAssertTrue(
+            OutputDirectoryAccess.shouldPreserveUnresolvedBookmark(
+                storedPath: unmountedPath,
+                volumesRootURL: fakeVolumesRoot
+            )
+        )
+
+        let deletedFolderOnMountedDrive = mountedDrive
+            .appendingPathComponent("DeletedClips", isDirectory: true)
+            .path(percentEncoded: false)
+        XCTAssertFalse(
+            OutputDirectoryAccess.shouldPreserveUnresolvedBookmark(
+                storedPath: deletedFolderOnMountedDrive,
+                volumesRootURL: fakeVolumesRoot
+            )
+        )
+
+        let deletedLocalFolder = sandboxRoot
+            .appendingPathComponent("Users/test/Movies/DeletedClips", isDirectory: true)
+            .path(percentEncoded: false)
+        XCTAssertFalse(
+            OutputDirectoryAccess.shouldPreserveUnresolvedBookmark(
+                storedPath: deletedLocalFolder,
+                volumesRootURL: fakeVolumesRoot
+            )
+        )
+    }
 }

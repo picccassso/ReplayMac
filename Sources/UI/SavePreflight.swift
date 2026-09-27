@@ -123,4 +123,129 @@ public enum SavePreflight {
         }
         return nil
     }
+
+    /// Resolves available volume capacity from macOS resource keys.
+    ///
+    /// `CacheDelete` (which backs `.volumeAvailableCapacityForImportantUsageKey`)
+    /// only tracks purgeable space on the boot volume group and returns `0` on
+    /// external APFS drives. Falling back to `.volumeAvailableCapacityKey` when
+    /// `importantUsage` is zero or missing avoids false "disk full" failures on
+    /// external drives while still reporting `0` when a volume is genuinely full.
+    public static func resolvedAvailableCapacityBytes(
+        importantUsage: Int64?,
+        standardCapacity: Int?
+    ) -> Int64? {
+        let standard = standardCapacity.map(Int64.init)
+        if let importantUsage, importantUsage > 0 {
+            if let standard, standard > importantUsage {
+                return standard
+            }
+            return importantUsage
+        }
+        return standard
+    }
+
+    /// Returns the volume name when `url` points inside `/Volumes/<VolumeName>`
+    /// and that mount point does not currently exist on disk.
+    public static func unmountedExternalVolumeName(
+        for url: URL,
+        volumesRootURL: URL = URL(filePath: "/Volumes", directoryHint: .isDirectory),
+        fileManager: FileManager = .default
+    ) -> String? {
+        let standardized = url.standardizedFileURL
+        let volumesRoot = volumesRootURL.standardizedFileURL
+        let rootComponents = volumesRoot.pathComponents
+        let components = standardized.pathComponents
+
+        guard components.count > rootComponents.count,
+              Array(components.prefix(rootComponents.count)) == rootComponents else {
+            return nil
+        }
+
+        let volumeName = components[rootComponents.count]
+        guard !volumeName.isEmpty, volumeName != "/" else {
+            return nil
+        }
+
+        let mountPointURL = volumesRoot.appendingPathComponent(volumeName, isDirectory: true)
+        guard !fileManager.fileExists(atPath: mountPointURL.path(percentEncoded: false)) else {
+            return nil
+        }
+        return volumeName
+    }
+
+    /// Finds the nearest existing directory on the same volume as `outputURL`
+    /// so disk-capacity checks probe the target drive even before the leaf
+    /// output folder has been created on first save.
+    public static func existingProbeURL(
+        for outputURL: URL,
+        fallbackURL: URL = FileManager.default.homeDirectoryForCurrentUser,
+        volumesRootURL: URL = URL(filePath: "/Volumes", directoryHint: .isDirectory),
+        fileManager: FileManager = .default
+    ) -> URL {
+        let volumesRootPath = volumesRootURL.standardizedFileURL.path(percentEncoded: false)
+        var candidate = outputURL.standardizedFileURL
+
+        while true {
+            let path = candidate.path(percentEncoded: false)
+            if path == "/" || path == volumesRootPath || path.isEmpty {
+                break
+            }
+            if fileManager.fileExists(atPath: path) {
+                return candidate
+            }
+            let parent = candidate.deletingLastPathComponent().standardizedFileURL
+            if parent == candidate {
+                break
+            }
+            candidate = parent
+        }
+
+        return fallbackURL.standardizedFileURL
+    }
+
+    public static func availableCapacityBytes(
+        for outputURL: URL,
+        fallbackURL: URL = FileManager.default.homeDirectoryForCurrentUser,
+        volumesRootURL: URL = URL(filePath: "/Volumes", directoryHint: .isDirectory),
+        fileManager: FileManager = .default
+    ) -> Int64? {
+        if unmountedExternalVolumeName(
+            for: outputURL,
+            volumesRootURL: volumesRootURL,
+            fileManager: fileManager
+        ) != nil {
+            return nil
+        }
+
+        let probeURL = existingProbeURL(
+            for: outputURL,
+            fallbackURL: fallbackURL,
+            volumesRootURL: volumesRootURL,
+            fileManager: fileManager
+        )
+        let keys: Set<URLResourceKey> = [
+            .volumeAvailableCapacityForImportantUsageKey,
+            .volumeAvailableCapacityKey
+        ]
+        if let values = try? probeURL.resourceValues(forKeys: keys),
+           let resolved = resolvedAvailableCapacityBytes(
+               importantUsage: values.volumeAvailableCapacityForImportantUsage,
+               standardCapacity: values.volumeAvailableCapacity
+           ) {
+            return resolved
+        }
+
+        let volumesPrefix = volumesRootURL.standardizedFileURL.path(percentEncoded: false) + "/"
+        let isExternalPath = outputURL.standardizedFileURL.path(percentEncoded: false).hasPrefix(volumesPrefix)
+        if !isExternalPath, probeURL != fallbackURL.standardizedFileURL,
+           let fallbackValues = try? fallbackURL.resourceValues(forKeys: keys) {
+            return resolvedAvailableCapacityBytes(
+                importantUsage: fallbackValues.volumeAvailableCapacityForImportantUsage,
+                standardCapacity: fallbackValues.volumeAvailableCapacity
+            )
+        }
+
+        return nil
+    }
 }

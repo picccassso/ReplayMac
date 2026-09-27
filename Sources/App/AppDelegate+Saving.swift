@@ -235,24 +235,25 @@ extension AppDelegate {
     }
 
     private func availableDiskCapacityBytes() -> Int64? {
-        // Probe the output directory if it exists, otherwise the home directory
-        // (same volume), since the output folder is created lazily on first save.
         guard let outputURL = AppSettings.outputDirectoryURL else {
             return nil
         }
-        let probeURL = FileManager.default.fileExists(atPath: outputURL.path)
-            ? outputURL
-            : FileManager.default.homeDirectoryForCurrentUser
-
-        let values = try? probeURL.resourceValues(forKeys: [.volumeAvailableCapacityForImportantUsageKey])
-        return values?.volumeAvailableCapacityForImportantUsage
+        return SavePreflight.availableCapacityBytes(for: outputURL)
     }
 
     func selectedOutputDirectoryOrNotify() -> URL? {
+        OutputDirectoryAccess.ensureAccessIfNeeded()
         guard let outputDirectory = AppSettings.outputDirectoryURL else {
             NotificationManager.shared.showOperationalNotification(
                 title: "Choose an Output Folder",
                 body: "Open Settings and choose the folder where clips should be saved."
+            )
+            return nil
+        }
+        if let volumeName = SavePreflight.unmountedExternalVolumeName(for: outputDirectory) {
+            NotificationManager.shared.showOperationalNotification(
+                title: "Output Drive Disconnected",
+                body: "Connect “\(volumeName)” or choose a different output folder in Settings."
             )
             return nil
         }

@@ -16,22 +16,47 @@ public extension Defaults.Keys {
 public enum OutputDirectoryAccess {
     private static var scopedURL: URL?
 
+    /// True when a security-scoped bookmark is stored (for example, pointing to
+    /// an external drive that was unmounted at launch) and has not yet been
+    /// activated for this session.
+    public static var hasPendingBookmark: Bool {
+        scopedURL == nil && Defaults[.outputDirectoryBookmark] != nil
+    }
+
     /// Persist access to a folder the user just picked in the open panel.
-    /// The panel's implicit grant covers the rest of this session, so no
-    /// scoped access needs to start here; the bookmark takes over on the
-    /// next launch.
+    /// Creates the bookmark before releasing any previous scoped URL so
+    /// re-selecting the same folder never revokes access mid-operation.
     public static func adopt(_ url: URL) {
-        endScopedAccess()
+        let bookmark: Data?
         do {
-            Defaults[.outputDirectoryBookmark] = try url.bookmarkData(
+            bookmark = try url.bookmarkData(
                 options: .withSecurityScope,
                 includingResourceValuesForKeys: nil,
                 relativeTo: nil
             )
         } catch {
-            Defaults[.outputDirectoryBookmark] = nil
+            bookmark = nil
             NSLog("OutputDirectoryAccess: failed to create bookmark for \(url.path): \(error)")
         }
+
+        endScopedAccess()
+        Defaults[.outputDirectoryBookmark] = bookmark
+        if url.startAccessingSecurityScopedResource() {
+            scopedURL = url
+        }
+    }
+
+    /// Lazily restores security-scoped access if a bookmark is stored but not
+    /// yet active (e.g., an external drive that mounted after app launch).
+    @discardableResult
+    public static func ensureAccessIfNeeded() -> Bool {
+        if scopedURL != nil {
+            return true
+        }
+        guard Defaults[.outputDirectoryBookmark] != nil else {
+            return false
+        }
+        return restore()
     }
 
     /// Presents the standard folder picker and, on selection, persists both
@@ -83,6 +108,24 @@ public enum OutputDirectoryAccess {
         return storedURL.deletingLastPathComponent()
     }
 
+    /// Keeps a bookmark when its stored path lives on an external `/Volumes/...`
+    /// drive that is currently unmounted, so connecting the drive later in the
+    /// session can still restore access.
+    nonisolated static func shouldPreserveUnresolvedBookmark(
+        storedPath: String,
+        volumesRootURL: URL = URL(filePath: "/Volumes", directoryHint: .isDirectory),
+        fileManager: FileManager = .default
+    ) -> Bool {
+        guard let storedURL = AppSettings.outputDirectoryURL(for: storedPath) else {
+            return false
+        }
+        return SavePreflight.unmountedExternalVolumeName(
+            for: storedURL,
+            volumesRootURL: volumesRootURL,
+            fileManager: fileManager
+        ) != nil
+    }
+
     /// Re-establish access to a previously chosen folder. Call once at launch,
     /// before anything touches the output directory. Returns `true` only when
     /// persistent access was successfully restored.
@@ -102,14 +145,19 @@ public enum OutputDirectoryAccess {
                 bookmarkDataIsStale: &isStale
             )
         } catch {
-            // Folder is gone (deleted, or on an unmounted volume). Drop the
-            // stored path so App Store builds require a fresh explicit choice.
+            if shouldPreserveUnresolvedBookmark(storedPath: Defaults[.outputDirectoryPath]) {
+                NSLog("OutputDirectoryAccess: external volume for \(Defaults[.outputDirectoryPath]) is unmounted; keeping bookmark for later retry")
+                return false
+            }
+            // Folder is permanently gone. Drop the stored path so App Store
+            // builds require a fresh explicit choice.
             NSLog("OutputDirectoryAccess: dropping unresolvable bookmark: \(error)")
             Defaults[.outputDirectoryBookmark] = nil
             Defaults.reset(.outputDirectoryPath)
             return false
         }
 
+        endScopedAccess()
         guard url.startAccessingSecurityScopedResource() else {
             NSLog("OutputDirectoryAccess: security-scoped access could not be restored for \(url.path)")
             Defaults[.outputDirectoryBookmark] = nil

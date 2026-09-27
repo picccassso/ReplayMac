@@ -185,12 +185,17 @@ public actor LongBufferRecorder {
         outputDirectory: URL,
         storage: LongBufferStorageConfig = .longBuffer
     ) async {
+        let requestedSegmentDirectory = outputDirectory
+            .appendingPathComponent(storage.segmentDirectoryName, isDirectory: true)
+        if let previousSegmentDirectory = segmentDirectory,
+           previousSegmentDirectory.standardizedFileURL != requestedSegmentDirectory.standardizedFileURL {
+            await stop(deleteSegments: true)
+        }
+
         isEnabled = enabled
         self.maxDurationSeconds = maxDurationSeconds
         self.storageConfig = storage
         self.outputDirectory = outputDirectory
-        let requestedSegmentDirectory = outputDirectory
-            .appendingPathComponent(storage.segmentDirectoryName, isDirectory: true)
         segmentDirectory = requestedSegmentDirectory
         droppedVideoSamples = 0
         droppedSystemAudioSamples = 0

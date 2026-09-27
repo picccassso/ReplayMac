@@ -141,12 +141,11 @@ extension AppDelegate {
         statusItemController.refreshPresentation()
 
         do {
-            guard let outputDirectory = AppSettings.outputDirectoryURL else {
+            guard let outputDirectory = selectedOutputDirectoryOrNotify() else {
                 await discardSessionRecording()
                 menuBarState.finishSaving(success: false)
                 isSessionFinalizeInProgress = false
                 statusItemController.refreshPresentation()
-                _ = selectedOutputDirectoryOrNotify()
                 return nil
             }
 

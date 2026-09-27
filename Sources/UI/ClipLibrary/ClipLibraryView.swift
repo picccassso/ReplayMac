@@ -758,6 +758,7 @@ private final class ClipLibraryViewModel: ObservableObject {
     private var clipCache: [String: CachedClip] = [:]
 
     func reload() async {
+        OutputDirectoryAccess.ensureAccessIfNeeded()
         guard let outputDirectory = AppSettings.outputDirectoryURL else {
             rows = []
             metadataByPath = [:]
@@ -983,6 +984,7 @@ private final class ClipLibraryViewModel: ObservableObject {
     }
 
     private func persistMetadata() {
+        OutputDirectoryAccess.ensureAccessIfNeeded()
         guard let outputDirectory = AppSettings.outputDirectoryURL else {
             return
         }

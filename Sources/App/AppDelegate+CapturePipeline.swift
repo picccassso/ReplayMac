@@ -453,7 +453,9 @@ extension AppDelegate {
     }
 
     func configureLongBufferForCurrentSettings() async {
-        guard let outputDirectory = AppSettings.outputDirectoryURL else {
+        OutputDirectoryAccess.ensureAccessIfNeeded()
+        guard let outputDirectory = AppSettings.outputDirectoryURL,
+              SavePreflight.unmountedExternalVolumeName(for: outputDirectory) == nil else {
             await longBufferRecorder.stop(deleteSegments: true)
             menuBarState.setExtendedBufferRecording(false)
             return
