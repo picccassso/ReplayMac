@@ -15,14 +15,18 @@ public final class HotkeyManager: @unchecked Sendable {
 
     public init() {}
 
+    // KeyboardShortcuts 3 is main-actor isolated. The manager is owned by
+    // AppDelegate, so its last release always happens on the main thread.
     deinit {
-        KeyboardShortcuts.removeHandler(for: .saveClip)
-        KeyboardShortcuts.removeHandler(for: .toggleRecording)
-        KeyboardShortcuts.removeHandler(for: .saveLast15Seconds)
-        KeyboardShortcuts.removeHandler(for: .saveLast60Seconds)
-        KeyboardShortcuts.removeHandler(for: .saveLongBuffer)
-        KeyboardShortcuts.removeHandler(for: .toggleSessionRecording)
-        KeyboardShortcuts.removeHandler(for: .openClipLibrary)
+        MainActor.assumeIsolated {
+            KeyboardShortcuts.removeHandler(for: .saveClip)
+            KeyboardShortcuts.removeHandler(for: .toggleRecording)
+            KeyboardShortcuts.removeHandler(for: .saveLast15Seconds)
+            KeyboardShortcuts.removeHandler(for: .saveLast60Seconds)
+            KeyboardShortcuts.removeHandler(for: .saveLongBuffer)
+            KeyboardShortcuts.removeHandler(for: .toggleSessionRecording)
+            KeyboardShortcuts.removeHandler(for: .openClipLibrary)
+        }
     }
 
     public func start() {

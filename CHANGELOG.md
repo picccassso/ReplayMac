@@ -1,5 +1,9 @@
 # Changelog
 
+## 1.7.3
+
+- Fix the hotkey recorder in Settings > Hotkeys never capturing a shortcut on recent macOS 26 and 27 builds: the field switched to "Press Shortcut" but ignored every key press. The KeyboardShortcuts library held its key monitor weakly, and newer macOS releases free that monitor as soon as recording starts. Updated KeyboardShortcuts to 3.1.0, which keeps the monitor alive, stops a recording from ending itself when the field already holds a shortcut, and makes the recorder's clear button work again ([#14](https://github.com/picccassso/ReplayMac/issues/14))
+
 ## 1.7.2
 
 - Redesign Trim & Export around a single dual-handle range selector with a cyan selected-range bar, adaptive high-contrast handles, and clearer Start, Selected, and End timing labels
