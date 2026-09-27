@@ -3,6 +3,8 @@
 ## 1.7.3
 
 - Fix the hotkey recorder in Settings > Hotkeys never capturing a shortcut on recent macOS 26 and 27 builds: the field switched to "Press Shortcut" but ignored every key press. The KeyboardShortcuts library held its key monitor weakly, and newer macOS releases free that monitor as soon as recording starts. Updated KeyboardShortcuts to 3.1.0, which keeps the monitor alive, stops a recording from ending itself when the field already holds a shortcut, and makes the recorder's clear button work again ([#14](https://github.com/picccassso/ReplayMac/issues/14))
+- Fix saving clips to external drives: macOS reports 0 bytes available for important usage on every non-boot APFS volume, so the disk space check treated external drives as full and blocked every save. It now falls back to the standard volume capacity, and probes the nearest existing folder on the target drive when the output folder has not been created yet ([#13](https://github.com/picccassso/ReplayMac/issues/13))
+- Keep an external output folder when its drive is not connected at launch, restoring access once the drive is plugged in instead of resetting the folder and reopening onboarding. Saving while the drive is disconnected now shows a notification naming the drive, and changing the output folder while recording moves the extended replay buffer to the new location
 
 ## 1.7.2
 
