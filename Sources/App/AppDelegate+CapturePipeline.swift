@@ -88,6 +88,8 @@ extension AppDelegate {
             systemAudioRingBuffer.clear()
             micAudioRingBuffer.clear()
             AudioLevelMonitor.shared.reset()
+            applyEffectiveAudioVolumes()
+            syncAudioMuteStateToUI()
             longBufferAppendPump.reset()
             await configureLongBufferForCurrentSettings()
 

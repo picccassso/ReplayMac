@@ -84,7 +84,9 @@ class AppDelegate: NSObject, NSApplicationDelegate, @unchecked Sendable {
     var settingsObservations: [Defaults.Observation] = []
     var settingsReconcileTask: Task<Void, Never>?
     var pendingRuntimeSettingsReconcile = false
+    var pendingVideoShapeReconcile = false
     var pendingRuntimeFullRestart = false
+    var isPushToMuteActive = false
 
     // Current capture dimensions for runtime reconfiguration
     // Stores the original (unscaled) display dimensions so resolution
@@ -178,12 +180,23 @@ class AppDelegate: NSObject, NSApplicationDelegate, @unchecked Sendable {
         statusItemController.onToggleRecording = { [weak self] in
             self?.toggleCapturePipeline()
         }
+        statusItemController.onToggleMicrophoneMute = { [weak self] in
+            self?.toggleMicrophoneMuteFromUI()
+        }
+        statusItemController.onToggleSystemAudioMute = { [weak self] in
+            self?.toggleSystemAudioMuteFromUI()
+        }
+        statusItemController.onCopyLastClip = { [weak self] in
+            self?.copyLastClipFromUI()
+        }
         statusItemController.onOpenClipLibrary = { [weak self] in
             self?.openClipLibraryWindow()
         }
         statusItemController.onOpenSettings = { [weak self] in
             self?.openSettingsWindow()
         }
+        applyEffectiveAudioVolumes()
+        syncAudioMuteStateToUI()
         statusItemController.setup(state: menuBarState)
         checkForAvailableUpdate()
         configureHotkeys()

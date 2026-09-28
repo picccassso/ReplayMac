@@ -74,13 +74,26 @@ extension SettingsView {
                     HStack {
                         Text("System audio volume")
                         Spacer()
-                        Text("\(Int(systemAudioVolume * 100))%")
-                            .foregroundStyle(AppTheme.accent)
+                        Button {
+                            isSystemAudioMuted.toggle()
+                        } label: {
+                            Label(
+                                isSystemAudioMuted ? "Muted" : "Mute",
+                                systemImage: isSystemAudioMuted ? "speaker.slash.fill" : "speaker.wave.2.fill"
+                            )
+                            .font(.system(size: 11, weight: .semibold, design: .rounded))
+                            .foregroundStyle(isSystemAudioMuted ? AppTheme.danger : AppTheme.textSecondary)
+                        }
+                        .buttonStyle(.plain)
+                        .help(isSystemAudioMuted ? "Unmute system audio" : "Mute system audio")
+
+                        Text(isSystemAudioMuted ? "Muted (\(Int(systemAudioVolume * 100))%)" : "\(Int(systemAudioVolume * 100))%")
+                            .foregroundStyle(isSystemAudioMuted ? AppTheme.danger : AppTheme.accent)
                             .fontWeight(.semibold)
                     }
                     Slider(value: $systemAudioVolume, in: 0...1, step: 0.05)
-                        .tint(AppTheme.accent)
-                    LiveAudioLevelMeter(source: .systemAudio, isEnabled: captureSystemAudio)
+                        .tint(isSystemAudioMuted ? AppTheme.danger : AppTheme.accent)
+                    LiveAudioLevelMeter(source: .systemAudio, isEnabled: captureSystemAudio && !isSystemAudioMuted)
                 }
                 .disabled(!captureSystemAudio)
 
@@ -88,13 +101,26 @@ extension SettingsView {
                     HStack {
                         Text("Microphone volume")
                         Spacer()
-                        Text("\(Int(microphoneVolume * 100))%")
-                            .foregroundStyle(AppTheme.accent)
+                        Button {
+                            isMicrophoneMuted.toggle()
+                        } label: {
+                            Label(
+                                isMicrophoneMuted ? "Muted" : "Mute",
+                                systemImage: isMicrophoneMuted ? "mic.slash.fill" : "mic.fill"
+                            )
+                            .font(.system(size: 11, weight: .semibold, design: .rounded))
+                            .foregroundStyle(isMicrophoneMuted ? AppTheme.danger : AppTheme.textSecondary)
+                        }
+                        .buttonStyle(.plain)
+                        .help(isMicrophoneMuted ? "Unmute microphone" : "Mute microphone")
+
+                        Text(isMicrophoneMuted ? "Muted (\(Int(microphoneVolume * 100))%)" : "\(Int(microphoneVolume * 100))%")
+                            .foregroundStyle(isMicrophoneMuted ? AppTheme.danger : AppTheme.accent)
                             .fontWeight(.semibold)
                     }
                     Slider(value: $microphoneVolume, in: 0...1, step: 0.05)
-                        .tint(AppTheme.accent)
-                    LiveAudioLevelMeter(source: .microphone, isEnabled: captureMicrophone)
+                        .tint(isMicrophoneMuted ? AppTheme.danger : AppTheme.accent)
+                    LiveAudioLevelMeter(source: .microphone, isEnabled: captureMicrophone && !isMicrophoneMuted)
                 }
                 .disabled(!captureMicrophone)
             } header: {
@@ -145,6 +171,8 @@ extension SettingsView {
         .onChange(of: microphoneID) { _, _ in refreshAudioLevelPreview() }
         .onChange(of: systemAudioVolume) { _, _ in refreshAudioLevelPreview() }
         .onChange(of: microphoneVolume) { _, _ in refreshAudioLevelPreview() }
+        .onChange(of: isSystemAudioMuted) { _, _ in refreshAudioLevelPreview() }
+        .onChange(of: isMicrophoneMuted) { _, _ in refreshAudioLevelPreview() }
     }
 
     func refreshAudioLevelPreview() {
@@ -160,8 +188,14 @@ extension SettingsView {
                 microphoneDeviceID: microphoneID,
                 perAppAudioBundleID: perAppAudioEnabled && !perAppAudioBundleID.isEmpty ? perAppAudioBundleID : nil,
                 excludeOwnAppAudio: excludeOwnAppAudio,
-                systemAudioVolume: systemAudioVolume,
-                microphoneVolume: microphoneVolume
+                systemAudioVolume: AppSettings.effectiveSystemAudioVolume(
+                    volume: systemAudioVolume,
+                    isMuted: isSystemAudioMuted
+                ),
+                microphoneVolume: AppSettings.effectiveMicrophoneVolume(
+                    volume: microphoneVolume,
+                    isMuted: isMicrophoneMuted
+                )
             )
         )
     }

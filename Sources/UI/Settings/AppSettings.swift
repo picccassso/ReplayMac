@@ -263,6 +263,23 @@ public enum AppSettings {
 
     public static var systemAudioVolume: Double { Defaults[.systemAudioVolume] }
     public static var microphoneVolume: Double { Defaults[.microphoneVolume] }
+    public static var isSystemAudioMuted: Bool { Defaults[.isSystemAudioMuted] }
+    public static var isMicrophoneMuted: Bool { Defaults[.isMicrophoneMuted] }
+
+    public static func effectiveSystemAudioVolume(
+        volume: Double = systemAudioVolume,
+        isMuted: Bool = isSystemAudioMuted
+    ) -> Double {
+        isMuted ? 0.0 : volume
+    }
+
+    public static func effectiveMicrophoneVolume(
+        volume: Double = microphoneVolume,
+        isMuted: Bool = isMicrophoneMuted,
+        isPushToMuteActive: Bool = false
+    ) -> Double {
+        (isMuted || isPushToMuteActive) ? 0.0 : volume
+    }
 
     public static var captureHDR: Bool { Defaults[.captureHDR] }
     public static var isHDRCaptureActive: Bool {
@@ -410,6 +427,8 @@ public extension Defaults.Keys {
 
     static let systemAudioVolume = Key<Double>("systemAudioVolume", default: 1.0)
     static let microphoneVolume = Key<Double>("microphoneVolume", default: 1.0)
+    static let isSystemAudioMuted = Key<Bool>("isSystemAudioMuted", default: false)
+    static let isMicrophoneMuted = Key<Bool>("isMicrophoneMuted", default: false)
 
     static let hasCompletedOnboarding = Key<Bool>("hasCompletedOnboarding", default: false)
 }

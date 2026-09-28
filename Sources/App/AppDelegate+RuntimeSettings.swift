@@ -10,13 +10,35 @@ import UI
 extension AppDelegate {
     // MARK: - Runtime settings reconciler
 
+    func applyEffectiveAudioVolumes() {
+        systemAudioCapture.setVolume(AppSettings.effectiveSystemAudioVolume())
+        micAudioCapture.setVolume(
+            AppSettings.effectiveMicrophoneVolume(isPushToMuteActive: isPushToMuteActive)
+        )
+    }
+
+    func syncAudioMuteStateToUI() {
+        let micMuted = AppSettings.captureMicrophone && (AppSettings.isMicrophoneMuted || isPushToMuteActive)
+        let sysMuted = AppSettings.captureSystemAudio && AppSettings.isSystemAudioMuted
+        menuBarState.setAudioMuteState(isMicrophoneMuted: micMuted, isSystemAudioMuted: sysMuted)
+        statusItemController.refreshPresentation()
+    }
+
     func setupSettingsObservations() {
         // Group 1: Live mutable settings - apply directly
         settingsObservations.append(Defaults.observe(.systemAudioVolume) { [weak self] _ in
-            self?.systemAudioCapture.setVolume(AppSettings.systemAudioVolume)
+            self?.applyEffectiveAudioVolumes()
         })
         settingsObservations.append(Defaults.observe(.microphoneVolume) { [weak self] _ in
-            self?.micAudioCapture.setVolume(AppSettings.microphoneVolume)
+            self?.applyEffectiveAudioVolumes()
+        })
+        settingsObservations.append(Defaults.observe(.isSystemAudioMuted) { [weak self] _ in
+            self?.applyEffectiveAudioVolumes()
+            self?.syncAudioMuteStateToUI()
+        })
+        settingsObservations.append(Defaults.observe(.isMicrophoneMuted) { [weak self] _ in
+            self?.applyEffectiveAudioVolumes()
+            self?.syncAudioMuteStateToUI()
         })
 
         // Debounced through one reconciler so preset/UI changes do not race.
@@ -49,16 +71,19 @@ extension AppDelegate {
             self?.scheduleRuntimeSettingsReconcile()
         })
         settingsObservations.append(Defaults.observe(.captureMicrophone) { [weak self] _ in
-            self?.scheduleRuntimeSettingsReconcile()
+            self?.syncMemoryCapsToSettings()
+            self?.syncAudioMuteStateToUI()
+            self?.scheduleRuntimeSettingsReconcile(needsVideoReset: false)
         })
         settingsObservations.append(Defaults.observe(.microphoneID) { [weak self] _ in
-            self?.scheduleRuntimeSettingsReconcile()
+            self?.scheduleRuntimeSettingsReconcile(needsVideoReset: false)
         })
         settingsObservations.append(Defaults.observe(.memoryCapMB) { [weak self] _ in
             self?.syncMemoryCapsToSettings()
         })
         settingsObservations.append(Defaults.observe(.captureSystemAudio) { [weak self] _ in
             self?.syncMemoryCapsToSettings()
+            self?.syncAudioMuteStateToUI()
             self?.scheduleRuntimeSettingsReconcile(needsFullRestart: true)
         })
         settingsObservations.append(Defaults.observe(.perAppAudioEnabled) { [weak self] _ in
@@ -71,10 +96,10 @@ extension AppDelegate {
             self?.scheduleRuntimeSettingsReconcile(needsFullRestart: true)
         })
         settingsObservations.append(Defaults.observe(.longBufferEnabled) { [weak self] _ in
-            self?.scheduleRuntimeSettingsReconcile(needsFullRestart: false)
+            self?.scheduleRuntimeSettingsReconcile(needsVideoReset: false, needsFullRestart: false)
         })
         settingsObservations.append(Defaults.observe(.longBufferDurationMinutes) { [weak self] _ in
-            self?.scheduleRuntimeSettingsReconcile(needsFullRestart: false)
+            self?.scheduleRuntimeSettingsReconcile(needsVideoReset: false, needsFullRestart: false)
         })
         // No `.initial` fire: capture start configures the long buffer itself.
         // Access is restored inside configureLongBufferForCurrentSettings, after
@@ -104,8 +129,9 @@ extension AppDelegate {
 
     // MARK: - Runtime settings reconciler handlers
 
-    func scheduleRuntimeSettingsReconcile(needsFullRestart: Bool = false) {
+    func scheduleRuntimeSettingsReconcile(needsVideoReset: Bool = true, needsFullRestart: Bool = false) {
         pendingRuntimeSettingsReconcile = true
+        pendingVideoShapeReconcile = pendingVideoShapeReconcile || needsVideoReset
         pendingRuntimeFullRestart = pendingRuntimeFullRestart || needsFullRestart
 
         guard settingsReconcileTask == nil else { return }
@@ -122,14 +148,19 @@ extension AppDelegate {
                 }
 
                 guard let self else { return }
-                let needsFullRestart = await MainActor.run {
+                let (needsVideoReset, needsFullRestart) = await MainActor.run {
+                    let needsVideoReset = self.pendingVideoShapeReconcile
                     let needsFullRestart = self.pendingRuntimeFullRestart
                     self.pendingRuntimeSettingsReconcile = false
+                    self.pendingVideoShapeReconcile = false
                     self.pendingRuntimeFullRestart = false
-                    return needsFullRestart
+                    return (needsVideoReset, needsFullRestart)
                 }
 
-                await self.reconcileRuntimeSettings(needsFullRestart: needsFullRestart)
+                await self.reconcileRuntimeSettings(
+                    needsVideoReset: needsVideoReset,
+                    needsFullRestart: needsFullRestart
+                )
 
                 let shouldContinue = await MainActor.run {
                     if self.pendingRuntimeSettingsReconcile {
@@ -147,14 +178,16 @@ extension AppDelegate {
         }
     }
 
-    func reconcileRuntimeSettings(needsFullRestart: Bool) async {
+    func reconcileRuntimeSettings(needsVideoReset: Bool = true, needsFullRestart: Bool) async {
         guard isCaptureRunning else { return }
 
         do {
             if needsFullRestart {
                 await restartFullPipeline()
             } else {
-                try await applyPipelineShapeChanges()
+                if needsVideoReset {
+                    try await applyPipelineShapeChanges()
+                }
                 await applyMicSettingIfNeeded()
                 await configureLongBufferForCurrentSettings()
             }

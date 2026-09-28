@@ -12,7 +12,10 @@ public final class StatusItemController: NSObject, NSMenuDelegate, @unchecked Se
     private var saveLongBufferItem: NSMenuItem?
     private var toggleSessionRecordingItem: NSMenuItem?
     private var toggleRecordingItem: NSMenuItem?
+    private var toggleMicMuteItem: NSMenuItem?
+    private var toggleSystemAudioMuteItem: NSMenuItem?
     private var libraryItem: NSMenuItem?
+    private var copyLastClipItem: NSMenuItem?
     private var revealLastClipItem: NSMenuItem?
     private var openLastClipItem: NSMenuItem?
     private var recordingDurationItem: NSMenuItem?
@@ -29,6 +32,9 @@ public final class StatusItemController: NSObject, NSMenuDelegate, @unchecked Se
     public var onSaveLongBuffer: (() -> Void)?
     public var onToggleSessionRecording: (() -> Void)?
     public var onToggleRecording: (() -> Void)?
+    public var onToggleMicrophoneMute: (() -> Void)?
+    public var onToggleSystemAudioMute: (() -> Void)?
+    public var onCopyLastClip: (() -> Void)?
     public var onOpenClipLibrary: (() -> Void)?
     public var onOpenSettings: (() -> Void)?
     public var onQuit: (() -> Void)?
@@ -57,6 +63,60 @@ public final class StatusItemController: NSObject, NSMenuDelegate, @unchecked Se
     public func setLastClip(_ url: URL?) {
         lastClipURL = url
         refreshMenuItems()
+    }
+
+    /// Resolves the most recently saved clip (or the newest video file in the
+    /// configured output directory) and writes it as a file object onto the
+    /// general pasteboard so it can be pasted directly into apps like Discord or Messages.
+    @discardableResult
+    public func copyLastClipToPasteboard() -> URL? {
+        if let url = lastClipURL, !FileManager.default.fileExists(atPath: url.path) {
+            lastClipURL = nil
+        }
+
+        let resolvedURL = lastClipURL ?? Self.mostRecentSavedClipURL(in: AppSettings.outputDirectoryURL)
+        guard let clipURL = resolvedURL else {
+            return nil
+        }
+
+        if lastClipURL == nil {
+            lastClipURL = clipURL
+            refreshMenuItems()
+        }
+
+        let pasteboard = NSPasteboard.general
+        pasteboard.clearContents()
+        pasteboard.writeObjects([clipURL as NSURL])
+        return clipURL
+    }
+
+    internal static func mostRecentSavedClipURL(in directoryURL: URL?) -> URL? {
+        guard let directoryURL else { return nil }
+        OutputDirectoryAccess.ensureAccessIfNeeded()
+        guard let contents = try? FileManager.default.contentsOfDirectory(
+            at: directoryURL,
+            includingPropertiesForKeys: [.contentModificationDateKey, .isRegularFileKey],
+            options: [.skipsHiddenFiles]
+        ) else {
+            return nil
+        }
+
+        let supportedExtensions: Set<String> = ["mp4", "mov"]
+        var newestURL: URL?
+        var newestDate: Date = .distantPast
+
+        for url in contents where supportedExtensions.contains(url.pathExtension.lowercased()) {
+            guard let values = try? url.resourceValues(forKeys: [.contentModificationDateKey, .isRegularFileKey]),
+                  values.isRegularFile == true else {
+                continue
+            }
+            let modified = values.contentModificationDate ?? .distantPast
+            if modified >= newestDate {
+                newestDate = modified
+                newestURL = url
+            }
+        }
+        return newestURL
     }
 
     private func configureButton(for item: NSStatusItem) {
@@ -111,9 +171,21 @@ public final class StatusItemController: NSObject, NSMenuDelegate, @unchecked Se
         toggleRecordingItem.target = self
         menu.addItem(toggleRecordingItem)
 
+        let toggleMicMuteItem = NSMenuItem(title: "", action: #selector(toggleMicrophoneMute), keyEquivalent: "")
+        toggleMicMuteItem.target = self
+        menu.addItem(toggleMicMuteItem)
+
+        let toggleSystemAudioMuteItem = NSMenuItem(title: "", action: #selector(toggleSystemAudioMute), keyEquivalent: "")
+        toggleSystemAudioMuteItem.target = self
+        menu.addItem(toggleSystemAudioMuteItem)
+
         let libraryItem = NSMenuItem(title: "Clip Library", action: #selector(openClipLibrary), keyEquivalent: "")
         libraryItem.target = self
         menu.addItem(libraryItem)
+
+        let copyLastClipItem = NSMenuItem(title: "Copy Last Clip", action: #selector(copyLastClip), keyEquivalent: "")
+        copyLastClipItem.target = self
+        menu.addItem(copyLastClipItem)
 
         let openLastClipItem = NSMenuItem(title: "Open Last Clip", action: #selector(openLastClip), keyEquivalent: "")
         openLastClipItem.target = self
@@ -162,7 +234,10 @@ public final class StatusItemController: NSObject, NSMenuDelegate, @unchecked Se
         self.saveLongBufferItem = saveLongBufferItem
         self.toggleSessionRecordingItem = toggleSessionRecordingItem
         self.toggleRecordingItem = toggleRecordingItem
+        self.toggleMicMuteItem = toggleMicMuteItem
+        self.toggleSystemAudioMuteItem = toggleSystemAudioMuteItem
         self.libraryItem = libraryItem
+        self.copyLastClipItem = copyLastClipItem
         self.openLastClipItem = openLastClipItem
         self.revealLastClipItem = revealLastClipItem
         self.recordingDurationItem = recordingDurationItem
@@ -204,6 +279,28 @@ public final class StatusItemController: NSObject, NSMenuDelegate, @unchecked Se
 
         toggleRecordingItem?.title = state.isRecording ? "Stop Recording" : "Start Recording"
 
+        if !AppSettings.captureMicrophone {
+            toggleMicMuteItem?.title = "Enable & Unmute Microphone"
+            toggleMicMuteItem?.image = NSImage(systemSymbolName: "mic.slash", accessibilityDescription: "Microphone disabled")
+        } else if state.isMicrophoneMuted {
+            toggleMicMuteItem?.title = "Unmute Microphone"
+            toggleMicMuteItem?.image = NSImage(systemSymbolName: "mic.slash.fill", accessibilityDescription: "Microphone muted")
+        } else {
+            toggleMicMuteItem?.title = "Mute Microphone"
+            toggleMicMuteItem?.image = NSImage(systemSymbolName: "mic.fill", accessibilityDescription: "Microphone active")
+        }
+
+        if !AppSettings.captureSystemAudio {
+            toggleSystemAudioMuteItem?.title = "Enable & Unmute System Audio"
+            toggleSystemAudioMuteItem?.image = NSImage(systemSymbolName: "speaker.slash", accessibilityDescription: "System audio disabled")
+        } else if state.isSystemAudioMuted {
+            toggleSystemAudioMuteItem?.title = "Unmute System Audio"
+            toggleSystemAudioMuteItem?.image = NSImage(systemSymbolName: "speaker.slash.fill", accessibilityDescription: "System audio muted")
+        } else {
+            toggleSystemAudioMuteItem?.title = "Mute System Audio"
+            toggleSystemAudioMuteItem?.image = NSImage(systemSymbolName: "speaker.wave.2.fill", accessibilityDescription: "System audio active")
+        }
+
         libraryItem?.title = "Clip Library"
 
         // Drop the reference if the clip has since been moved, renamed, or deleted.
@@ -211,6 +308,7 @@ public final class StatusItemController: NSObject, NSMenuDelegate, @unchecked Se
             lastClipURL = nil
         }
         let hasLastClip = lastClipURL != nil
+        copyLastClipItem?.isHidden = !hasLastClip
         openLastClipItem?.isHidden = !hasLastClip
         revealLastClipItem?.isHidden = !hasLastClip
 
@@ -271,20 +369,29 @@ public final class StatusItemController: NSObject, NSMenuDelegate, @unchecked Se
         guard let button = statusItem?.button else { return }
 
         let displayDetail = state.capturedDisplayName.map { " (\($0))" } ?? ""
+        var muteDetails: [String] = []
+        if state.isMicrophoneMuted {
+            muteDetails.append("Mic Muted")
+        }
+        if state.isSystemAudioMuted {
+            muteDetails.append("System Audio Muted")
+        }
+        let muteSuffix = muteDetails.isEmpty ? "" : " · \(muteDetails.joined(separator: ", "))"
+
         if state.isSessionRecording {
-            button.toolTip = "\(AppBranding.name) — Session\(displayDetail) \(state.formattedSessionDuration) (stop to save)"
+            button.toolTip = "\(AppBranding.name) — Session\(displayDetail) \(state.formattedSessionDuration) (stop to save)\(muteSuffix)"
         } else if state.isRecording {
             if AppSettings.longBufferEnabled {
                 let longReplayCap = TimeInterval(AppSettings.longBufferDurationSeconds)
                 let available = min(state.extendedBufferElapsedSeconds, longReplayCap)
-                button.toolTip = "\(AppBranding.name) — Recording\(displayDetail) \(state.formattedRecordingDuration) · Extended replay \(MenuBarState.formattedDuration(available))/\(MenuBarState.formattedDuration(longReplayCap))"
+                button.toolTip = "\(AppBranding.name) — Recording\(displayDetail) \(state.formattedRecordingDuration) · Extended replay \(MenuBarState.formattedDuration(available))/\(MenuBarState.formattedDuration(longReplayCap))\(muteSuffix)"
             } else {
                 let cap = TimeInterval(AppSettings.bufferDurationSeconds)
                 let buffered = MenuBarState.formattedDuration(min(state.bufferedSeconds, cap))
-                button.toolTip = "\(AppBranding.name) — Recording\(displayDetail) \(state.formattedRecordingDuration) · Quick replay \(buffered)/\(MenuBarState.formattedDuration(cap))"
+                button.toolTip = "\(AppBranding.name) — Recording\(displayDetail) \(state.formattedRecordingDuration) · Quick replay \(buffered)/\(MenuBarState.formattedDuration(cap))\(muteSuffix)"
             }
         } else {
-            button.toolTip = "\(AppBranding.name) — Not recording"
+            button.toolTip = "\(AppBranding.name) — Not recording\(muteSuffix)"
         }
     }
 
@@ -309,6 +416,14 @@ public final class StatusItemController: NSObject, NSMenuDelegate, @unchecked Se
         onToggleRecording?()
     }
 
+    @objc private func toggleMicrophoneMute() {
+        onToggleMicrophoneMute?()
+    }
+
+    @objc private func toggleSystemAudioMute() {
+        onToggleSystemAudioMute?()
+    }
+
     @objc private func openSettings() {
         DispatchQueue.main.async { [weak self] in
             guard let self else {
@@ -328,6 +443,14 @@ public final class StatusItemController: NSObject, NSMenuDelegate, @unchecked Se
     @objc private func openClipLibrary() {
         if let onOpenClipLibrary {
             onOpenClipLibrary()
+        }
+    }
+
+    @objc private func copyLastClip() {
+        if let onCopyLastClip {
+            onCopyLastClip()
+        } else {
+            copyLastClipToPasteboard()
         }
     }
 
@@ -413,6 +536,18 @@ private struct StatusBadgeView: View {
                     Image(systemName: "record.circle")
                         .foregroundStyle(AppTheme.accent)
                 }
+
+                if state.isMicrophoneMuted {
+                    Image(systemName: "mic.slash.fill")
+                        .font(.system(size: 10, weight: .bold))
+                        .foregroundStyle(AppTheme.danger)
+                }
+
+                if state.isSystemAudioMuted {
+                    Image(systemName: "speaker.slash.fill")
+                        .font(.system(size: 10, weight: .bold))
+                        .foregroundStyle(AppTheme.danger)
+                }
             }
         }
         .font(.system(size: 12, weight: .semibold, design: .rounded))
@@ -433,6 +568,8 @@ private struct StatusBadgeView: View {
         .animation(.easeOut(duration: 0.2), value: state.isRecording)
         .animation(.easeOut(duration: 0.2), value: state.isSessionRecording)
         .animation(.easeOut(duration: 0.2), value: state.bufferedSeconds)
+        .animation(.easeOut(duration: 0.2), value: state.isMicrophoneMuted)
+        .animation(.easeOut(duration: 0.2), value: state.isSystemAudioMuted)
     }
 
     private var backgroundColor: Color {

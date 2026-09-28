@@ -33,6 +33,21 @@ extension SettingsView {
             }
 
             Section {
+                KeyboardShortcuts.Recorder("Mute/unmute microphone", name: .toggleMicrophoneMute)
+                KeyboardShortcuts.Recorder("Push-to-mute microphone (hold)", name: .pushToMuteMicrophone)
+                KeyboardShortcuts.Recorder("Mute/unmute system audio", name: .toggleSystemAudioMute)
+                Label(
+                    "Silences audio live without restarting capture or clearing the replay buffer.",
+                    systemImage: "info.circle"
+                )
+                .foregroundStyle(AppTheme.textSecondary)
+                .font(.system(size: 12, design: .rounded))
+            } header: {
+                sectionHeader(icon: "mic.slash.fill", title: "Audio")
+            }
+
+            Section {
+                KeyboardShortcuts.Recorder("Copy last saved clip", name: .copyLastClip)
                 KeyboardShortcuts.Recorder("Show or hide clip library", name: .openClipLibrary)
             } header: {
                 sectionHeader(icon: "film.stack", title: "Library")

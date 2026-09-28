@@ -69,8 +69,7 @@ extension AppDelegate {
                     break
                 }
 
-                self.systemAudioCapture.setVolume(AppSettings.systemAudioVolume)
-                self.micAudioCapture.setVolume(AppSettings.microphoneVolume)
+                self.applyEffectiveAudioVolumes()
 
                 let isSessionActive = self.isWorkspaceSessionActive && self.areScreensAwake
 

@@ -21,6 +21,8 @@ public final class MenuBarState: ObservableObject {
     @Published public private(set) var availableUpdate: AvailableUpdate?
     @Published public private(set) var capturedDisplayName: String?
     @Published public private(set) var isUsingFallbackDisplay = false
+    @Published public private(set) var isMicrophoneMuted = false
+    @Published public private(set) var isSystemAudioMuted = false
 
     private var saveStatusResetTask: Task<Void, Never>?
     private var recordingStartedAt: Date?
@@ -92,6 +94,15 @@ public final class MenuBarState: ObservableObject {
     public func setCapturedDisplay(name: String?, isFallback: Bool = false) {
         capturedDisplayName = name
         isUsingFallbackDisplay = isFallback
+    }
+
+    public func setAudioMuteState(isMicrophoneMuted: Bool, isSystemAudioMuted: Bool) {
+        if self.isMicrophoneMuted != isMicrophoneMuted {
+            self.isMicrophoneMuted = isMicrophoneMuted
+        }
+        if self.isSystemAudioMuted != isSystemAudioMuted {
+            self.isSystemAudioMuted = isSystemAudioMuted
+        }
     }
 
     @discardableResult

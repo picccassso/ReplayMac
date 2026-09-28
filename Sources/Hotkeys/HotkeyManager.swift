@@ -10,6 +10,10 @@ public final class HotkeyManager: @unchecked Sendable {
     public var onSaveLongBuffer: (() -> Void)?
     public var onToggleSessionRecording: (() -> Void)?
     public var onOpenClipLibrary: (() -> Void)?
+    public var onToggleMicrophoneMute: (() -> Void)?
+    public var onPushToMuteMicrophoneChanged: ((Bool) -> Void)?
+    public var onToggleSystemAudioMute: (() -> Void)?
+    public var onCopyLastClip: (() -> Void)?
 
     private var isStarted = false
 
@@ -26,6 +30,10 @@ public final class HotkeyManager: @unchecked Sendable {
             KeyboardShortcuts.removeHandler(for: .saveLongBuffer)
             KeyboardShortcuts.removeHandler(for: .toggleSessionRecording)
             KeyboardShortcuts.removeHandler(for: .openClipLibrary)
+            KeyboardShortcuts.removeHandler(for: .toggleMicrophoneMute)
+            KeyboardShortcuts.removeHandler(for: .pushToMuteMicrophone)
+            KeyboardShortcuts.removeHandler(for: .toggleSystemAudioMute)
+            KeyboardShortcuts.removeHandler(for: .copyLastClip)
         }
     }
 
@@ -55,6 +63,21 @@ public final class HotkeyManager: @unchecked Sendable {
         }
         KeyboardShortcuts.onKeyUp(for: .openClipLibrary) { [weak self] in
             self?.onOpenClipLibrary?()
+        }
+        KeyboardShortcuts.onKeyUp(for: .toggleMicrophoneMute) { [weak self] in
+            self?.onToggleMicrophoneMute?()
+        }
+        KeyboardShortcuts.onKeyDown(for: .pushToMuteMicrophone) { [weak self] in
+            self?.onPushToMuteMicrophoneChanged?(true)
+        }
+        KeyboardShortcuts.onKeyUp(for: .pushToMuteMicrophone) { [weak self] in
+            self?.onPushToMuteMicrophoneChanged?(false)
+        }
+        KeyboardShortcuts.onKeyUp(for: .toggleSystemAudioMute) { [weak self] in
+            self?.onToggleSystemAudioMute?()
+        }
+        KeyboardShortcuts.onKeyUp(for: .copyLastClip) { [weak self] in
+            self?.onCopyLastClip?()
         }
     }
 }

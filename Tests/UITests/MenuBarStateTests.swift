@@ -104,4 +104,71 @@ final class MenuBarStateTests: XCTestCase {
         XCTAssertEqual(state.sessionElapsedSeconds, 0)
         XCTAssertEqual(state.formattedSessionDuration, "00:00")
     }
+
+    func testEffectiveAudioVolumesRespectMuteAndPushToMute() {
+        XCTAssertEqual(AppSettings.effectiveSystemAudioVolume(volume: 0.8, isMuted: false), 0.8, accuracy: 0.0001)
+        XCTAssertEqual(AppSettings.effectiveSystemAudioVolume(volume: 0.8, isMuted: true), 0.0, accuracy: 0.0001)
+
+        XCTAssertEqual(
+            AppSettings.effectiveMicrophoneVolume(volume: 0.75, isMuted: false, isPushToMuteActive: false),
+            0.75,
+            accuracy: 0.0001
+        )
+        XCTAssertEqual(
+            AppSettings.effectiveMicrophoneVolume(volume: 0.75, isMuted: true, isPushToMuteActive: false),
+            0.0,
+            accuracy: 0.0001
+        )
+        XCTAssertEqual(
+            AppSettings.effectiveMicrophoneVolume(volume: 0.75, isMuted: false, isPushToMuteActive: true),
+            0.0,
+            accuracy: 0.0001
+        )
+    }
+
+    func testAudioMuteStateUpdatesOnMenuBarState() {
+        let state = MenuBarState()
+        XCTAssertFalse(state.isMicrophoneMuted)
+        XCTAssertFalse(state.isSystemAudioMuted)
+
+        state.setAudioMuteState(isMicrophoneMuted: true, isSystemAudioMuted: false)
+        XCTAssertTrue(state.isMicrophoneMuted)
+        XCTAssertFalse(state.isSystemAudioMuted)
+
+        state.setAudioMuteState(isMicrophoneMuted: false, isSystemAudioMuted: true)
+        XCTAssertFalse(state.isMicrophoneMuted)
+        XCTAssertTrue(state.isSystemAudioMuted)
+    }
+
+    func testCopyLastClipToPasteboardWritesLastSavedClipAndFallsBackToDirectory() throws {
+        let tempDir = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
+        try FileManager.default.createDirectory(at: tempDir, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: tempDir) }
+
+        let olderClip = tempDir.appendingPathComponent("Older.mp4")
+        let newerClip = tempDir.appendingPathComponent("Newer.mp4")
+        try Data("old".utf8).write(to: olderClip)
+        try FileManager.default.setAttributes(
+            [.modificationDate: Date(timeIntervalSince1970: 1_000)],
+            ofItemAtPath: olderClip.path
+        )
+        try Data("new".utf8).write(to: newerClip)
+        try FileManager.default.setAttributes(
+            [.modificationDate: Date(timeIntervalSince1970: 2_000)],
+            ofItemAtPath: newerClip.path
+        )
+
+        XCTAssertEqual(
+            StatusItemController.mostRecentSavedClipURL(in: tempDir)?.standardizedFileURL,
+            newerClip.standardizedFileURL
+        )
+
+        let controller = StatusItemController()
+        controller.setLastClip(olderClip)
+        let copiedURL = controller.copyLastClipToPasteboard()
+        XCTAssertEqual(copiedURL?.standardizedFileURL, olderClip.standardizedFileURL)
+
+        let pastedURLs = NSPasteboard.general.readObjects(forClasses: [NSURL.self]) as? [URL]
+        XCTAssertEqual(pastedURLs?.first?.standardizedFileURL, olderClip.standardizedFileURL)
+    }
 }

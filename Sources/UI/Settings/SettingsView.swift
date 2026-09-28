@@ -40,6 +40,8 @@ public struct SettingsView: View {
     @Default(.perAppAudioBundleID) var perAppAudioBundleID
     @Default(.systemAudioVolume) var systemAudioVolume
     @Default(.microphoneVolume) var microphoneVolume
+    @Default(.isSystemAudioMuted) var isSystemAudioMuted
+    @Default(.isMicrophoneMuted) var isMicrophoneMuted
 
     @Default(.memoryCapMB) var memoryCapMB
     @Default(.queueDepth) var queueDepth

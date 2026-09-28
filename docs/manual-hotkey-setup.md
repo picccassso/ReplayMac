@@ -41,6 +41,10 @@ You only change three things: the **action name**, the **key code**, and the
 | Save last 60 seconds | `KeyboardShortcuts_saveLast60Seconds` |
 | Save extended replay | `KeyboardShortcuts_saveLongBuffer` |
 | Start/stop session recording | `KeyboardShortcuts_toggleSessionRecording` |
+| Mute/unmute microphone | `KeyboardShortcuts_toggleMicrophoneMute` |
+| Push-to-mute microphone (hold) | `KeyboardShortcuts_pushToMuteMicrophone` |
+| Mute/unmute system audio | `KeyboardShortcuts_toggleSystemAudioMute` |
+| Copy last saved clip | `KeyboardShortcuts_copyLastClip` |
 | Open clip library | `KeyboardShortcuts_openClipLibrary` |
 
 ## The modifiers (`carbonModifiers`)
