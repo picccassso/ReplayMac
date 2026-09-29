@@ -22,6 +22,12 @@ extension SettingsView {
                 KeyboardShortcuts.Recorder("Save last 15 seconds", name: .saveLast15Seconds)
                 KeyboardShortcuts.Recorder("Save last 60 seconds", name: .saveLast60Seconds)
                 KeyboardShortcuts.Recorder("Save extended replay", name: .saveLongBuffer)
+                Label(
+                    "Save extended replay saves the last 5, 10, or 30 minutes from a separate, longer buffer kept on disk. It's off by default: turn on Extended replay buffer in Settings → Video.",
+                    systemImage: "info.circle"
+                )
+                .foregroundStyle(AppTheme.textSecondary)
+                .font(.system(size: 12, design: .rounded))
             } header: {
                 sectionHeader(icon: "stopwatch", title: "Quick Presets")
             }

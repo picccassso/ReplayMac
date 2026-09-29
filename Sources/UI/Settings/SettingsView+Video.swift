@@ -197,6 +197,13 @@ extension SettingsView {
                 }
                 .disabled(!longBufferEnabled)
 
+                Label(
+                    "A second buffer, separate from the normal replay buffer that Save clip uses. To save this longer window, use the Save extended replay hotkey or its Save Last item in the menu bar.",
+                    systemImage: "info.circle"
+                )
+                .foregroundStyle(AppTheme.textSecondary)
+                .font(.system(size: 12, design: .rounded))
+
                 Label(longBufferWarningText, systemImage: "externaldrive.badge.timemachine")
                     .foregroundStyle(longBufferEnabled ? .orange : AppTheme.textSecondary)
                     .font(.system(size: 12, design: .rounded))
