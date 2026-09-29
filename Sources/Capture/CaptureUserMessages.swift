@@ -44,7 +44,7 @@ public extension CapturePermissionError {
         case .denied:
             return CaptureUserMessage(
                 title: "Screen Recording Permission Required",
-                body: "Enable \(AppBranding.name) in System Settings → Privacy & Security → Screen Recording, then choose Start Recording from the menu bar."
+                body: "Enable \(AppBranding.name) in System Settings → Privacy & Security → Screen Recording, then choose Start Replay Buffer from the menu bar."
             )
         case .noDisplaysAvailable:
             return CaptureUserMessage(

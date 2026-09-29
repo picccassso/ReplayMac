@@ -7,7 +7,13 @@ extension SettingsView {
         Form {
             Section {
                 KeyboardShortcuts.Recorder("Save clip", name: .saveClip)
-                KeyboardShortcuts.Recorder("Start/stop recording", name: .toggleRecording)
+                KeyboardShortcuts.Recorder("Start/stop replay buffer", name: .toggleRecording)
+                Label(
+                    "The replay buffer keeps your most recent footage ready, and Save clip writes it to a file. Stopping the buffer discards anything you haven't saved. To record from start to stop instead, use session recording below.",
+                    systemImage: "info.circle"
+                )
+                .foregroundStyle(AppTheme.textSecondary)
+                .font(.system(size: 12, design: .rounded))
             } header: {
                 sectionHeader(icon: "bolt.fill", title: "Primary")
             }

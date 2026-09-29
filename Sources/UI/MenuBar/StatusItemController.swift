@@ -277,7 +277,7 @@ public final class StatusItemController: NSObject, NSMenuDelegate, @unchecked Se
             : "Start Session Recording"
         toggleSessionRecordingItem?.isEnabled = !state.isSaveInProgress
 
-        toggleRecordingItem?.title = state.isRecording ? "Stop Recording" : "Start Recording"
+        toggleRecordingItem?.title = state.isRecording ? "Stop Replay Buffer" : "Start Replay Buffer"
 
         if !AppSettings.captureMicrophone {
             toggleMicMuteItem?.title = "Enable & Unmute Microphone"

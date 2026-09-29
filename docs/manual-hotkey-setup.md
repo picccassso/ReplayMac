@@ -36,7 +36,7 @@ You only change three things: the **action name**, the **key code**, and the
 | Action | Name to use in the command |
 |---|---|
 | Save clip | `KeyboardShortcuts_saveClip` |
-| Start/stop recording | `KeyboardShortcuts_toggleRecording` |
+| Start/stop replay buffer | `KeyboardShortcuts_toggleRecording` |
 | Save last 15 seconds | `KeyboardShortcuts_saveLast15Seconds` |
 | Save last 60 seconds | `KeyboardShortcuts_saveLast60Seconds` |
 | Save extended replay | `KeyboardShortcuts_saveLongBuffer` |
@@ -100,7 +100,7 @@ Save clip → **F9** (no modifiers):
 defaults write com.replaymac.app KeyboardShortcuts_saveClip -string '{"carbonKeyCode":101,"carbonModifiers":0}'
 ```
 
-Start/stop recording → **⌘⇧R**:
+Start/stop replay buffer → **⌘⇧R**:
 
 ```bash
 defaults write com.replaymac.app KeyboardShortcuts_toggleRecording -string '{"carbonKeyCode":15,"carbonModifiers":768}'

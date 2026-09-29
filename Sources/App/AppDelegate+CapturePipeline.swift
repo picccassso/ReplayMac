@@ -571,7 +571,7 @@ extension AppDelegate {
         guard AppSettings.resumeRecordingAfterWake else {
             NotificationManager.shared.showOperationalNotification(
                 title: "Recording Paused",
-                body: "macOS interrupted screen capture. Choose Start Recording to continue."
+                body: "macOS interrupted screen capture. Choose Start Replay Buffer to continue."
             )
             stopCapturePipeline()
             return
@@ -686,7 +686,7 @@ extension AppDelegate {
                 if !shouldRetry {
                     NotificationManager.shared.showOperationalNotification(
                         title: "Recording Could Not Resume",
-                        body: "\(AppBranding.name) could not restore screen capture automatically. Choose Start Recording to try again."
+                        body: "\(AppBranding.name) could not restore screen capture automatically. Choose Start Replay Buffer to try again."
                     )
                 }
             }

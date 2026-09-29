@@ -77,7 +77,7 @@ public enum SavePreflight {
         case .saveInProgress:
             return ("Save Already in Progress", "Wait for the current clip to finish saving.")
         case .notRecording:
-            return ("Not Recording", "Start recording before saving a clip.")
+            return ("Replay Buffer Not Running", "Start the replay buffer from the menu bar or your hotkey, then save a clip.")
         case .replayBufferUnavailable:
             return (
                 "Replay Buffer Off",

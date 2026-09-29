@@ -220,7 +220,12 @@ public struct OnboardingView: View {
         ) {
             VStack(alignment: .leading, spacing: 14) {
                 KeyboardShortcuts.Recorder("Save clip", name: .saveClip)
-                KeyboardShortcuts.Recorder("Start/stop recording", name: .toggleRecording)
+                KeyboardShortcuts.Recorder("Start/stop replay buffer", name: .toggleRecording)
+
+                Text("The replay buffer keeps your most recent footage ready, and Save clip writes it to a file. Stopping the buffer discards anything you haven't saved.")
+                    .font(.caption)
+                    .foregroundStyle(AppTheme.textSecondary)
+                    .fixedSize(horizontal: false, vertical: true)
 
                 Text("Quick presets (save last 15 or 60 seconds, extended replay, session recording, open library) can be assigned in Settings → Hotkeys.")
                     .font(.caption)
