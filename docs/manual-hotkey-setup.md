@@ -1,11 +1,8 @@
 # Setting ReplayMac Hotkeys from the Terminal
 
-Normally you set hotkeys in **Settings → Hotkeys**. In ReplayMac 1.7.2 and
-earlier, a bug in the shortcut recorder stops it registering key presses on
-recent macOS 26 and 27 builds. **Version 1.7.3 fixes this, so updating is the
-easiest option.** If you cannot update yet, you can set any hotkey from the
-Terminal instead. This is completely safe and fully reversible — it writes the
-same preference the Settings UI would.
+Normally you set hotkeys in **Settings → Hotkeys**. You can also configure all hotkeys directly from the Terminal. This is useful for scripting, automated setups, or if you prefer managing preferences via the command line. This is completely safe and fully reversible — it writes the same preference the Settings UI would.
+
+> **Note:** If you are running ReplayMac 1.7.2 or earlier on macOS 26/27 and the Settings shortcut recorder does not capture keys, update to version 1.7.3 or later, which resolves the issue.
 
 The App Store version (ReplayCap) keeps its settings in a protected container.
 macOS may ask whether Terminal can access data from other apps; allow it, or

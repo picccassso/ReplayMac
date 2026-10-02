@@ -108,7 +108,7 @@ ReplayMac exports self-contained MP4 files. When audio track separation is enabl
 
 ## Troubleshooting
 
-**Trouble recording a hotkey in Settings?** Versions 1.7.2 and earlier could not capture key presses in the shortcut recorder on recent macOS 26 and 27 builds. Update to 1.7.3 or later, which fixes it. Remember that shortcuts need at least one modifier (⌘, ⌥, or ⌃) unless you use a function key on its own. If you cannot update yet, you can configure hotkeys from the Terminal instead: see [Setting ReplayMac Hotkeys from the Terminal](docs/manual-hotkey-setup.md).
+**Shortcut not registering in Settings?** Hotkeys require at least one modifier (⌘, ⌥, or ⌃) unless you use a function key (F1–F12) on its own. You can also configure hotkeys directly from the Terminal: see [Setting ReplayMac Hotkeys from the Terminal](docs/manual-hotkey-setup.md).
 
 ## Support
 
