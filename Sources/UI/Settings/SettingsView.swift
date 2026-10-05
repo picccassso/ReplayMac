@@ -2,10 +2,6 @@ import SwiftUI
 import AppKit
 import Defaults
 
-public extension Notification.Name {
-    static let replayCapSettingsShouldOpenGeneral = Notification.Name("replayCapSettingsShouldOpenGeneral")
-}
-
 public struct SettingsView: View {
     @Default(.bufferDurationSeconds) var bufferDurationSeconds
     @Default(.outputDirectoryPath) var outputDirectoryPath
@@ -68,44 +64,28 @@ public struct SettingsView: View {
     @State var bitrateSliderValue = Defaults[.bitrateMbps]
     @State var bitrateSliderIsEditing = false
     @State var isApplyingQualityPreset = false
-    @State var selectedTab = SettingsTab.general
+    @Binding var selectedTab: SettingsTab
+    var isVisible: Bool
 
-    public init() {}
+    public init(selectedTab: Binding<SettingsTab>, isVisible: Bool = true) {
+        self._selectedTab = selectedTab
+        self.isVisible = isVisible
+    }
 
     public var body: some View {
-        TabView(selection: $selectedTab) {
-            generalTab
-                .tabItem { Label("General", systemImage: "gearshape") }
-                .tag(SettingsTab.general)
-
-            videoTab
-                .tabItem { Label("Video", systemImage: "video") }
-                .tag(SettingsTab.video)
-
-            audioTab
-                .tabItem { Label("Audio", systemImage: "speaker.wave.2") }
-                .tag(SettingsTab.audio)
-
-            profilesTab
-                .tabItem { Label("Profiles", systemImage: "rectangle.stack.badge.play") }
-                .tag(SettingsTab.profiles)
-
-            hotkeysTab
-                .tabItem { Label("Hotkeys", systemImage: "keyboard") }
-                .tag(SettingsTab.hotkeys)
-
-            advancedTab
-                .tabItem { Label("Advanced", systemImage: "slider.horizontal.3") }
-                .tag(SettingsTab.advanced)
+        Group {
+            switch selectedTab {
+            case .general: generalTab
+            case .video: videoTab
+            case .audio: audioTab
+            case .profiles: profilesTab
+            case .hotkeys: hotkeysTab
+            case .advanced: advancedTab
+            }
         }
-        .padding(20)
-        .frame(width: 760, height: 560)
-        .onAppear {
-            selectedTab = .general
-        }
-        .onReceive(NotificationCenter.default.publisher(for: .replayCapSettingsShouldOpenGeneral)) { _ in
-            selectedTab = .general
-        }
+        .frame(maxWidth: 820)
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+        .onChange(of: isVisible) { _, _ in refreshAudioLevelPreview() }
         .onReceive(NSWorkspace.shared.notificationCenter.publisher(for: NSWorkspace.didLaunchApplicationNotification)) { _ in
             refreshAudioApplicationsAfterWorkspaceChange()
         }

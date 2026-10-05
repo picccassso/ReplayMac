@@ -176,7 +176,7 @@ extension SettingsView {
     }
 
     func refreshAudioLevelPreview() {
-        guard selectedTab == .audio else {
+        guard isVisible, selectedTab == .audio else {
             AudioLevelPreview.shared.setConfiguration(nil)
             return
         }

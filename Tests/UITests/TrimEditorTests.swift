@@ -70,10 +70,10 @@ final class TrimEditorTests: XCTestCase {
     @MainActor
     func testRestoredWindowIsKeptOnScreen() {
         let screen = NSRect(x: 1920, y: 100, width: 1280, height: 720)
-        let restored = ClipTrimWindowController.visibleFrame(
+        let restored = MainWindowGeometry.visibleFrame(
             NSRect(x: -3000, y: 3000, width: 1800, height: 900), within: screen)
         XCTAssertEqual(restored, screen)
-        let smaller = ClipTrimWindowController.visibleFrame(
+        let smaller = MainWindowGeometry.visibleFrame(
             NSRect(x: 4000, y: -100, width: 960, height: 640), within: screen)
         XCTAssertTrue(screen.contains(smaller))
     }

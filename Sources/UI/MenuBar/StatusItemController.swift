@@ -35,7 +35,7 @@ public final class StatusItemController: NSObject, NSMenuDelegate, @unchecked Se
     public var onToggleMicrophoneMute: (() -> Void)?
     public var onToggleSystemAudioMute: (() -> Void)?
     public var onCopyLastClip: (() -> Void)?
-    public var onOpenClipLibrary: (() -> Void)?
+    public var onOpenMainWindow: (() -> Void)?
     public var onOpenSettings: (() -> Void)?
     public var onQuit: (() -> Void)?
 
@@ -179,7 +179,7 @@ public final class StatusItemController: NSObject, NSMenuDelegate, @unchecked Se
         toggleSystemAudioMuteItem.target = self
         menu.addItem(toggleSystemAudioMuteItem)
 
-        let libraryItem = NSMenuItem(title: "Clip Library", action: #selector(openClipLibrary), keyEquivalent: "")
+        let libraryItem = NSMenuItem(title: "Open \(AppBranding.name)", action: #selector(openClipLibrary), keyEquivalent: "")
         libraryItem.target = self
         menu.addItem(libraryItem)
 
@@ -301,7 +301,7 @@ public final class StatusItemController: NSObject, NSMenuDelegate, @unchecked Se
             toggleSystemAudioMuteItem?.image = NSImage(systemSymbolName: "speaker.wave.2.fill", accessibilityDescription: "System audio active")
         }
 
-        libraryItem?.title = "Clip Library"
+        libraryItem?.title = "Open \(AppBranding.name)"
 
         // Drop the reference if the clip has since been moved, renamed, or deleted.
         if let url = lastClipURL, !FileManager.default.fileExists(atPath: url.path) {
@@ -435,14 +435,13 @@ public final class StatusItemController: NSObject, NSMenuDelegate, @unchecked Se
                 return
             }
 
-            NSApp.activate(ignoringOtherApps: true)
-            NSApp.sendAction(Selector(("showSettingsWindow:")), to: nil, from: nil)
+            self.onOpenMainWindow?()
         }
     }
 
     @objc private func openClipLibrary() {
-        if let onOpenClipLibrary {
-            onOpenClipLibrary()
+        if let onOpenMainWindow {
+            onOpenMainWindow()
         }
     }
 

@@ -1,6 +1,6 @@
 import Foundation
 
-enum SettingsTab: Hashable {
+public enum SettingsTab: String, CaseIterable, Hashable {
     case general
     case video
     case audio

@@ -18,20 +18,31 @@ enum ExportDestinationPicker {
         contentType: UTType,
         title: String
     ) async -> URL? {
-        let panel = NSSavePanel()
+        guard !Task.isCancelled else { return nil }
+        let owner = ExportPanelOwner()
+        let panel = owner.panel
         panel.title = title
         panel.directoryURL = suggestedURL.deletingLastPathComponent()
         panel.nameFieldStringValue = suggestedURL.lastPathComponent
         panel.allowedContentTypes = [contentType]
         panel.canCreateDirectories = true
 
-        let response = await withCheckedContinuation { continuation in
-            // `begin` retains the panel until the handler runs, and the handler
-            // is guaranteed to be called exactly once.
-            panel.begin { continuation.resume(returning: $0) }
+        let response = await withTaskCancellationHandler {
+            await withCheckedContinuation { continuation in
+                panel.begin { continuation.resume(returning: $0) }
+                if Task.isCancelled { panel.cancel(nil) }
+            }
+        } onCancel: {
+            Task { @MainActor in owner.panel.cancel(nil) }
         }
 
-        guard response == .OK else { return nil }
+        guard response == .OK, !Task.isCancelled else { return nil }
         return panel.url
     }
+}
+
+
+@MainActor
+private final class ExportPanelOwner {
+    let panel = NSSavePanel()
 }

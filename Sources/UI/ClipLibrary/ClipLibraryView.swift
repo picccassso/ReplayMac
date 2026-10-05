@@ -6,24 +6,19 @@ import AppKit
 import AVKit
 import Save
 import UniformTypeIdentifiers
+import Defaults
 
 public struct ClipLibraryView: View {
-    @StateObject private var model = ClipLibraryViewModel()
-    @State private var selection = Set<String>()
-    @State private var sortMode: ClipSortMode = .date
-    @State private var searchText = ""
-    @State private var favoritesOnly = false
-    @State private var deleteCandidate: ClipRow?
-    @State private var bulkDeletePresented = false
-    @State private var bulkTagDraft = ""
-    @State private var cleanupSheetPresented = false
-    @State private var previewURL: URL?
-    @State private var metadataDraft = ClipUserMetadata.empty
-    @State private var renameDraft = ""
-    @State private var copiedFilePath: String?
-    @State private var gifExportingPath: String?
+    @Default(.outputDirectoryPath) private var outputDirectoryPath
+    @ObservedObject var state: ClipLibraryState
+    @ObservedObject var model: ClipLibraryViewModel
+    @ObservedObject var windowState: MainWindowState
 
-    public init() {}
+    public init(windowState: MainWindowState) {
+        self.windowState = windowState
+        self.state = windowState.library
+        self.model = windowState.library.model
+    }
 
     public var body: some View {
         VStack(spacing: 0) {
@@ -47,43 +42,58 @@ public struct ClipLibraryView: View {
                     .padding(.vertical, 12)
             }
 
-            if selection.count > 1 {
-                batchBarView(for: selectedRows)
+            if state.selection.count > 1 {
+                ScrollView(.horizontal, showsIndicators: false) { batchBarView(for: selectedRows).frame(minWidth: 800) }
+                    .fixedSize(horizontal: false, vertical: true)
                     .padding(.horizontal, 20)
                     .padding(.vertical, 10)
                     .background(AppTheme.backgroundSecondary.opacity(0.5))
             } else if let row = singleSelectedRow {
-                bottomBarView(for: row)
+                ScrollView(.horizontal, showsIndicators: false) { bottomBarView(for: row).frame(minWidth: 800) }
+                    .fixedSize(horizontal: false, vertical: true)
                     .padding(.horizontal, 20)
                     .padding(.vertical, 10)
                     .background(AppTheme.backgroundSecondary.opacity(0.5))
             }
         }
-        .frame(minWidth: 900, minHeight: 520)
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
         .task {
             await model.reload()
         }
-        .onChange(of: selection) { _, _ in
+        .onReceive(NotificationCenter.default.publisher(for: .replayCapLibraryShouldReload)) { _ in
+            Task { await model.reload() }
+        }
+        .onChange(of: outputDirectoryPath) { _, _ in
+            state.selection = []
+            state.metadataDraft = .empty
+            state.renameDraft = ""
+            Task { await model.reload() }
+        }
+        .onChange(of: windowState.page) { _, page in
+            if page == .library { Task { await model.reload() } }
+        }
+        .onChange(of: model.rows.map(\.id)) { _, _ in pruneSelectionToExistingRows() }
+        .onChange(of: state.selection) { _, _ in
             syncDraftFromSelection()
         }
         .onReceive(NotificationCenter.default.publisher(for: .replayCapClipSaved)) { _ in
             Task { await model.reload() }
         }
-        .alert("Delete Clip?", isPresented: deleteAlertBinding, presenting: deleteCandidate) { row in
+        .alert("Delete Clip?", isPresented: deleteAlertBinding, presenting: state.deleteCandidate) { row in
             Button("Delete", role: .destructive) {
                 Task {
                     await model.delete(row)
-                    selection.remove(row.id)
-                    deleteCandidate = nil
+                    state.selection.remove(row.id)
+                    state.deleteCandidate = nil
                 }
             }
             Button("Cancel", role: .cancel) {
-                deleteCandidate = nil
+                state.deleteCandidate = nil
             }
         } message: { row in
             Text("Move \(row.fileName) to Trash?")
         }
-        .alert("Delete \(selectedRows.count) Clips?", isPresented: $bulkDeletePresented) {
+        .alert("Delete \(selectedRows.count) Clips?", isPresented: $state.bulkDeletePresented) {
             Button("Delete", role: .destructive) {
                 let targets = selectedRows
                 Task {
@@ -96,75 +106,90 @@ public struct ClipLibraryView: View {
             Text("Move \(selectedRows.count) clips to Trash? Favorites are included.")
         }
         .sheet(isPresented: previewSheetBinding) {
-            if let previewURL {
+            if let previewURL = state.previewURL {
                 ClipPreviewView(url: previewURL)
             }
         }
-        .sheet(isPresented: $cleanupSheetPresented) {
-            ClipCleanupView(summary: model.storageSummary) { action in
-                Task {
-                    await model.cleanup(action)
-                    pruneSelectionToExistingRows()
-                    cleanupSheetPresented = false
+        .sheet(isPresented: $state.cleanupSheetPresented) {
+            VStack(spacing: 0) {
+                if windowState.editor != nil || windowState.exports.isBusy {
+                    Text("Clips currently being edited or exported are kept.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .padding(.top, 16)
+                }
+                ClipCleanupView(summary: model.storageSummary) { action in
+                    Task {
+                        await model.cleanup(action)
+                        pruneSelectionToExistingRows()
+                        state.cleanupSheetPresented = false
+                    }
                 }
             }
         }
     }
 
     private var toolbarView: some View {
-        HStack(spacing: 12) {
-            TextField("Search clips, tags, notes", text: $searchText)
-                .textFieldStyle(.roundedBorder)
-                .frame(maxWidth: 240)
+        ViewThatFits(in: .horizontal) {
+            HStack(spacing: 12) {
+                searchControls
+                sortControls
+                libraryActions
+            }
+            .fixedSize(horizontal: true, vertical: false)
+            VStack(alignment: .leading, spacing: 10) {
+                HStack(spacing: 12) {
+                    searchControls
+                    Spacer(minLength: 0)
+                    libraryActions
+                }
+                sortControls
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
 
-            Toggle(isOn: $favoritesOnly) {
+    private var searchControls: some View {
+        HStack(spacing: 12) {
+            TextField("Search clips, tags, notes", text: $state.searchText)
+                .textFieldStyle(.roundedBorder)
+                .frame(width: 240)
+            Toggle(isOn: $state.favoritesOnly) {
                 Image(systemName: "star.fill")
-                    .foregroundStyle(favoritesOnly ? .yellow : AppTheme.textSecondary)
+                    .foregroundStyle(state.favoritesOnly ? .yellow : AppTheme.textSecondary)
             }
             .toggleStyle(.button)
             .help("Show favorites only")
+        }
+    }
 
-            HStack(spacing: 6) {
-                Image(systemName: "arrow.up.arrow.down.circle.fill")
-                    .foregroundStyle(AppTheme.accent)
-                    .font(.system(size: 14))
-                Picker("Sort", selection: $sortMode) {
-                    ForEach(ClipSortMode.allCases) { mode in
-                        Text(mode.title).tag(mode)
-                    }
-                }
-                .pickerStyle(.segmented)
-                .frame(maxWidth: 280)
+    private var sortControls: some View {
+        HStack(spacing: 6) {
+            Image(systemName: "arrow.up.arrow.down.circle.fill")
+                .foregroundStyle(AppTheme.accent)
+            Picker("Sort", selection: $state.sortMode) {
+                ForEach(ClipSortMode.allCases) { mode in Text(mode.title).tag(mode) }
             }
+            .pickerStyle(.segmented)
+            .frame(width: 280)
+        }
+    }
 
-            Spacer()
-
-            Button {
-                cleanupSheetPresented = true
-            } label: {
-                HStack(spacing: 6) {
-                    Image(systemName: "externaldrive.badge.minus")
-                    Text("Clean Up")
-                }
-                .font(.system(size: 12, weight: .semibold, design: .rounded))
+    private var libraryActions: some View {
+        HStack(spacing: 10) {
+            Button { state.cleanupSheetPresented = true } label: {
+                Label("Clean Up", systemImage: "externaldrive.badge.minus")
             }
             .buttonStyle(.bordered)
-            .controlSize(.small)
             .disabled(model.rows.isEmpty)
-
-            Button {
-                Task { await model.reload() }
-            } label: {
-                HStack(spacing: 6) {
-                    Image(systemName: "arrow.clockwise")
-                    Text("Refresh")
-                }
-                .font(.system(size: 12, weight: .semibold, design: .rounded))
+            Button { Task { await model.reload() } } label: {
+                Label("Refresh", systemImage: "arrow.clockwise")
             }
             .buttonStyle(.borderedProminent)
             .tint(AppTheme.accent)
-            .controlSize(.small)
         }
+        .font(.system(size: 12, weight: .semibold, design: .rounded))
+        .controlSize(.small)
     }
 
     private var storageSummaryView: some View {
@@ -200,11 +225,11 @@ public struct ClipLibraryView: View {
             }
 
             VStack(spacing: 6) {
-                Text("No Clips Yet")
+                Text(model.rows.isEmpty ? "No Clips Yet" : "No Matching Clips")
                     .font(.system(size: 18, weight: .bold, design: .rounded))
                     .foregroundStyle(AppTheme.textPrimary)
 
-                Text("Saved clips will appear here.")
+                Text(model.rows.isEmpty ? "Saved clips will appear here." : "Try another search or turn off the favorites filter.")
                     .font(.system(size: 13, weight: .regular, design: .rounded))
                     .foregroundStyle(AppTheme.textSecondary)
             }
@@ -212,11 +237,11 @@ public struct ClipLibraryView: View {
     }
 
     private var tableView: some View {
-        Table(visibleRows, selection: $selection) {
+        Table(visibleRows, selection: $state.selection) {
             TableColumn("") { row in
                 Button {
                     model.toggleFavorite(row)
-                    if selection.contains(row.id) {
+                    if state.selection.contains(row.id) {
                         syncDraftFromSelection()
                     }
                 } label: {
@@ -226,7 +251,7 @@ public struct ClipLibraryView: View {
                 .buttonStyle(.plain)
                 .help(row.userMetadata.isFavorite ? "Remove favorite" : "Mark favorite")
             }
-            .width(32)
+            .width(28)
 
             TableColumn("Clip") { row in
                 HStack(spacing: 12) {
@@ -242,7 +267,7 @@ public struct ClipLibraryView: View {
                     }
                 }
             }
-            .width(min: 280, ideal: 360)
+            .width(min: 200, ideal: 240)
 
             TableColumn("Tags") { row in
                 Text(row.tagsLabel)
@@ -250,71 +275,75 @@ public struct ClipLibraryView: View {
                     .font(.system(size: 12, weight: .medium, design: .rounded))
                     .foregroundStyle(row.userMetadata.tags.isEmpty ? AppTheme.textSecondary : AppTheme.accent)
             }
-            .width(min: 110, ideal: 150)
+            .width(min: 70, ideal: 82)
 
             TableColumn("Duration") { row in
                 Text(row.durationLabel)
                     .font(.system(size: 12, weight: .medium, design: .rounded))
                     .foregroundStyle(AppTheme.textSecondary)
             }
-            .width(90)
+            .width(64)
 
             TableColumn("Size") { row in
                 Text(row.sizeLabel)
                     .font(.system(size: 12, weight: .medium, design: .rounded))
                     .foregroundStyle(AppTheme.textSecondary)
             }
-            .width(90)
+            .width(64)
 
             TableColumn("Created") { row in
                 Text(row.dateLabel)
+                    .lineLimit(1)
+                    .help(row.dateLabel)
                     .font(.system(size: 12, weight: .medium, design: .rounded))
                     .foregroundStyle(AppTheme.textSecondary)
             }
-            .width(min: 130, ideal: 180)
+            .width(112)
 
             TableColumn("Actions") { row in
-                HStack(spacing: 14) {
+                HStack(spacing: 10) {
                     IconActionButton(icon: "play.fill", color: AppTheme.accent) {
-                        previewURL = row.info.fileURL
+                        state.previewURL = row.info.fileURL
                     }
                     .help("Quick preview")
 
                     IconActionButton(icon: "scissors", color: AppTheme.accentSecondary) {
                         openTrim(row.info.fileURL)
                     }
+                    .disabled(windowState.exports.isBusy)
                     .help("Trim & Export")
 
                     ClipShareLink(url: row.info.fileURL)
 
-                    IconActionButton(
-                        icon: copiedFilePath == row.info.fileURL.path ? "checkmark" : "doc.on.doc",
-                        color: copiedFilePath == row.info.fileURL.path ? AppTheme.success : AppTheme.textSecondary
-                    ) {
-                        copyFile(row.info.fileURL)
+                    Menu {
+                        Button("Copy File", systemImage: "doc.on.doc") { copyFile(row.info.fileURL) }
+                        Button("Show in Finder", systemImage: "folder") {
+                            NSWorkspace.shared.activateFileViewerSelecting([row.info.fileURL])
+                        }
+                        Divider()
+                        Button("Delete Clip", systemImage: "trash", role: .destructive) { requestDelete([row]) }
+                            .disabled(windowState.isProtected(row.info.fileURL))
+                    } label: {
+                        IconActionLabel(icon: "ellipsis", color: AppTheme.textSecondary)
                     }
-                    .help("Copy file to clipboard")
+                    .menuStyle(.borderlessButton)
+                    .menuIndicator(.hidden)
+                    .fixedSize()
+                    .help("More clip actions")
+                    .accessibilityLabel("More actions for \(row.displayTitle)")
 
-                    IconActionButton(icon: "folder", color: AppTheme.textSecondary) {
-                        NSWorkspace.shared.activateFileViewerSelecting([row.info.fileURL])
-                    }
-                    .help("Reveal in Finder")
-
-                    IconActionButton(icon: "trash", color: AppTheme.danger) {
-                        requestDelete([row])
-                    }
-                    .help("Delete clip (moves it to Trash)")
                 }
             }
-            .width(min: 240, ideal: 260)
+            .width(164)
         }
         .tableStyle(.inset(alternatesRowBackgrounds: true))
         .contextMenu(forSelectionType: ClipRow.ID.self) { ids in
             let targets = rows(for: ids)
             if !targets.isEmpty {
                 if let row = targets.first, targets.count == 1 {
-                    Button("Quick Preview") { previewURL = row.info.fileURL }
+                    Button("Quick Preview") { state.previewURL = row.info.fileURL }
                     Button("Trim & Export…") { openTrim(row.info.fileURL) }
+                        .disabled(windowState.exports.isBusy)
                     Button("Copy File") { copyFile(row.info.fileURL) }
                 }
                 Button("Reveal in Finder") {
@@ -324,10 +353,11 @@ public struct ClipLibraryView: View {
                 Button(targets.count == 1 ? "Delete Clip" : "Delete \(targets.count) Clips", role: .destructive) {
                     requestDelete(targets)
                 }
+                .disabled(targets.contains { windowState.isProtected($0.info.fileURL) })
             }
         } primaryAction: { ids in
             if let row = rows(for: ids).first {
-                previewURL = row.info.fileURL
+                state.previewURL = row.info.fileURL
             }
         }
         .onDeleteCommand {
@@ -343,12 +373,12 @@ public struct ClipLibraryView: View {
     /// Selection is synced first so the bulk alert (which reads `selectedRows`)
     /// targets exactly what was right-clicked.
     private func requestDelete(_ targets: [ClipRow]) {
-        guard !targets.isEmpty else { return }
+        guard windowState.isLibraryFrontmost, !targets.isEmpty, !targets.contains(where: { windowState.isProtected($0.info.fileURL) }) else { return }
         if targets.count == 1 {
-            deleteCandidate = targets[0]
+            state.deleteCandidate = targets[0]
         } else {
-            selection = Set(targets.map(\.id))
-            bulkDeletePresented = true
+            state.selection = Set(targets.map(\.id))
+            state.bulkDeletePresented = true
         }
     }
 
@@ -356,7 +386,7 @@ public struct ClipLibraryView: View {
         VStack(spacing: 10) {
             HStack(spacing: 12) {
                 Button {
-                    previewURL = row.info.fileURL
+                    state.previewURL = row.info.fileURL
                 } label: {
                     HStack(spacing: 6) {
                         Image(systemName: "play.circle.fill")
@@ -379,6 +409,7 @@ public struct ClipLibraryView: View {
                 }
                 .buttonStyle(.bordered)
                 .controlSize(.small)
+                .disabled(windowState.exports.isBusy)
                 .help("Trim or crop the clip, choose an audio track, and export as MP4 or GIF")
 
                 ShareLink(item: row.info.fileURL) {
@@ -392,8 +423,8 @@ public struct ClipLibraryView: View {
                     copyFile(row.info.fileURL)
                 } label: {
                     Label(
-                        copiedFilePath == row.info.fileURL.path ? "Copied" : "Copy File",
-                        systemImage: copiedFilePath == row.info.fileURL.path ? "checkmark" : "doc.on.doc"
+                        state.copiedFilePath == row.info.fileURL.path ? "Copied" : "Copy File",
+                        systemImage: state.copiedFilePath == row.info.fileURL.path ? "checkmark" : "doc.on.doc"
                     )
                     .font(.system(size: 12, weight: .semibold, design: .rounded))
                 }
@@ -401,10 +432,10 @@ public struct ClipLibraryView: View {
                 .controlSize(.small)
 
                 Button {
-                    Task { await exportWholeClipGIF(for: row) }
+                    exportWholeClipGIF(for: row)
                 } label: {
                     HStack(spacing: 6) {
-                        if gifExportingPath == row.info.fileURL.path {
+                        if windowState.exports.isBusy && windowState.exports.sourceURL == row.info.fileURL.standardizedFileURL {
                             ProgressView().controlSize(.small)
                         } else {
                             Image(systemName: "photo.stack")
@@ -415,7 +446,7 @@ public struct ClipLibraryView: View {
                 }
                 .buttonStyle(.bordered)
                 .controlSize(.small)
-                .disabled(gifExportingPath != nil)
+                .disabled(windowState.exports.isBusy)
                 .help("Export the whole clip as a looping GIF (no audio). Use Trim to choose a range or size.")
 
                 Text(row.info.fileURL.lastPathComponent)
@@ -434,27 +465,28 @@ public struct ClipLibraryView: View {
                 .buttonStyle(.bordered)
                 .controlSize(.small)
                 .tint(AppTheme.danger)
+                .disabled(windowState.isProtected(row.info.fileURL))
                 .help("Move this clip to Trash")
             }
 
             HStack(alignment: .top, spacing: 12) {
                 Toggle("Favorite", isOn: Binding(
-                    get: { metadataDraft.isFavorite },
-                    set: { metadataDraft.isFavorite = $0 }
+                    get: { state.metadataDraft.isFavorite },
+                    set: { state.metadataDraft.isFavorite = $0 }
                 ))
                 .toggleStyle(.checkbox)
                 .frame(width: 90, alignment: .leading)
 
-                TextField("Display name", text: $metadataDraft.displayName)
+                TextField("Display name", text: $state.metadataDraft.displayName)
                     .textFieldStyle(.roundedBorder)
 
-                TextField("File name", text: $renameDraft)
+                TextField("File name", text: $state.renameDraft)
                     .textFieldStyle(.roundedBorder)
 
                 Button("Rename File") {
                     applyRename(for: row)
                 }
-                .disabled(renameDraft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                .disabled(windowState.isProtected(row.info.fileURL) || state.renameDraft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
 
                 Button("Save Details") {
                     saveDraft(for: row)
@@ -465,12 +497,12 @@ public struct ClipLibraryView: View {
 
             HStack(spacing: 12) {
                 TextField("Tags, comma separated", text: Binding(
-                    get: { metadataDraft.tags.joined(separator: ", ") },
-                    set: { metadataDraft.tags = Self.parseTags($0) }
+                    get: { state.metadataDraft.tags.joined(separator: ", ") },
+                    set: { state.metadataDraft.tags = Self.parseTags($0) }
                 ))
                 .textFieldStyle(.roundedBorder)
 
-                TextField("Notes", text: $metadataDraft.notes, axis: .vertical)
+                TextField("Notes", text: $state.metadataDraft.notes, axis: .vertical)
                     .textFieldStyle(.roundedBorder)
                     .lineLimit(1...3)
             }
@@ -513,7 +545,7 @@ public struct ClipLibraryView: View {
                 Spacer()
 
                 Button(role: .destructive) {
-                    bulkDeletePresented = true
+                    requestDelete(rows)
                 } label: {
                     Label("Delete \(rows.count)", systemImage: "trash")
                         .font(.system(size: 12, weight: .semibold, design: .rounded))
@@ -521,46 +553,47 @@ public struct ClipLibraryView: View {
                 .buttonStyle(.bordered)
                 .controlSize(.small)
                 .tint(AppTheme.danger)
+                .disabled(rows.contains { windowState.isProtected($0.info.fileURL) })
             }
 
             HStack(spacing: 12) {
-                TextField("Add tag to all selected", text: $bulkTagDraft)
+                TextField("Add tag to all selected", text: $state.bulkTagDraft)
                     .textFieldStyle(.roundedBorder)
                     .onSubmit { applyBulkTag(to: rows) }
 
                 Button("Add Tag") {
                     applyBulkTag(to: rows)
                 }
-                .disabled(bulkTagDraft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                .disabled(state.bulkTagDraft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
             }
             .font(.system(size: 12, weight: .regular, design: .rounded))
         }
     }
 
     private func applyBulkTag(to rows: [ClipRow]) {
-        let tag = bulkTagDraft.trimmingCharacters(in: .whitespacesAndNewlines)
+        let tag = state.bulkTagDraft.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !tag.isEmpty else { return }
         model.addTag(tag, to: rows)
-        bulkTagDraft = ""
+        state.bulkTagDraft = ""
     }
 
     private var selectedRows: [ClipRow] {
-        model.rows.filter { selection.contains($0.id) }
+        model.rows.filter { state.selection.contains($0.id) }
     }
 
     private var singleSelectedRow: ClipRow? {
-        guard selection.count == 1 else { return nil }
-        return model.rows.first(where: { selection.contains($0.id) })
+        guard state.selection.count == 1 else { return nil }
+        return model.rows.first(where: { state.selection.contains($0.id) })
     }
 
     private func pruneSelectionToExistingRows() {
-        selection = selection.filter { id in model.rows.contains(where: { $0.id == id }) }
+        state.selection = state.selection.filter { id in model.rows.contains(where: { $0.id == id }) }
     }
 
     private var visibleRows: [ClipRow] {
-        model.sortedRows(by: sortMode).filter { row in
-            let matchesFavorite = !favoritesOnly || row.userMetadata.isFavorite
-            let query = searchText.trimmingCharacters(in: .whitespacesAndNewlines)
+        model.sortedRows(by: state.sortMode).filter { row in
+            let matchesFavorite = !state.favoritesOnly || row.userMetadata.isFavorite
+            let query = state.searchText.trimmingCharacters(in: .whitespacesAndNewlines)
             guard matchesFavorite, !query.isEmpty else {
                 return matchesFavorite
             }
@@ -570,56 +603,41 @@ public struct ClipLibraryView: View {
 
     private func syncDraftFromSelection() {
         guard let row = singleSelectedRow else {
-            metadataDraft = .empty
-            renameDraft = ""
+            state.metadataDraft = .empty
+            state.renameDraft = ""
             return
         }
-        metadataDraft = row.userMetadata
-        renameDraft = row.fileNameWithoutExtension
+        state.metadataDraft = row.userMetadata
+        state.renameDraft = row.fileNameWithoutExtension
     }
 
     private func saveDraft(for row: ClipRow) {
-        model.updateMetadata(for: row, metadata: metadataDraft)
+        model.updateMetadata(for: row, metadata: state.metadataDraft)
     }
 
     private func applyRename(for row: ClipRow) {
+        guard !windowState.isProtected(row.info.fileURL) else { return }
         let oldID = row.id
-        if let newID = model.rename(row, to: renameDraft, metadata: metadataDraft) {
-            selection = [newID]
+        if let newID = model.rename(row, to: state.renameDraft, metadata: state.metadataDraft) {
+            state.selection = [newID]
         } else {
-            selection = [oldID]
+            state.selection = [oldID]
         }
         syncDraftFromSelection()
     }
 
-    private func exportWholeClipGIF(for row: ClipRow) async {
+    private func exportWholeClipGIF(for row: ClipRow) {
         let sourceURL = row.info.fileURL
-        let end = row.info.duration.isFinite && row.info.duration > 0 ? row.info.duration : 0
+        let end = row.info.duration.isFinite ? row.info.duration : 0
         guard end > 0 else { return }
-
-        let suggestedURL = GIFExporter.uniqueOutputURL(basedOn: sourceURL)
-        guard let outputURL = await ExportDestinationPicker.chooseDestination(
-            suggestedURL: suggestedURL,
-            contentType: .gif,
-            title: "Export GIF"
-        ) else {
-            return
-        }
-
-        gifExportingPath = sourceURL.path
-        defer { gifExportingPath = nil }
-
-        do {
-            try await GIFExporter.export(
-                sourceURL: sourceURL,
-                startSeconds: 0,
-                endSeconds: end,
-                to: outputURL
-            )
-            // GIFs aren't listed in the library (MP4s only), so reveal in Finder.
-            NSWorkspace.shared.activateFileViewerSelecting([outputURL])
-        } catch {
-            print("Failed to export GIF: \(error)")
+        windowState.exports.start(source: sourceURL, title: "Exporting GIF") {
+            let suggestedURL = GIFExporter.uniqueOutputURL(basedOn: sourceURL)
+            guard let outputURL = await ExportDestinationPicker.chooseDestination(
+                suggestedURL: suggestedURL, contentType: .gif, title: "Export GIF"
+            ) else { return nil }
+            return try await ClipExportCoordinator.write(source: sourceURL, destination: outputURL) { staged in
+                try await GIFExporter.export(sourceURL: sourceURL, startSeconds: 0, endSeconds: end, to: staged)
+            }
         }
     }
 
@@ -629,11 +647,11 @@ public struct ClipLibraryView: View {
         }
 
         let copiedPath = url.path
-        copiedFilePath = copiedPath
+        state.copiedFilePath = copiedPath
         Task {
             try? await Task.sleep(for: .seconds(2))
-            guard copiedFilePath == copiedPath else { return }
-            copiedFilePath = nil
+            guard state.copiedFilePath == copiedPath else { return }
+            state.copiedFilePath = nil
         }
     }
 
@@ -647,10 +665,10 @@ public struct ClipLibraryView: View {
 
     private var deleteAlertBinding: Binding<Bool> {
         Binding(
-            get: { deleteCandidate != nil },
+            get: { state.deleteCandidate != nil },
             set: { isPresented in
                 if !isPresented {
-                    deleteCandidate = nil
+                    state.deleteCandidate = nil
                 }
             }
         )
@@ -658,24 +676,22 @@ public struct ClipLibraryView: View {
 
     private var previewSheetBinding: Binding<Bool> {
         Binding(
-            get: { previewURL != nil },
+            get: { state.previewURL != nil },
             set: { isPresented in
                 if !isPresented {
-                    previewURL = nil
+                    state.previewURL = nil
                 }
             }
         )
     }
 
     private func openTrim(_ url: URL) {
-        ClipTrimWindowController.open(url: url) {
-            Task { await model.reload() }
-        }
+        windowState.openEditor(url)
     }
 
 }
 
-private enum ClipSortMode: String, CaseIterable, Identifiable {
+enum ClipSortMode: String, CaseIterable, Identifiable {
     case date
     case name
     case duration
@@ -693,7 +709,7 @@ private enum ClipSortMode: String, CaseIterable, Identifiable {
     }
 }
 
-private struct ClipRow: Identifiable {
+struct ClipRow: Identifiable {
     let info: ClipInfo
     let thumbnail: NSImage?
     var userMetadata: ClipUserMetadata
@@ -731,9 +747,17 @@ private struct ClipRow: Identifiable {
 }
 
 @MainActor
-private final class ClipLibraryViewModel: ObservableObject {
+final class ClipLibraryViewModel: ObservableObject {
     @Published var rows: [ClipRow] = []
     @Published var storageSummary = ClipLibraryStorageSummary(clipCount: 0, totalBytes: 0, oldestClipDate: nil)
+    var isProtected: (URL) -> Bool = { _ in false }
+    private var reloadGeneration = UUID()
+    private var loadedDirectory: URL?
+    private let outputDirectory: () -> URL?
+
+    init(outputDirectory: @escaping () -> URL? = { AppSettings.outputDirectoryURL }) {
+        self.outputDirectory = outputDirectory
+    }
     private var metadataByPath: [String: ClipUserMetadata] = [:]
 
     /// Enriched info + thumbnail for a clip, keyed by ``cacheKey(for:)``.
@@ -746,8 +770,18 @@ private final class ClipLibraryViewModel: ObservableObject {
     private var clipCache: [String: CachedClip] = [:]
 
     func reload() async {
+        let generation = UUID()
+        reloadGeneration = generation
+        let scannedDirectory = self.outputDirectory()
+        if scannedDirectory != loadedDirectory {
+            rows = []
+            metadataByPath = [:]
+            clipCache = [:]
+            loadedDirectory = scannedDirectory
+            updateStorageSummary()
+        }
         OutputDirectoryAccess.ensureAccessIfNeeded()
-        guard let outputDirectory = AppSettings.outputDirectoryURL else {
+        guard let outputDirectory = self.outputDirectory() else {
             rows = []
             metadataByPath = [:]
             clipCache = [:]
@@ -783,7 +817,7 @@ private final class ClipLibraryViewModel: ObservableObject {
             return collected
         }
 
-        if Task.isCancelled { return }
+        if Task.isCancelled || reloadGeneration != generation || self.outputDirectory() != scannedDirectory { return }
 
         // Rebuild the cache to current files only (reusing hits, prunes stale).
         var refreshedCache: [String: CachedClip] = [:]
@@ -817,6 +851,7 @@ private final class ClipLibraryViewModel: ObservableObject {
     }
 
     func delete(_ row: ClipRow) async {
+        guard !isProtected(row.info.fileURL) else { return }
         do {
             try FileManager.default.trashItem(at: row.info.fileURL, resultingItemURL: nil)
             rows.removeAll(where: { $0.id == row.id })
@@ -829,6 +864,7 @@ private final class ClipLibraryViewModel: ObservableObject {
     }
 
     func delete(_ rowsToDelete: [ClipRow]) async {
+        let rowsToDelete = rowsToDelete.filter { !isProtected($0.info.fileURL) }
         let ids = Set(rowsToDelete.map(\.id))
         for row in rowsToDelete {
             do {
@@ -890,6 +926,7 @@ private final class ClipLibraryViewModel: ObservableObject {
     }
 
     func rename(_ row: ClipRow, to requestedName: String, metadata: ClipUserMetadata) -> String? {
+        guard !isProtected(row.info.fileURL) else { return nil }
         let cleanName = sanitizedFileBaseName(requestedName)
         guard !cleanName.isEmpty else { return nil }
 
@@ -935,7 +972,7 @@ private final class ClipLibraryViewModel: ObservableObject {
             candidates = rows.filter { !$0.userMetadata.isFavorite }
         }
 
-        for row in candidates {
+        for row in candidates where !isProtected(row.info.fileURL) {
             try? FileManager.default.trashItem(at: row.info.fileURL, resultingItemURL: nil)
             metadataByPath.removeValue(forKey: ClipLibraryMetadataStore.key(for: row.info.fileURL))
         }
@@ -973,9 +1010,7 @@ private final class ClipLibraryViewModel: ObservableObject {
 
     private func persistMetadata() {
         OutputDirectoryAccess.ensureAccessIfNeeded()
-        guard let outputDirectory = AppSettings.outputDirectoryURL else {
-            return
-        }
+        guard let outputDirectory = loadedDirectory, outputDirectory == self.outputDirectory() else { return }
         ClipLibraryMetadataStore.save(metadataByPath, in: outputDirectory)
     }
 
@@ -1018,7 +1053,7 @@ private final class ClipLibraryViewModel: ObservableObject {
     }
 }
 
-private enum ClipCleanupAction {
+enum ClipCleanupAction {
     case nonFavoritesOlderThanDays(Int)
     case allNonFavorites
 }

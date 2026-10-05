@@ -78,7 +78,11 @@ class AppDelegate: NSObject, NSApplicationDelegate, @unchecked Sendable {
     var captureRecoveryTask: Task<Void, Never>?
     var displayReconfigurationTask: Task<Void, Never>?
     var monitoringTask: Task<Void, Never>?
-    var clipLibraryWindowController: NSWindowController?
+    let mainWindowState = MainWindowState()
+    weak var mainWindow: NSWindow?
+    var mainWindowOpener: (() -> Void)?
+    var mainWindowDelegate: SharedWindowDelegate?
+    var isQuittingAfterExportCancellation = false
     var onboardingWindowController: NSWindowController?
     var bufferDurationObservation: Defaults.Observation?
     var settingsObservations: [Defaults.Observation] = []
@@ -189,8 +193,8 @@ class AppDelegate: NSObject, NSApplicationDelegate, @unchecked Sendable {
         statusItemController.onCopyLastClip = { [weak self] in
             self?.copyLastClipFromUI()
         }
-        statusItemController.onOpenClipLibrary = { [weak self] in
-            self?.openClipLibraryWindow()
+        statusItemController.onOpenMainWindow = { [weak self] in
+            self?.openMainWindow()
         }
         statusItemController.onOpenSettings = { [weak self] in
             self?.openSettingsWindow()
@@ -259,6 +263,23 @@ class AppDelegate: NSObject, NSApplicationDelegate, @unchecked Sendable {
     }
 
     func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
+        if mainWindowState.exports.isBusy && !isQuittingAfterExportCancellation {
+            let alert = NSAlert()
+            alert.messageText = "An export is still running"
+            alert.informativeText = "Keep \(AppBranding.name) running to finish, or cancel the export and quit."
+            alert.addButton(withTitle: "Keep Running")
+            alert.addButton(withTitle: "Cancel Export and Quit")
+            guard alert.runModal() == .alertSecondButtonReturn else { return .terminateCancel }
+            isQuittingAfterExportCancellation = true
+            Task { @MainActor in
+                await mainWindowState.exports.cancelAndWait()
+                // Re-enter termination so session recordings retain their existing
+                // stop-and-save lifecycle after export cancellation completes.
+                NSApp.reply(toApplicationShouldTerminate: false)
+                NSApp.terminate(nil)
+            }
+            return .terminateLater
+        }
         // Finish an in-progress session recording before quitting so the file
         // is not left as orphaned temp segments.
         guard isSessionRecording || isSessionFinalizeInProgress else {
@@ -274,6 +295,11 @@ class AppDelegate: NSObject, NSApplicationDelegate, @unchecked Sendable {
             NSApp.reply(toApplicationShouldTerminate: true)
         }
         return .terminateLater
+    }
+
+    func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
+        openMainWindow()
+        return false
     }
 
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool {

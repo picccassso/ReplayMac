@@ -171,6 +171,9 @@ extension AppDelegate {
     }
 
     @objc private func windowVisibilityChanged(_ notification: Notification) {
+        if let window = notification.object as? NSWindow, window === mainWindow {
+            mainWindowState.isWindowVisible = window.isVisible
+        }
         DispatchQueue.main.async { [weak self] in
             self?.updateActivationPolicy(bringVisibleWindowToFront: true)
         }
@@ -210,42 +213,64 @@ extension AppDelegate {
         }
     }
 
-    func openClipLibraryWindow() {
-        if enforceOnboardingWindowExclusivity() {
-            return
-        }
-
-        if clipLibraryWindowController == nil {
-            let hostingController = NSHostingController(rootView: ClipLibraryView())
-            let window = NSWindow(contentViewController: hostingController)
-            window.title = "Clip Library"
-            window.setContentSize(NSSize(width: 980, height: 620))
-            window.styleMask = NSWindow.StyleMask([.titled, .closable, .miniaturizable, .resizable])
-            clipLibraryWindowController = NSWindowController(window: window)
-        }
-
-        NSApp.setActivationPolicy(.regular)
-        NSApp.activate(ignoringOtherApps: true)
-        clipLibraryWindowController?.showWindow(nil)
-        clipLibraryWindowController?.window?.makeKeyAndOrderFront(nil)
-        clipLibraryWindowController?.window?.orderFrontRegardless()
-        updateActivationPolicy(bringVisibleWindowToFront: true)
+    func installMainWindowOpener(_ opener: @escaping () -> Void) {
+        mainWindowOpener = opener
     }
 
-    /// Hotkey behaviour: a second press dismisses the library. The window is
-    /// only closed when it is already frontmost, so pressing the hotkey from
-    /// another app still brings it forward instead of hiding it.
-    func toggleClipLibraryWindow() {
-        if let window = clipLibraryWindowController?.window,
-           window.isVisible,
-           NSApp.isActive,
-           window.isKeyWindow || window.isMainWindow {
-            window.close()
-            updateActivationPolicy()
-            return
+    func registerMainWindow(_ window: NSWindow) {
+        guard mainWindow !== window else { return }
+        mainWindow = window
+        window.identifier = NSUserInterfaceItemIdentifier("ReplayMacMainWindow")
+        let delegate = SharedWindowDelegate(appDelegate: self, forwarding: window.delegate)
+        mainWindowDelegate = delegate
+        window.delegate = delegate
+        window.isReleasedWhenClosed = false
+        let restored = window.setFrameUsingName("ReplayMacMainWindow")
+        let screen = NSScreen.screens.max { lhs, rhs in
+            let a = window.frame.intersection(lhs.visibleFrame)
+            let b = window.frame.intersection(rhs.visibleFrame)
+            return (a.isNull ? 0 : a.width * a.height) < (b.isNull ? 0 : b.width * b.height)
         }
+        if let visible = (screen ?? NSScreen.main)?.visibleFrame {
+            let titleHeight = window.frame.height - window.contentRect(forFrameRect: window.frame).height
+            window.contentMinSize = NSSize(width: min(1040, visible.width), height: min(640, max(1, visible.height - titleHeight)))
+            if !restored {
+                window.setContentSize(NSSize(width: min(1120, visible.width), height: min(720, max(1, visible.height - titleHeight))))
+                window.center()
+            }
+            window.setFrame(MainWindowGeometry.visibleFrame(window.frame, within: visible), display: true)
+        }
+        mainWindowState.isWindowVisible = window.isVisible
+        _ = enforceOnboardingWindowExclusivity()
+    }
 
-        openClipLibraryWindow()
+    func openMainWindow(page: MainWindowPage? = nil) {
+        guard !enforceOnboardingWindowExclusivity() else { return }
+        if let page { mainWindowState.select(page) }
+        NSApp.setActivationPolicy(.regular)
+        NSApp.activate(ignoringOtherApps: true)
+        if let mainWindow {
+            mainWindow.deminiaturize(nil)
+            mainWindow.makeKeyAndOrderFront(nil)
+        } else { mainWindowOpener?() }
+        mainWindowState.isWindowVisible = true
+    }
+
+    func openClipLibraryWindow() { openMainWindow(page: .library) }
+
+    func toggleClipLibraryWindow() {
+        let frontmost = mainWindow.map {
+            $0.isVisible && NSApp.isActive && ($0.isKeyWindow || $0.isMainWindow)
+        } ?? false
+        if mainWindowState.routeLibraryShortcut(windowIsFrontmost: frontmost) {
+            hideMainWindow()
+        } else { openMainWindow() }
+    }
+
+    func hideMainWindow() {
+        mainWindowState.windowDidHide()
+        mainWindow?.orderOut(nil)
+        updateActivationPolicy()
     }
 
     func showOnboardingWindow() {
@@ -304,34 +329,7 @@ extension AppDelegate {
         }
     }
 
-    func openSettingsWindow() {
-        if enforceOnboardingWindowExclusivity() {
-            return
-        }
-
-        NSApp.setActivationPolicy(.regular)
-        NSApp.activate(ignoringOtherApps: true)
-        NSApp.sendAction(Selector(("showSettingsWindow:")), to: nil, from: nil)
-        NotificationCenter.default.post(name: .replayCapSettingsShouldOpenGeneral, object: nil)
-
-        bringSettingsWindowToFront()
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) { [weak self] in
-            NotificationCenter.default.post(name: .replayCapSettingsShouldOpenGeneral, object: nil)
-            self?.bringSettingsWindowToFront()
-        }
-    }
-
-    func bringSettingsWindowToFront() {
-        guard let settingsWindow = NSApp.windows.first(where: {
-            $0.styleMask.contains(.titled)
-                && $0 != clipLibraryWindowController?.window
-                && $0 != onboardingWindowController?.window
-        }) else {
-            return
-        }
-        settingsWindow.makeKeyAndOrderFront(nil)
-        settingsWindow.orderFrontRegardless()
-    }
+    func openSettingsWindow() { openMainWindow(page: .general) }
 
     /// SwiftUI may restore Settings or Clip Library state while AppDelegate is
     /// presenting first-run setup. Keep onboarding as the only visible titled
@@ -378,4 +376,62 @@ extension AppDelegate {
         return true
     }
 
+}
+
+/// Preserve SwiftUI's delegate methods while supplying menu-bar close behaviour.
+@MainActor
+final class SharedWindowDelegate: NSObject, NSWindowDelegate {
+    weak var appDelegate: AppDelegate?
+    // Assigned once; Objective-C introspection may read the delegate off actor.
+    nonisolated(unsafe) weak var forwarding: (any NSWindowDelegate)?
+    private var fullscreenTransition = false
+
+    init(appDelegate: AppDelegate, forwarding: (any NSWindowDelegate)?) {
+        self.appDelegate = appDelegate
+        self.forwarding = forwarding
+    }
+
+    override func responds(to selector: Selector!) -> Bool {
+        super.responds(to: selector) || forwarding?.responds(to: selector) == true
+    }
+    override func forwardingTarget(for selector: Selector!) -> Any? { forwarding }
+
+    func windowShouldClose(_ sender: NSWindow) -> Bool {
+        appDelegate?.hideMainWindow()
+        return false
+    }
+    func windowDidBecomeKey(_ notification: Notification) {
+        appDelegate?.mainWindowState.isWindowVisible = true
+        forwarding?.windowDidBecomeKey?(notification)
+    }
+    func windowDidMiniaturize(_ notification: Notification) {
+        appDelegate?.mainWindowState.windowDidHide()
+        forwarding?.windowDidMiniaturize?(notification)
+    }
+    func windowDidDeminiaturize(_ notification: Notification) {
+        appDelegate?.mainWindowState.isWindowVisible = true
+        forwarding?.windowDidDeminiaturize?(notification)
+    }
+    func windowDidMove(_ notification: Notification) {
+        saveFrame()
+        forwarding?.windowDidMove?(notification)
+    }
+    func windowDidResize(_ notification: Notification) {
+        saveFrame()
+        forwarding?.windowDidResize?(notification)
+    }
+    func windowWillEnterFullScreen(_ notification: Notification) {
+        fullscreenTransition = true
+        forwarding?.windowWillEnterFullScreen?(notification)
+    }
+    func windowDidExitFullScreen(_ notification: Notification) {
+        fullscreenTransition = false
+        saveFrame()
+        forwarding?.windowDidExitFullScreen?(notification)
+    }
+    private func saveFrame() {
+        guard !fullscreenTransition, let window = appDelegate?.mainWindow,
+              !window.styleMask.contains(.fullScreen) else { return }
+        window.saveFrame(usingName: "ReplayMacMainWindow")
+    }
 }
