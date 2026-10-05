@@ -69,31 +69,32 @@ struct TrimRangeSelector: View {
                 Spacer(minLength: 12)
 
                 VStack(spacing: 1) {
-                    Text("Selected")
-                        .font(.system(size: 10, weight: .medium, design: .rounded))
-                        .foregroundStyle(AppTheme.textSecondary)
+                    HStack(spacing: 4) {
+                        Text("Selected")
+                            .font(.system(size: 10, weight: .medium, design: .rounded))
+                            .foregroundStyle(AppTheme.textSecondary)
+                            .accessibilityHidden(true)
+                        if editableTimes {
+                            TrimHelpButton(text: "Drag either handle or type the Start and End times. Enter seconds, minutes:seconds, or hours:minutes:seconds, with optional tenths. Use the arrows to adjust by 0.1 second. The player loops your selection when you finish editing.")
+                        }
+                    }
                     Text(Self.timeLabel(max(0, end - start)))
                         .font(.system(size: 12, weight: .semibold, design: .monospaced))
                         .foregroundStyle(AppTheme.accent)
+                        .accessibilityLabel("Selected duration")
+                        .accessibilityValue(Self.timeLabel(max(0, end - start)))
                 }
-                .accessibilityElement(children: .combine)
-                .accessibilityLabel("Selected duration")
+                .accessibilityElement(children: .contain)
 
                 Spacer(minLength: 12)
 
                 if editableTimes {
-                    TrimTimeField(title: "End", value: $end, clamped: {
+                    TrimTimeField(title: "End", value: $end, alignment: .trailing, clamped: {
                         TrimRangeMath.clampedEnd($0, start: start, bounds: bounds,
                                                  minimumSelection: minimumSelection)
                     }, onSeek: onSeek, onEditingChanged: onEditingChanged)
                 } else {
                     endpointLabel("End", time: end, alignment: .trailing)
-                }
-            }
-            if editableTimes {
-                HStack {
-                    Spacer()
-                    TrimHelpButton(text: "Drag either handle or type the Start and End times. Enter seconds, minutes:seconds, or hours:minutes:seconds, with optional tenths. Use the arrows to adjust by 0.1 second. The player loops your selection when you finish editing.")
                 }
             }
         }
@@ -214,6 +215,7 @@ struct TrimRangeSelector: View {
 private struct TrimTimeField: View {
     let title: String
     @Binding var value: Double
+    var alignment: HorizontalAlignment = .leading
     let clamped: (Double) -> Double
     let onSeek: (Double) -> Void
     let onEditingChanged: (Bool) -> Void
@@ -224,8 +226,10 @@ private struct TrimTimeField: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 4) {
             Text(title).font(.system(size: 10, weight: .medium)).foregroundStyle(.secondary)
+                .frame(width: 94, alignment: alignment == .trailing ? .trailing : .leading)
             HStack(spacing: 4) {
                 TrimEndpointInput(title: "Trim \(title.lowercased()) time", text: $draft,
+                                  alignment: alignment == .trailing ? .right : .left,
                                   onEditingChanged: { editing in
                                       focused = editing
                                       if editing {
@@ -308,6 +312,7 @@ enum TrimRangeMath {
 private struct TrimEndpointInput: NSViewRepresentable {
     let title: String
     @Binding var text: String
+    var alignment: NSTextAlignment = .left
     let onEditingChanged: (Bool) -> Void
     let onEscape: () -> Void
     let onAdjust: (Double) -> Void
@@ -330,6 +335,7 @@ private struct TrimEndpointInput: NSViewRepresentable {
     func updateNSView(_ field: NSTextField, context: Context) {
         context.coordinator.parent = self
         if field.stringValue != text { field.stringValue = text }
+        field.alignment = alignment
         field.isEnabled = isEnabled
     }
 
