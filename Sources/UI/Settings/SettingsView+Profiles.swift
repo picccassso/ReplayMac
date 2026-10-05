@@ -16,7 +16,7 @@ extension SettingsView {
                     .disabled(newProfileName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
                 }
             } header: {
-                sectionHeader(icon: "plus.rectangle.on.rectangle", title: "Create")
+                Text("Create")
             }
 
             Section {
@@ -65,7 +65,7 @@ extension SettingsView {
                     .disabled(selectedProfile == nil)
                 }
             } header: {
-                sectionHeader(icon: "rectangle.stack", title: "Saved Profiles")
+                Text("Saved Profiles")
             }
 
             if let selectedProfile {
@@ -85,7 +85,7 @@ extension SettingsView {
                     ProfileDetailRow(label: "Audio", value: selectedProfile.audioDetail)
                     ProfileDetailRow(label: "Buffer", value: selectedProfile.bufferDetail)
                 } header: {
-                    sectionHeader(icon: "info.circle", title: "Selected Profile")
+                    Text("Selected Profile")
                 }
             }
 

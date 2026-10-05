@@ -22,13 +22,22 @@ APPSTORE_FLAG=""
 # Mac needs a real x86_64 slice. Multi-arch builds land in
 # .build/apple/Products/Release rather than the per-arch directory.
 ARCH_FLAGS="--arch arm64 --arch x86_64"
+# SwiftPM can stamp the deployment target as the linked SDK version. Explicit
+# platform metadata opts into native Liquid Glass while retaining macOS 15.
+SDK_VERSION="$(xcrun --sdk macosx --show-sdk-version)"
+if [ "${SDK_VERSION%%.*}" -lt 26 ]; then
+  printf 'Xcode 26 or later with a macOS 26+ SDK is required.\n' >&2
+  exit 1
+fi
+SDK_LINK_FLAGS="-Xlinker -platform_version -Xlinker macos -Xlinker 15.0 -Xlinker $SDK_VERSION"
 if [ "${1:-}" = "--appstore" ]; then
   APP_NAME="ReplayCap"
   APPSTORE_FLAG="-Xswiftc -DAPPSTORE"
   ENTITLEMENTS="$ROOT_DIR/Resources/ReplayCap.appstore.entitlements"
   printf 'Building Mac App Store variant (update checker disabled).\n'
 fi
-APP_DIR="$ROOT_DIR/dist/${APP_NAME}.app"
+# Allow local review builds alongside an app that is currently running.
+APP_DIR="${REPLAYMAC_BUILD_OUTPUT_DIR:-$ROOT_DIR/dist}/${APP_NAME}.app"
 
 resolve_signing_identity() {
   if [ -n "${SIGNING_IDENTITY:-}" ]; then
@@ -61,8 +70,8 @@ else
 fi
 
 # Build once so SPM generates resource bundle accessors
-# shellcheck disable=SC2086  # APPSTORE_FLAG/ARCH_FLAGS intentionally word-split
-swift build -c release --package-path "$ROOT_DIR" $ARCH_FLAGS $APPSTORE_FLAG
+# shellcheck disable=SC2086  # Build flag lists are intentionally word-split
+swift build -c release --package-path "$ROOT_DIR" $ARCH_FLAGS $APPSTORE_FLAG $SDK_LINK_FLAGS
 
 # Patch generated accessors to load bundles from Contents/Resources
 # instead of the app root, which avoids breaking code signing.
@@ -82,7 +91,7 @@ done
 
 # Rebuild so the patched accessors are compiled in
 # shellcheck disable=SC2086
-swift build -c release --package-path "$ROOT_DIR" $ARCH_FLAGS $APPSTORE_FLAG
+swift build -c release --package-path "$ROOT_DIR" $ARCH_FLAGS $APPSTORE_FLAG $SDK_LINK_FLAGS
 
 # ARCH_FLAGS must be repeated here: without them SwiftPM reports the per-arch
 # path and we would ship a thin binary out of a universal build.

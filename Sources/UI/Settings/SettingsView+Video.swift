@@ -107,7 +107,7 @@ extension SettingsView {
                     }
                 }
             } header: {
-                sectionHeader(icon: "camera", title: "Capture")
+                Text("Capture")
             }
 
             Section {
@@ -178,7 +178,7 @@ extension SettingsView {
                     }
                 }
             } header: {
-                sectionHeader(icon: "film.stack", title: "Encoding")
+                Text("Encoding")
             }
 
             Section {
@@ -208,7 +208,7 @@ extension SettingsView {
                     .foregroundStyle(longBufferEnabled ? .orange : AppTheme.textSecondary)
                     .font(.system(size: 12, design: .rounded))
             } header: {
-                sectionHeader(icon: "clock.badge.exclamationmark", title: "Long Buffer")
+                Text("Long Buffer")
             }
 
             Section {
@@ -219,7 +219,7 @@ extension SettingsView {
                 .foregroundStyle(AppTheme.textSecondary)
                 .font(.system(size: 12, design: .rounded))
             } header: {
-                sectionHeader(icon: "record.circle", title: "Session Recording")
+                Text("Session Recording")
             }
         }
         .formStyle(.grouped)

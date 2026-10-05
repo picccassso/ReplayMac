@@ -66,7 +66,7 @@ extension SettingsView {
                 Toggle("Exclude \(AppBranding.name) audio", isOn: $excludeOwnAppAudio)
                     .disabled(systemAudioModeBinding.wrappedValue == .off)
             } header: {
-                sectionHeader(icon: "waveform", title: "Sources")
+                Text("Sources")
             }
 
             Section {
@@ -124,7 +124,7 @@ extension SettingsView {
                 }
                 .disabled(!captureMicrophone)
             } header: {
-                sectionHeader(icon: "speaker.wave.2", title: "Levels")
+                Text("Levels")
             }
 
             Section {
@@ -147,7 +147,7 @@ extension SettingsView {
                         .font(.system(size: 12, design: .rounded))
                 }
             } header: {
-                sectionHeader(icon: "mic", title: "Microphone")
+                Text("Microphone")
             }
 
             Section {
@@ -207,6 +207,7 @@ extension SettingsView {
 }
 
 private struct LiveAudioLevelMeter: View {
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     let source: Source
     let isEnabled: Bool
 
@@ -233,7 +234,7 @@ private struct LiveAudioLevelMeter: View {
                 .frame(height: 6)
             }
             .opacity(isEnabled ? 1 : 0.45)
-            .animation(.linear(duration: 0.1), value: level)
+            .animation(reduceMotion ? nil : .linear(duration: 0.1), value: level)
         }
     }
 

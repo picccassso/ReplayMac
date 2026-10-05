@@ -30,14 +30,14 @@ extension SettingsView {
                     .foregroundStyle(AppTheme.textSecondary)
                     .font(.system(size: 12, design: .rounded))
             } header: {
-                sectionHeader(icon: "cpu", title: "Performance")
+                Text("Performance")
             }
 
             Section {
                 Toggle("Play audio cue on save", isOn: $playAudioCueOnSave)
                 Toggle("Show notification on save", isOn: $showNotificationOnSave)
             } header: {
-                sectionHeader(icon: "speaker.wave.2.bubble.left", title: "Feedback")
+                Text("Feedback")
             }
         }
         .formStyle(.grouped)

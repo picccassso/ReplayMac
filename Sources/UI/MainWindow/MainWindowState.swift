@@ -42,8 +42,6 @@ public final class MainWindowState: ObservableObject {
     @Published public var isWindowVisible = false
     @Published var hasVisitedSettings: Bool
     @Published var settingsTab: SettingsTab = .general
-    @Published private var browsingSidebarVisible: Bool
-    @Published private var editingSidebarVisible = false
     public let exports = ClipExportCoordinator()
     let library: ClipLibraryState
     private let defaults: UserDefaults
@@ -54,14 +52,12 @@ public final class MainWindowState: ObservableObject {
         let restoredPage = MainWindowPage(rawValue: defaults.string(forKey: "mainWindowPage") ?? "") ?? .library
         page = restoredPage
         hasVisitedSettings = restoredPage != .library
-        browsingSidebarVisible = defaults.object(forKey: "mainWindowSidebarVisible") as? Bool ?? true
         library = ClipLibraryState()
         if let tab = SettingsTab(rawValue: page.rawValue) { settingsTab = tab }
         exports.objectWillChange.sink { [weak self] _ in self?.objectWillChange.send() }.store(in: &subscriptions)
         library.model.isProtected = { [weak self] url in self?.isProtected(url) ?? false }
     }
 
-    var sidebarVisible: Bool { isEditing ? editingSidebarVisible : browsingSidebarVisible }
     public var isLibraryFrontmost: Bool { page == .library && !isEditing }
 
     /// Returns whether the caller should hide the native window. Otherwise the
@@ -83,14 +79,6 @@ public final class MainWindowState: ObservableObject {
         if let tab = SettingsTab(rawValue: page.rawValue) {
             hasVisitedSettings = true
             settingsTab = tab
-        }
-    }
-
-    func toggleSidebar() {
-        if isEditing { editingSidebarVisible.toggle() }
-        else {
-            browsingSidebarVisible.toggle()
-            defaults.set(browsingSidebarVisible, forKey: "mainWindowSidebarVisible")
         }
     }
 
@@ -117,7 +105,6 @@ public final class MainWindowState: ObservableObject {
         guard editor != nil else { return }
         page = .library
         defaults.set(MainWindowPage.library.rawValue, forKey: "mainWindowPage")
-        editingSidebarVisible = false
         isEditing = true
     }
 

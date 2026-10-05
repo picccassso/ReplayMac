@@ -16,6 +16,8 @@ struct TrimRangeSelector: View {
     var onEditingChanged: (Bool) -> Void = { _ in }
     var editableTimes = false
 
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.accessibilityShowBorders) private var showBorders
     @State private var activeHandle: Handle?
 
     private enum Handle {
@@ -35,13 +37,7 @@ struct TrimRangeSelector: View {
                         .padding(.horizontal, metrics.thumbInset)
 
                     Capsule(style: .continuous)
-                        .fill(
-                            LinearGradient(
-                                colors: [AppTheme.accent, AppTheme.accentSecondary],
-                                startPoint: .leading,
-                                endPoint: .trailing
-                            )
-                        )
+                        .fill(AppTheme.accent)
                         .frame(width: max(0, metrics.x(for: end) - metrics.x(for: start)), height: 4)
                         .offset(x: metrics.x(for: start))
 
@@ -111,10 +107,10 @@ struct TrimRangeSelector: View {
             .frame(width: TrackMetrics.thumbWidth, height: isActive ? 22 : 19)
             .overlay {
                 RoundedRectangle(cornerRadius: 2.5, style: .continuous)
-                    .stroke(Color(nsColor: .controlBackgroundColor).opacity(0.7), lineWidth: 0.75)
+                    .stroke(Color(nsColor: .controlBackgroundColor).opacity(0.7), lineWidth: showBorders ? 2 : 0.75)
             }
             .shadow(color: .black.opacity(isActive ? 0.25 : 0.14), radius: isActive ? 3 : 2, y: 1)
-            .animation(.easeOut(duration: 0.12), value: isActive)
+            .animation(reduceMotion ? nil : .easeOut(duration: 0.12), value: isActive)
     }
 
     private func endpointLabel(

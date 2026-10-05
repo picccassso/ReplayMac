@@ -15,8 +15,31 @@ jobs:
       - name: Check out repository
         uses: actions/checkout@v6
 
-      - name: Show Swift version
-        run: swift --version
+      - name: Select an Xcode with Liquid Glass SDK support
+        run: |
+          developer_dir=$(python3 - <<'PYCODE'
+          import glob, os, subprocess
+          candidates = []
+          for app in glob.glob('/Applications/Xcode*.app'):
+              directory = app + '/Contents/Developer'
+              result = subprocess.run(
+                  ['xcrun', '--sdk', 'macosx', '--show-sdk-version'],
+                  env={**os.environ, 'DEVELOPER_DIR': directory},
+                  capture_output=True, text=True,
+              )
+              if result.returncode == 0:
+                  version = tuple(int(part) for part in result.stdout.strip().split('.'))
+                  if version >= (26,):
+                      candidates.append((version, directory))
+          if not candidates:
+              raise SystemExit('Xcode 26+ with a macOS 26+ SDK is required for Liquid Glass')
+          print(max(candidates)[1])
+          PYCODE
+          )
+          sudo xcode-select --switch "$developer_dir"
+          xcodebuild -version
+          xcrun --sdk macosx --show-sdk-version
+          swift --version
 
       - name: Build
         run: swift build

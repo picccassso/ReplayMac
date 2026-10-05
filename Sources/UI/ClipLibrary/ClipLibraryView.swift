@@ -21,41 +21,15 @@ public struct ClipLibraryView: View {
     }
 
     public var body: some View {
-        VStack(spacing: 0) {
-            toolbarView
-                .padding(.horizontal, 20)
-                .padding(.vertical, 14)
-
-            storageSummaryView
-                .padding(.horizontal, 20)
-                .padding(.bottom, 10)
-
-            Divider()
-                .padding(.horizontal, 20)
-
+        Group {
             if visibleRows.isEmpty {
                 emptyStateView
-                    .frame(maxHeight: .infinity)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
             } else {
                 tableView
-                    .padding(.horizontal, 20)
-                    .padding(.vertical, 12)
-            }
-
-            if state.selection.count > 1 {
-                ScrollView(.horizontal, showsIndicators: false) { batchBarView(for: selectedRows).frame(minWidth: 800) }
-                    .fixedSize(horizontal: false, vertical: true)
-                    .padding(.horizontal, 20)
-                    .padding(.vertical, 10)
-                    .background(AppTheme.backgroundSecondary.opacity(0.5))
-            } else if let row = singleSelectedRow {
-                ScrollView(.horizontal, showsIndicators: false) { bottomBarView(for: row).frame(minWidth: 800) }
-                    .fixedSize(horizontal: false, vertical: true)
-                    .padding(.horizontal, 20)
-                    .padding(.vertical, 10)
-                    .background(AppTheme.backgroundSecondary.opacity(0.5))
             }
         }
+        .floatingBottomBar { selectionPanel }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .task {
             await model.reload()
@@ -129,80 +103,25 @@ public struct ClipLibraryView: View {
         }
     }
 
-    private var toolbarView: some View {
-        ViewThatFits(in: .horizontal) {
-            HStack(spacing: 12) {
-                searchControls
-                sortControls
-                libraryActions
-            }
-            .fixedSize(horizontal: true, vertical: false)
-            VStack(alignment: .leading, spacing: 10) {
-                HStack(spacing: 12) {
-                    searchControls
-                    Spacer(minLength: 0)
-                    libraryActions
-                }
-                sortControls
-            }
-        }
-        .frame(maxWidth: .infinity, alignment: .leading)
-    }
-
-    private var searchControls: some View {
-        HStack(spacing: 12) {
-            TextField("Search clips, tags, notes", text: $state.searchText)
-                .textFieldStyle(.roundedBorder)
-                .frame(width: 240)
-            Toggle(isOn: $state.favoritesOnly) {
-                Image(systemName: "star.fill")
-                    .foregroundStyle(state.favoritesOnly ? .yellow : AppTheme.textSecondary)
-            }
-            .toggleStyle(.button)
-            .help("Show favorites only")
+    @ViewBuilder
+    private var selectionPanel: some View {
+        if state.selection.count > 1 {
+            panel { batchBarView(for: selectedRows) }
+        } else if let row = singleSelectedRow {
+            panel { bottomBarView(for: row) }
         }
     }
 
-    private var sortControls: some View {
-        HStack(spacing: 6) {
-            Image(systemName: "arrow.up.arrow.down.circle.fill")
-                .foregroundStyle(AppTheme.accent)
-            Picker("Sort", selection: $state.sortMode) {
-                ForEach(ClipSortMode.allCases) { mode in Text(mode.title).tag(mode) }
-            }
-            .pickerStyle(.segmented)
-            .frame(width: 280)
-        }
-    }
-
-    private var libraryActions: some View {
-        HStack(spacing: 10) {
-            Button { state.cleanupSheetPresented = true } label: {
-                Label("Clean Up", systemImage: "externaldrive.badge.minus")
-            }
+    /// Selection details float over the table as one glass panel. Its own
+    /// buttons stay bordered, since glass controls on glass lose contrast.
+    private func panel<Content: View>(@ViewBuilder _ content: () -> Content) -> some View {
+        ScrollView(.horizontal, showsIndicators: false) { content().frame(minWidth: 800) }
+            .fixedSize(horizontal: false, vertical: true)
+            .padding(14)
+            .glassPanel()
+            .padding(.horizontal, 16)
+            .padding(.bottom, 12)
             .buttonStyle(.bordered)
-            .disabled(model.rows.isEmpty)
-            Button { Task { await model.reload() } } label: {
-                Label("Refresh", systemImage: "arrow.clockwise")
-            }
-            .buttonStyle(.borderedProminent)
-            .tint(AppTheme.accent)
-        }
-        .font(.system(size: 12, weight: .semibold, design: .rounded))
-        .controlSize(.small)
-    }
-
-    private var storageSummaryView: some View {
-        HStack(spacing: 14) {
-            Label("\(model.storageSummary.clipCount) clips", systemImage: "film.stack")
-            Label(ByteCountFormatter.string(fromByteCount: model.storageSummary.totalBytes, countStyle: .file), systemImage: "internaldrive")
-            if let oldest = model.storageSummary.oldestClipDate {
-                Label("Oldest \(DateFormatter.clipLibraryDate.string(from: oldest))", systemImage: "clock")
-            }
-            Spacer()
-        }
-        .font(.system(size: 12, weight: .medium, design: .rounded))
-        .foregroundStyle(AppTheme.textSecondary)
     }
 
     @ViewBuilder
@@ -1102,7 +1021,7 @@ private struct ClipCleanupView: View {
                 Button("Run Cleanup") {
                     onRun(.nonFavoritesOlderThanDays(days))
                 }
-                .buttonStyle(.borderedProminent)
+                .buttonStyle(AccentButtonStyle())
                 .tint(AppTheme.danger)
                 .disabled(summary.clipCount == 0)
             }
@@ -1181,6 +1100,7 @@ private struct IconActionLabel: View {
     let icon: String
     let color: Color
 
+    @Environment(\.accessibilityShowBorders) private var showBorders
     @State private var isHovering = false
 
     var body: some View {
@@ -1192,6 +1112,12 @@ private struct IconActionLabel: View {
                 RoundedRectangle(cornerRadius: 6, style: .continuous)
                     .fill(color.opacity(isHovering ? 0.15 : 0.08))
             )
+            .overlay {
+                if showBorders {
+                    RoundedRectangle(cornerRadius: 6, style: .continuous)
+                        .stroke(Color.primary, lineWidth: 1)
+                }
+            }
             .contentShape(Rectangle())
         .onHover { isHovering = $0 }
     }

@@ -15,7 +15,7 @@ extension SettingsView {
                 .foregroundStyle(AppTheme.textSecondary)
                 .font(.system(size: 12, design: .rounded))
             } header: {
-                sectionHeader(icon: "bolt.fill", title: "Primary")
+                Text("Primary")
             }
 
             Section {
@@ -29,7 +29,7 @@ extension SettingsView {
                 .foregroundStyle(AppTheme.textSecondary)
                 .font(.system(size: 12, design: .rounded))
             } header: {
-                sectionHeader(icon: "stopwatch", title: "Quick Presets")
+                Text("Quick Presets")
             }
 
             Section {
@@ -41,7 +41,7 @@ extension SettingsView {
                 .foregroundStyle(AppTheme.textSecondary)
                 .font(.system(size: 12, design: .rounded))
             } header: {
-                sectionHeader(icon: "record.circle", title: "Session Recording")
+                Text("Session Recording")
             }
 
             Section {
@@ -55,14 +55,14 @@ extension SettingsView {
                 .foregroundStyle(AppTheme.textSecondary)
                 .font(.system(size: 12, design: .rounded))
             } header: {
-                sectionHeader(icon: "mic.slash.fill", title: "Audio")
+                Text("Audio")
             }
 
             Section {
                 KeyboardShortcuts.Recorder("Copy last saved clip", name: .copyLastClip)
                 KeyboardShortcuts.Recorder("Show or hide clip library", name: .openClipLibrary)
             } header: {
-                sectionHeader(icon: "film.stack", title: "Library")
+                Text("Library")
             }
         }
         .formStyle(.grouped)

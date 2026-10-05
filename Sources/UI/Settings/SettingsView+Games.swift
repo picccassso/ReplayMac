@@ -19,7 +19,7 @@ extension SettingsView {
                 excludedAppsSubSection
             }
         } header: {
-            sectionHeader(icon: "gamecontroller", title: "Games")
+            Text("Games")
         } footer: {
             Text("Most games are detected automatically via macOS game categorization. You can manually include unlisted games or exclude background launchers and tools.")
                 .font(.caption)

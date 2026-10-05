@@ -9,7 +9,6 @@ struct ClipTrimView: View {
     @ObservedObject var session: ClipEditorSession
     @ObservedObject var exports: ClipExportCoordinator
     let onClose: () -> Void
-    private var url: URL { session.url }
 
     var body: some View {
         HStack(spacing: 0) {
@@ -20,7 +19,6 @@ struct ClipTrimView: View {
                 .frame(width: 300)
                 .background(AppTheme.backgroundSecondary)
         }
-        .background(AppTheme.backgroundPrimary)
         .tint(AppTheme.accent)
         .onAppear { session.isVisible = true }
         .onChange(of: session.selectedAudioTrackID) { _, newValue in
@@ -57,19 +55,8 @@ struct ClipTrimView: View {
     }
 
     private var workspace: some View {
+        // The window title and subtitle already name the editor and clip.
         VStack(spacing: 12) {
-            HStack(spacing: 6) {
-                Label("Trim and Export", systemImage: "film")
-                    .font(.system(size: 14, weight: .semibold))
-                TrimHelpButton(text: "Crop the picture, select a time range, then choose your export settings. Save exports an MP4; Export GIF creates a looping image without audio.")
-                Spacer(minLength: 16)
-                Text(url.lastPathComponent)
-                    .font(.system(size: 11))
-                    .foregroundStyle(.secondary)
-                    .lineLimit(1)
-                    .truncationMode(.middle)
-                    .help(url.lastPathComponent)
-            }
             cropControls
             GeometryReader { proxy in
                 ZStack {
@@ -128,6 +115,7 @@ struct ClipTrimView: View {
             } else {
                 Spacer()
             }
+            TrimHelpButton(text: "Crop the picture, select a time range, then choose your export settings. Save exports an MP4; Export GIF creates a looping image without audio.")
         }
         .font(.system(size: 12))
         .disabled(session.isBusy || session.duration <= 0)
@@ -209,7 +197,7 @@ struct ClipTrimView: View {
                             Text("Save")
                         }
                     }
-                    .buttonStyle(.borderedProminent)
+                    .buttonStyle(AccentButtonStyle())
                     .tint(AppTheme.accent)
                     .disabled(session.isBusy || session.duration <= 0 || session.trimEnd <= session.trimStart)
                     .keyboardShortcut(.defaultAction)

@@ -24,8 +24,9 @@ ReplayMac is a macOS menu bar instant-replay clipper. It continuously buffers re
 
 ### Clip Library & Export
 
-Open **ReplayMac** from the menu bar to browse clips and settings in one window. The collapsible sidebar puts Clip Library above General, Video, Audio, Profiles, Hotkeys and Advanced. Trim & Export opens inside the same window; you can leave an edit and resume it later. Exports continue while you browse or close the window, with progress and completion shown when you reopen it.
+Open **ReplayMac** from the menu bar to browse clips and settings in one window. The sidebar puts Clip Library above General, Video, Audio, Profiles, Hotkeys and Advanced. Trim & Export opens inside the same window; you can leave an edit and resume it later. Exports continue while you browse or close the window, with progress and completion shown when you reopen it.
 
+- **Native appearance**: Liquid Glass navigation and controls on macOS 26+, following your system glass appearance, accent colour, and Light/Dark mode. Earlier macOS versions use native controls.
 - **Built-in library and editor**: Preview, trim, and search clips, with support for favorites, tags, notes, and batch actions.
 - **Cropping and aspect presets**: Drag a crop box over the preview or snap to 16:9, 1:1, 4:3, or 9:16 for MP4 and GIF exports.
 - **Custom exports**: Export with fast passthrough or re-encode to 1080p or 720p with quality presets, HDR metadata preservation, and a live file size estimator.
@@ -41,7 +42,7 @@ Open **ReplayMac** from the menu bar to browse clips and settings in one window.
 
 - macOS 15+
 - Apple Silicon or Intel (universal binaries since version 1.6.9)
-- Swift 6
+- Xcode 26 or later to build from source (macOS 26 SDK or later)
 
 ## Download
 

@@ -5,52 +5,28 @@ import SwiftUI
 public struct MainWindowView: View {
     @ObservedObject private var state: MainWindowState
     @ObservedObject private var exports: ClipExportCoordinator
+    @ObservedObject private var libraryModel: ClipLibraryViewModel
+    @Environment(\.accessibilityShowBorders) private var showBorders
+    @Environment(\.colorSchemeContrast) private var contrast
     @State private var discardPresented = false
 
     public init(state: MainWindowState) {
         self.state = state
         self.exports = state.exports
+        self.libraryModel = state.library.model
     }
 
     public var body: some View {
-        HStack(spacing: 0) {
-            if state.sidebarVisible {
-                navigation
-                    .frame(width: 200)
-                Divider()
-            }
-            VStack(spacing: 0) {
-                header
-                Divider()
-                if exports.isBusy || exports.completedURL != nil || exports.errorMessage != nil {
-                    exportStatus
-                    Divider()
-                }
-                if state.page == .library, !state.isEditing, let editor = state.editor {
-                    resumeBar(editor)
-                    Divider()
-                }
-                ZStack {
-                    ClipLibraryView(windowState: state)
-                        .opacity(state.isLibraryFrontmost ? 1 : 0)
-                        .allowsHitTesting(state.isLibraryFrontmost)
-                        .disabled(!state.isLibraryFrontmost)
-                        .accessibilityHidden(!state.isLibraryFrontmost)
-                    if state.hasVisitedSettings {
-                        SettingsView(selectedTab: $state.settingsTab,
-                                     isVisible: state.page != .library && state.isWindowVisible)
-                            .opacity(state.page != .library ? 1 : 0)
-                            .allowsHitTesting(state.page != .library)
-                            .disabled(state.page == .library)
-                            .accessibilityHidden(state.page == .library)
-                    }
-                    if state.isEditing, let editor = state.editor {
-                        ClipTrimView(session: editor, exports: exports) { state.select(.library) }
-                            .id(editor.url)
-                    }
-                }
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
-            }
+        // The sidebar is always shown at a fixed width; there is no collapsing.
+        NavigationSplitView(columnVisibility: .constant(.all)) {
+            sidebar
+                .navigationSplitViewColumnWidth(220)
+                .toolbar(removing: .sidebarToggle)
+        } detail: {
+            detail
+                .navigationTitle(state.isEditing ? "Trim & Export" : state.page.title)
+                .navigationSubtitle(subtitle)
+                .toolbar { detailToolbar }
         }
         .onChange(of: state.isWindowVisible) { _, visible in
             if state.isEditing {
@@ -58,7 +34,6 @@ public struct MainWindowView: View {
                 else { state.editor?.pause() }
             }
         }
-        .background(AppTheme.backgroundPrimary)
         .tint(AppTheme.accent)
         .alert("Replace Current Edit?", isPresented: Binding(
             get: { state.replacementCandidate != nil },
@@ -77,77 +52,163 @@ public struct MainWindowView: View {
         }
     }
 
-    private var navigation: some View {
+    // MARK: Sidebar
+
+    private var sidebar: some View {
         VStack(alignment: .leading, spacing: 0) {
             HStack(spacing: 9) {
                 Image(systemName: "arrow.counterclockwise.circle.fill")
                     .font(.system(size: 23))
-                    .foregroundStyle(AppTheme.accent)
+                    .foregroundStyle(AppTheme.brandAccent)
+                    .frame(width: 20)
                 Text(AppBranding.name)
                     .font(.system(size: 17, weight: .bold, design: .rounded))
             }
-            .padding(.horizontal, 18)
-            .padding(.top, 24)
-            .padding(.bottom, 26)
-            navigationRow(.library)
+            .padding(.horizontal, 12)
+            .padding(.top, 8)
+            .padding(.bottom, 22)
+            .accessibilityElement(children: .ignore)
+            .accessibilityLabel(AppBranding.name)
+
+            sidebarRow(MainWindowPage.library.title, icon: MainWindowPage.library.icon,
+                       isSelected: state.isLibraryFrontmost) { state.select(.library) }
+            if let editor = state.editor {
+                sidebarRow("Trim & Export", detail: editor.url.lastPathComponent, icon: "scissors",
+                           isSelected: state.isEditing) { state.resumeEditor() }
+                    .contextMenu {
+                        Button("Discard Edit…", role: .destructive) { discardPresented = true }
+                            .disabled(exports.isBusy)
+                    }
+            }
+
             Text("SETTINGS")
                 .font(.system(size: 10, weight: .semibold))
                 .foregroundStyle(.secondary)
-                .padding(.leading, 22)
-                .padding(.top, 28)
+                .padding(.leading, 12)
+                .padding(.top, 24)
                 .padding(.bottom, 8)
-            ForEach(MainWindowPage.allCases.filter { $0 != .library }) { page in navigationRow(page) }
-            Spacer()
+                .accessibilityAddTraits(.isHeader)
+            ForEach(MainWindowPage.allCases.filter { $0 != .library }) { page in
+                sidebarRow(page.title, icon: page.icon,
+                           isSelected: !state.isEditing && state.page == page) { state.select(page) }
+            }
+            Spacer(minLength: 0)
         }
         .padding(.horizontal, 10)
-        .background(AppTheme.backgroundSecondary)
+        .frame(maxWidth: .infinity, alignment: .leading)
     }
 
-    private func navigationRow(_ page: MainWindowPage) -> some View {
-        Button { state.select(page) } label: {
+    private func sidebarRow(_ title: String, detail: String? = nil, icon: String,
+                            isSelected: Bool, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
             HStack(spacing: 10) {
-                Image(systemName: page.icon).frame(width: 20)
-                Text(page.title)
+                Image(systemName: icon).frame(width: 20)
+                VStack(alignment: .leading, spacing: 1) {
+                    Text(title)
+                    if let detail {
+                        Text(detail)
+                            .font(.system(size: 10, design: .rounded))
+                            .foregroundStyle(.secondary)
+                            .truncationMode(.middle)
+                    }
+                }
+                .lineLimit(1)
                 Spacer(minLength: 0)
             }
-            .font(.system(size: 13, weight: state.page == page ? .semibold : .medium, design: .rounded))
-            .foregroundStyle(state.page == page ? AppTheme.accentSecondary : AppTheme.textPrimary)
+            .font(.system(size: 13, weight: isSelected ? .semibold : .medium, design: .rounded))
+            .foregroundStyle(isSelected ? AppTheme.accent : AppTheme.textPrimary)
             .padding(.horizontal, 12)
-            .padding(.vertical, 10)
+            .padding(.vertical, 9)
             .contentShape(Rectangle())
-            .background(state.page == page ? AppTheme.accent.opacity(0.13) : Color.clear,
-                        in: RoundedRectangle(cornerRadius: 8))
+            .background(isSelected ? AppTheme.accent.opacity(contrast == .increased ? 0.25 : 0.15) : Color.clear,
+                        in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+            .overlay {
+                if showBorders || (contrast == .increased && isSelected) {
+                    RoundedRectangle(cornerRadius: 10, style: .continuous)
+                        .stroke(Color.primary, lineWidth: 1)
+                }
+            }
         }
         .buttonStyle(.plain)
         .padding(.vertical, 2)
-        .accessibilityAddTraits(state.page == page ? .isSelected : [])
+        .accessibilityLabel(detail.map { "\(title), \($0)" } ?? title)
+        .accessibilityAddTraits(isSelected ? .isSelected : [])
     }
 
-    private var header: some View {
-        HStack(spacing: 14) {
-            Button { state.toggleSidebar() } label: {
-                Image(systemName: "sidebar.left").font(.system(size: 17))
+    // MARK: Detail
+
+    private var detail: some View {
+        ZStack {
+            ClipLibraryView(windowState: state)
+                .opacity(state.isLibraryFrontmost ? 1 : 0)
+                .allowsHitTesting(state.isLibraryFrontmost)
+                .disabled(!state.isLibraryFrontmost)
+                .accessibilityHidden(!state.isLibraryFrontmost)
+            if state.isLibraryFrontmost {
+                // Search and library actions live in the window toolbar, so they
+                // are attached only while the library is the visible page.
+                ClipLibraryToolbarHost(state: state.library)
             }
-            .buttonStyle(.plain)
-            .foregroundStyle(.secondary)
-            .help(state.sidebarVisible ? "Hide sidebar" : "Show sidebar")
-            .accessibilityLabel(state.sidebarVisible ? "Hide sidebar" : "Show sidebar")
-            if state.isEditing {
-                Button { state.select(.library) } label: { Label("Library", systemImage: "chevron.left") }
-                    .buttonStyle(.plain)
-                    .foregroundStyle(AppTheme.accent)
+            if state.hasVisitedSettings {
+                SettingsView(selectedTab: $state.settingsTab,
+                             isVisible: state.page != .library && state.isWindowVisible)
+                    .opacity(state.page != .library ? 1 : 0)
+                    .allowsHitTesting(state.page != .library)
+                    .disabled(state.page == .library)
+                    .accessibilityHidden(state.page == .library)
             }
-            Text(state.isEditing ? "Trim & Export" : state.page.title)
-                .font(.system(size: 20, weight: .bold, design: .rounded))
-            Spacer()
-            if state.isEditing {
-                Button("Discard Edit") { discardPresented = true }
-                    .disabled(exports.isBusy)
-                    .controlSize(.small)
+            if state.isEditing, let editor = state.editor {
+                ClipTrimView(session: editor, exports: exports) { state.select(.library) }
+                    .id(editor.url)
             }
         }
-        .padding(.horizontal, 22)
-        .padding(.vertical, 17)
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .floatingBottomBar { statusBars }
+    }
+
+    private var subtitle: String {
+        if state.isEditing { return state.editor?.url.lastPathComponent ?? "" }
+        guard state.page == .library else { return "" }
+        let summary = libraryModel.storageSummary
+        let clips = summary.clipCount == 1 ? "1 clip" : "\(summary.clipCount) clips"
+        return "\(clips) · \(ByteCountFormatter.string(fromByteCount: summary.totalBytes, countStyle: .file))"
+    }
+
+    @ToolbarContentBuilder
+    private var detailToolbar: some ToolbarContent {
+        // The always-visible sidebar already leads back to the library.
+        if state.isEditing {
+            ToolbarItem(placement: .primaryAction) {
+                Button("Discard Edit", systemImage: "trash", role: .destructive) { discardPresented = true }
+                    .disabled(exports.isBusy)
+                    .help("Discard the current trim and crop choices")
+            }
+        }
+    }
+
+    // MARK: Floating status
+
+    private var showsExportStatus: Bool {
+        exports.isBusy || exports.completedURL != nil || exports.errorMessage != nil
+    }
+
+    private var showsResumeBar: Bool {
+        state.page == .library && !state.isEditing && state.editor != nil
+    }
+
+    @ViewBuilder
+    private var statusBars: some View {
+        if showsExportStatus || showsResumeBar {
+            GlassGroup(spacing: 8) {
+                VStack(spacing: 8) {
+                    if showsExportStatus { exportStatus }
+                    if showsResumeBar, let editor = state.editor { resumeBar(editor) }
+                }
+            }
+            .frame(maxWidth: 620)
+            .padding(.horizontal, 16)
+            .padding(.bottom, 12)
+        }
     }
 
     private func resumeBar(_ editor: ClipEditorSession) -> some View {
@@ -155,14 +216,11 @@ public struct MainWindowView: View {
             Image(systemName: "scissors").foregroundStyle(AppTheme.accent)
             Text(editor.url.lastPathComponent).lineLimit(1).truncationMode(.middle)
             Text("Editing paused").foregroundStyle(.secondary)
-            Spacer()
-            Button("Resume Editing") { state.resumeEditor() }.buttonStyle(AccentButtonStyle())
+            Spacer(minLength: 8)
             Button("Discard") { discardPresented = true }.disabled(exports.isBusy)
+            Button("Resume Editing") { state.resumeEditor() }.buttonStyle(.borderedProminent)
         }
-        .font(.system(size: 12, design: .rounded))
-        .padding(.horizontal, 22)
-        .padding(.vertical, 10)
-        .background(AppTheme.accent.opacity(0.04))
+        .floatingPill()
     }
 
     private var exportStatus: some View {
@@ -173,10 +231,10 @@ public struct MainWindowView: View {
                 } else { ProgressView().controlSize(.small) }
                 Text(exports.title)
                 if let source = exports.sourceURL {
-                    Text(source.lastPathComponent).foregroundStyle(.secondary).lineLimit(1)
+                    Text(source.lastPathComponent).foregroundStyle(.secondary).lineLimit(1).truncationMode(.middle)
                 }
-                Spacer()
-                if state.editor != nil {
+                Spacer(minLength: 8)
+                if state.editor != nil, !state.isEditing {
                     Button("Editor") { state.resumeEditor() }
                 }
                 Button("Cancel Export") { exports.cancel() }
@@ -185,17 +243,16 @@ public struct MainWindowView: View {
                     .foregroundStyle(exports.errorMessage == nil ? AppTheme.success : .orange)
                 Text(exports.errorMessage ?? "Export complete")
                     .lineLimit(2).textSelection(.enabled)
-                Spacer()
+                Spacer(minLength: 8)
                 if let url = exports.completedURL {
                     Button("Show in Finder") { NSWorkspace.shared.activateFileViewerSelecting([url]) }
                 }
                 Button { exports.dismissResult() } label: { Image(systemName: "xmark") }
-                    .buttonStyle(.plain).help("Dismiss export result")
+                    .buttonStyle(.borderless)
+                    .help("Dismiss export result")
+                    .accessibilityLabel("Dismiss export result")
             }
         }
-        .font(.system(size: 12, design: .rounded))
-        .padding(.horizontal, 22)
-        .padding(.vertical, 10)
-        .background(AppTheme.backgroundSecondary)
+        .floatingPill()
     }
 }

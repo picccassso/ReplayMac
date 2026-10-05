@@ -494,6 +494,7 @@ public final class StatusItemController: NSObject, NSMenuDelegate, @unchecked Se
 }
 
 private struct StatusBadgeView: View {
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @ObservedObject var state: MenuBarState
     let onWidthChange: (CGFloat) -> Void
 
@@ -563,12 +564,12 @@ private struct StatusBadgeView: View {
             }
         )
         .onPreferenceChange(StatusWidthPreferenceKey.self, perform: onWidthChange)
-        .animation(.easeOut(duration: 0.2), value: state.saveStatus)
-        .animation(.easeOut(duration: 0.2), value: state.isRecording)
-        .animation(.easeOut(duration: 0.2), value: state.isSessionRecording)
-        .animation(.easeOut(duration: 0.2), value: state.bufferedSeconds)
-        .animation(.easeOut(duration: 0.2), value: state.isMicrophoneMuted)
-        .animation(.easeOut(duration: 0.2), value: state.isSystemAudioMuted)
+        .animation(reduceMotion ? nil : .easeOut(duration: 0.2), value: state.saveStatus)
+        .animation(reduceMotion ? nil : .easeOut(duration: 0.2), value: state.isRecording)
+        .animation(reduceMotion ? nil : .easeOut(duration: 0.2), value: state.isSessionRecording)
+        .animation(reduceMotion ? nil : .easeOut(duration: 0.2), value: state.bufferedSeconds)
+        .animation(reduceMotion ? nil : .easeOut(duration: 0.2), value: state.isMicrophoneMuted)
+        .animation(reduceMotion ? nil : .easeOut(duration: 0.2), value: state.isSystemAudioMuted)
     }
 
     private var backgroundColor: Color {

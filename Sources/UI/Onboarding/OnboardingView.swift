@@ -28,6 +28,7 @@ public struct OnboardingView: View {
     @Default(.autoStartRecordingOnLaunch) var autoStartRecordingOnLaunch
     @Default(.showNotificationOnSave) var showNotificationOnSave
 
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var step: Step = .welcome
     @State private var launchAtLoginError: String?
     @State private var hasSelectedOutputDirectory = false
@@ -272,7 +273,7 @@ public struct OnboardingView: View {
     private var footer: some View {
         HStack {
             Button("Back") {
-                withAnimation(.easeOut(duration: 0.15)) {
+                withAnimation(reduceMotion ? nil : .easeOut(duration: 0.15)) {
                     step = Step(rawValue: step.rawValue - 1) ?? .welcome
                 }
             }
@@ -295,7 +296,7 @@ public struct OnboardingView: View {
                 if step == .finish {
                     onFinish()
                 } else {
-                    withAnimation(.easeOut(duration: 0.15)) {
+                    withAnimation(reduceMotion ? nil : .easeOut(duration: 0.15)) {
                         step = Step(rawValue: step.rawValue + 1) ?? .finish
                     }
                 }

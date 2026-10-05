@@ -64,6 +64,7 @@ public struct SettingsView: View {
     @State var bitrateSliderValue = Defaults[.bitrateMbps]
     @State var bitrateSliderIsEditing = false
     @State var isApplyingQualityPreset = false
+    @State private var pageWidth: CGFloat = 0
     @Binding var selectedTab: SettingsTab
     var isVisible: Bool
 
@@ -71,6 +72,8 @@ public struct SettingsView: View {
         self._selectedTab = selectedTab
         self.isVisible = isVisible
     }
+
+    private var readableMargin: CGFloat { max(0, (pageWidth - 760) / 2) }
 
     public var body: some View {
         Group {
@@ -83,7 +86,10 @@ public struct SettingsView: View {
             case .advanced: advancedTab
             }
         }
-        .frame(maxWidth: 820)
+        // The form fills the page so it scrolls under the toolbar with its
+        // scroller at the window edge; margins keep rows a readable width.
+        .contentMargins(.horizontal, readableMargin, for: .scrollContent)
+        .onGeometryChange(for: CGFloat.self, of: \.size.width) { pageWidth = $0 }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
         .onChange(of: isVisible) { _, _ in refreshAudioLevelPreview() }
         .onReceive(NSWorkspace.shared.notificationCenter.publisher(for: NSWorkspace.didLaunchApplicationNotification)) { _ in

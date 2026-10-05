@@ -45,7 +45,6 @@ final class MainWindowStateTests: XCTestCase {
             XCTAssertFalse(state.routeLibraryShortcut(windowIsFrontmost: true))
             XCTAssertTrue(state.isLibraryFrontmost)
             XCTAssertTrue(state.editor === editor)
-            XCTAssertTrue(state.sidebarVisible)
             state.discardEditor()
         }
     }
@@ -63,10 +62,8 @@ final class MainWindowStateTests: XCTestCase {
             editor.cropEnabled = true
             editor.exportQuality = .compact
             XCTAssertTrue(state.isEditing)
-            XCTAssertFalse(state.sidebarVisible)
             state.select(.video)
             state.windowDidHide()
-            XCTAssertTrue(state.sidebarVisible)
             XCTAssertFalse(editor.isVisible)
             state.select(.library)
             XCTAssertTrue(state.isLibraryFrontmost)
@@ -79,21 +76,6 @@ final class MainWindowStateTests: XCTestCase {
             XCTAssertEqual(editor.trimEnd, 12)
             XCTAssertTrue(editor.cropEnabled)
             XCTAssertEqual(editor.exportQuality, .compact)
-            state.discardEditor()
-        }
-    }
-
-    @MainActor
-    func testSidebarReturnsToBrowsingPreference() {
-        withState { state, defaults in
-            state.toggleSidebar()
-            XCTAssertFalse(state.sidebarVisible)
-            state.openEditor(URL(fileURLWithPath: "/private/tmp/first.mp4"))
-            state.toggleSidebar()
-            XCTAssertTrue(state.sidebarVisible)
-            state.select(.library)
-            XCTAssertFalse(state.sidebarVisible)
-            XCTAssertFalse(MainWindowState(defaults: defaults).sidebarVisible)
             state.discardEditor()
         }
     }

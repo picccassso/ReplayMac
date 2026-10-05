@@ -9,37 +9,31 @@ extension SettingsView {
         Form {
             Section {
                 Stepper(value: $bufferDurationSeconds, in: 15...300, step: 5) {
-                    HStack(spacing: 6) {
-                        Image(systemName: "timer")
-                            .foregroundStyle(AppTheme.accent)
-                        Text("Buffer duration: \(bufferDurationSeconds) seconds")
-                    }
+                    Text("Buffer duration: \(bufferDurationSeconds) seconds")
                 }
             } header: {
-                sectionHeader(icon: "clock.arrow.circlepath", title: "Replay")
+                Text("Replay")
             }
 
             Section {
-                HStack(alignment: .firstTextBaseline, spacing: 8) {
-                    Text("Output directory")
-                    Spacer()
-                    Text(
-                        outputDirectoryPath.isEmpty
-                            ? "No folder selected"
-                            : UserHome.abbreviateForDisplay(outputDirectoryPath)
-                    )
-                        .lineLimit(1)
-                        .truncationMode(.middle)
-                        .foregroundStyle(AppTheme.textSecondary)
-                        .help(outputDirectoryPath.isEmpty ? "No folder selected" : outputDirectoryPath)
+                LabeledContent("Output directory") {
+                    HStack(spacing: 10) {
+                        Text(
+                            outputDirectoryPath.isEmpty
+                                ? "No folder selected"
+                                : UserHome.abbreviateForDisplay(outputDirectoryPath)
+                        )
+                            .lineLimit(1)
+                            .truncationMode(.middle)
+                            .foregroundStyle(AppTheme.textSecondary)
+                            .help(outputDirectoryPath.isEmpty ? "No folder selected" : outputDirectoryPath)
+                        Button("Choose…") {
+                            chooseOutputDirectory()
+                        }
+                    }
                 }
-
-                Button("Choose Folder…") {
-                    chooseOutputDirectory()
-                }
-                .buttonStyle(AccentButtonStyle())
             } header: {
-                sectionHeader(icon: "folder", title: "Storage")
+                Text("Storage")
             }
 
             Section {
@@ -94,7 +88,7 @@ extension SettingsView {
                         && clipTimeFormat == FilenameTemplate.defaultTimeFormat
                 )
             } header: {
-                sectionHeader(icon: "textformat", title: "Clip File Names")
+                Text("Clip File Names")
             } footer: {
                 Text("Applied to new clips. \"\(FilenameTemplate.tokens[0].token)\" uses the app that was in front when you saved.")
                     .font(.caption)
@@ -107,7 +101,7 @@ extension SettingsView {
                     .disabled(autoRecordGamesEnabled)
                 Toggle("Resume recording after wake", isOn: $resumeRecordingAfterWake)
             } header: {
-                sectionHeader(icon: "power", title: "Startup")
+                Text("Startup")
             } footer: {
                 if autoRecordGamesEnabled {
                     Text("Auto-start is off while “Automatically record while playing games” is on — the app stays idle and records only when a game is running.")
