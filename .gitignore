@@ -25,3 +25,7 @@ scripts/
 !scripts/
 scripts/*
 !scripts/install-dev.sh
+
+# Local agent and editor workspaces
+.agents/
+.obsidian/
