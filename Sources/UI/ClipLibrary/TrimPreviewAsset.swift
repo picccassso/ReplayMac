@@ -22,6 +22,15 @@ enum TrimPreviewAssetError: LocalizedError {
 /// AVPlayerView then reports the selection's duration instead of the full clip
 /// duration, so its native controls agree with the cyan trim timeline.
 enum TrimPreviewAsset {
+    /// Restore the full source before an endpoint is moved outside the old selection.
+    @MainActor
+    static func restoreSource(to player: AVPlayer, url: URL) {
+        player.pause()
+        if player.currentItem?.asset is AVComposition {
+            player.replaceCurrentItem(with: AVPlayerItem(url: url))
+        }
+    }
+
     nonisolated static func make(
         from asset: AVURLAsset,
         startSeconds: Double,

@@ -18,7 +18,6 @@ public struct ClipLibraryView: View {
     @State private var bulkTagDraft = ""
     @State private var cleanupSheetPresented = false
     @State private var previewURL: URL?
-    @State private var trimURL: URL?
     @State private var metadataDraft = ClipUserMetadata.empty
     @State private var renameDraft = ""
     @State private var copiedFilePath: String?
@@ -99,13 +98,6 @@ public struct ClipLibraryView: View {
         .sheet(isPresented: previewSheetBinding) {
             if let previewURL {
                 ClipPreviewView(url: previewURL)
-            }
-        }
-        .sheet(isPresented: trimSheetBinding) {
-            if let trimURL {
-                ClipTrimView(url: trimURL) {
-                    Task { await model.reload() }
-                }
             }
         }
         .sheet(isPresented: $cleanupSheetPresented) {
@@ -289,7 +281,7 @@ public struct ClipLibraryView: View {
                     .help("Quick preview")
 
                     IconActionButton(icon: "scissors", color: AppTheme.accentSecondary) {
-                        trimURL = row.info.fileURL
+                        openTrim(row.info.fileURL)
                     }
                     .help("Trim & Export")
 
@@ -322,7 +314,7 @@ public struct ClipLibraryView: View {
             if !targets.isEmpty {
                 if let row = targets.first, targets.count == 1 {
                     Button("Quick Preview") { previewURL = row.info.fileURL }
-                    Button("Trim & Export…") { trimURL = row.info.fileURL }
+                    Button("Trim & Export…") { openTrim(row.info.fileURL) }
                     Button("Copy File") { copyFile(row.info.fileURL) }
                 }
                 Button("Reveal in Finder") {
@@ -377,7 +369,7 @@ public struct ClipLibraryView: View {
                 .controlSize(.small)
 
                 Button {
-                    trimURL = row.info.fileURL
+                    openTrim(row.info.fileURL)
                 } label: {
                     HStack(spacing: 6) {
                         Image(systemName: "scissors")
@@ -675,16 +667,12 @@ public struct ClipLibraryView: View {
         )
     }
 
-    private var trimSheetBinding: Binding<Bool> {
-        Binding(
-            get: { trimURL != nil },
-            set: { isPresented in
-                if !isPresented {
-                    trimURL = nil
-                }
-            }
-        )
+    private func openTrim(_ url: URL) {
+        ClipTrimWindowController.open(url: url) {
+            Task { await model.reload() }
+        }
     }
+
 }
 
 private enum ClipSortMode: String, CaseIterable, Identifiable {
@@ -1184,14 +1172,14 @@ private enum ClipSharing {
 
 /// An audio track a clip player can solo, identified by its persistent track
 /// ID in the file. `allTracksID` is a sentinel for "play every track".
-private struct AudioTrackChoice: Identifiable, Hashable {
+struct AudioTrackChoice: Identifiable, Hashable {
     static let allTracksID: CMPersistentTrackID = -1
 
     let id: CMPersistentTrackID
     let label: String
 }
 
-private enum ClipAudioTracks {
+enum ClipAudioTracks {
     /// Returns selectable audio tracks for the clip, or `[]` when the clip has
     /// zero or one audio track (nothing to choose between).
     ///
@@ -1356,599 +1344,7 @@ private struct ClipPreviewView: View {
     }
 }
 
-private struct ClipTrimView: View {
-    let url: URL
-    let onExport: () -> Void
-
-    @Environment(\.dismiss) private var dismiss
-    @State private var player: AVPlayer?
-    @State private var duration: Double = 0
-    @State private var trimStart: Double = 0
-    @State private var trimEnd: Double = 0
-    @State private var isExporting = false
-    @State private var isExportingGIF = false
-    @State private var gifWidth: GIFWidth = .medium
-    @State private var errorMessage: String?
-    @State private var audioTrackChoices: [AudioTrackChoice] = []
-    @State private var selectedAudioTrackID = AudioTrackChoice.allTracksID
-    @State private var cropEnabled = false
-    @State private var cropRect = NormalizedVideoCrop.fullFrame.rect
-    @State private var cropAspect: CropAspectPreset = .free
-    @State private var videoDisplaySize = CGSize(width: 16, height: 9)
-    @State private var activeExportSession: AVAssetExportSession?
-    @State private var activeCustomExporter: TrimVideoTranscoder?
-    @State private var exportResolution: TrimExportResolution = .source
-    @State private var exportQuality: TrimExportQuality = .source
-    @State private var sourceTotalBitrateMbps: Double = 0
-    @State private var sourceAudioTrackCount = 0
-    @State private var previewSourceStart: Double = 0
-    @State private var previewBuildID = UUID()
-
-    private var isBusy: Bool { isExporting || isExportingGIF }
-    private var activeCrop: NormalizedVideoCrop? {
-        guard cropEnabled else { return nil }
-        let crop = NormalizedVideoCrop(cropRect)
-        return crop.isFullFrame ? nil : crop
-    }
-    private var exportInputSize: CGSize {
-        guard let crop = activeCrop else { return videoDisplaySize }
-        return VideoCropper.pixelRect(for: crop, displaySize: videoDisplaySize).size
-    }
-    private var exportOutputSize: CGSize {
-        exportResolution.outputSize(for: exportInputSize)
-    }
-    private var exportedAudioTrackCount: Int {
-        selectedAudioTrackID == AudioTrackChoice.allTracksID
-            ? sourceAudioTrackCount
-            : min(1, sourceAudioTrackCount)
-    }
-    private var estimatedExportBytes: Int64 {
-        TrimExportEstimate.bytes(
-            durationSeconds: max(0, trimEnd - trimStart),
-            quality: exportQuality,
-            outputSize: exportOutputSize,
-            audioTrackCount: exportedAudioTrackCount,
-            sourceTotalBitrateMbps: sourceTotalBitrateMbps
-        )
-    }
-
-    var body: some View {
-        VStack(spacing: 14) {
-            if let player {
-                ZStack {
-                    AVPlayerViewRepresentable(player: player)
-                    if cropEnabled {
-                        VideoCropSelectionView(
-                            selection: $cropRect,
-                            videoSize: videoDisplaySize,
-                            onManualChange: { cropAspect = .free }
-                        )
-                    }
-                }
-                    .frame(minWidth: 720, minHeight: 405)
-                    .clipShape(RoundedRectangle(cornerRadius: AppTheme.cornerRadiusMedium, style: .continuous))
-                    .shadow(color: .black.opacity(0.12), radius: 12, x: 0, y: 6)
-            } else {
-                ZStack {
-                    AppTheme.backgroundSecondary
-                    ProgressView("Loading clip…")
-                }
-                .frame(minWidth: 720, minHeight: 405)
-                .clipShape(RoundedRectangle(cornerRadius: AppTheme.cornerRadiusMedium, style: .continuous))
-            }
-
-            TrimRangeSelector(
-                start: $trimStart,
-                end: $trimEnd,
-                bounds: 0...max(duration, 0.1),
-                onSeek: seek,
-                onEditingChanged: { isEditing in
-                    if !isEditing {
-                        playSelectedRange()
-                    }
-                }
-            )
-            .padding(.horizontal, 12)
-            .padding(.vertical, 10)
-            .background {
-                RoundedRectangle(cornerRadius: AppTheme.cornerRadiusSmall, style: .continuous)
-                    .fill(AppTheme.backgroundSecondary)
-            }
-            .disabled(isBusy)
-            .help("Drag either handle to choose the portion of the clip to export")
-
-            cropControls
-
-            exportControls
-
-            if !audioTrackChoices.isEmpty {
-                AudioTrackPickerView(
-                    choices: audioTrackChoices,
-                    selection: $selectedAudioTrackID,
-                    help: "Choose which audio track you hear. Export Trim keeps only the selected track (All Tracks keeps every track)."
-                )
-            }
-
-            if let errorMessage {
-                Label(errorMessage, systemImage: "exclamationmark.triangle.fill")
-                    .foregroundStyle(.orange)
-                    .font(.system(size: 12, design: .rounded))
-            }
-
-            HStack(spacing: 8) {
-                Text("GIF size")
-                    .font(.system(size: 12, weight: .medium, design: .rounded))
-                    .foregroundStyle(AppTheme.textSecondary)
-                Picker("GIF size", selection: $gifWidth) {
-                    ForEach(GIFWidth.allCases) { width in
-                        Text(width.title).tag(width)
-                    }
-                }
-                .pickerStyle(.segmented)
-                .labelsHidden()
-                .frame(maxWidth: 260)
-                .disabled(isBusy)
-                Spacer()
-            }
-
-            HStack {
-                Text(url.lastPathComponent)
-                    .font(.system(size: 12, weight: .medium, design: .rounded))
-                    .foregroundStyle(AppTheme.textSecondary)
-                    .lineLimit(1)
-
-                Spacer()
-
-                if isExporting && (activeExportSession != nil || activeCustomExporter != nil) {
-                    // An escape hatch while an export is running, so a wedged
-                    // export never leaves the sheet with no way out.
-                    Button("Cancel Export", role: .cancel) {
-                        activeExportSession?.cancelExport()
-                        activeCustomExporter?.cancel()
-                    }
-                    .help("Stop the export in progress")
-                }
-
-                Button("Cancel") {
-                    dismiss()
-                }
-                .disabled(isBusy)
-
-                Button {
-                    Task { await exportGIF() }
-                } label: {
-                    if isExportingGIF {
-                        ProgressView()
-                            .controlSize(.small)
-                    } else {
-                        Label("Export GIF", systemImage: "photo.stack")
-                    }
-                }
-                .buttonStyle(.bordered)
-                .controlSize(.regular)
-                .disabled(isBusy || trimEnd <= trimStart)
-                .help("Export the selected range as a looping GIF (no audio)")
-
-                Button {
-                    Task { await exportTrimmedClip() }
-                } label: {
-                    if isExporting {
-                        ProgressView()
-                            .controlSize(.small)
-                    } else {
-                        Label(
-                            activeCrop == nil ? "Export Trim" : "Export Trim & Crop",
-                            systemImage: "square.and.arrow.down"
-                        )
-                    }
-                }
-                .buttonStyle(.borderedProminent)
-                .tint(AppTheme.accent)
-                .disabled(isBusy || trimEnd <= trimStart)
-            }
-        }
-        .padding(16)
-        .task {
-            await loadClip()
-        }
-        .onChange(of: selectedAudioTrackID) { _, newValue in
-            ClipAudioTracks.apply(selection: newValue, choices: audioTrackChoices, to: player?.currentItem)
-        }
-        .onChange(of: cropAspect) { _, newValue in
-            guard newValue != .free else { return }
-            cropRect = newValue.cropRect(for: videoDisplaySize)
-        }
-        .onChange(of: exportResolution) { _, newValue in
-            if newValue != .source && exportQuality == .source {
-                exportQuality = .balanced
-            }
-        }
-        .onChange(of: exportQuality) { _, newValue in
-            if newValue == .source && exportResolution != .source {
-                exportResolution = .source
-            }
-        }
-        .onReceive(NotificationCenter.default.publisher(for: .AVPlayerItemDidPlayToEndTime)) { notification in
-            guard let endedItem = notification.object as? AVPlayerItem,
-                  endedItem === player?.currentItem else {
-                return
-            }
-            loopSelectedPreview()
-        }
-        .onDisappear {
-            previewBuildID = UUID()
-            player?.pause()
-            player = nil
-        }
-    }
-
-    private func loadClip() async {
-        let asset = AVURLAsset(url: url)
-        let loadedDuration = (try? await asset.load(.duration)) ?? .zero
-        let seconds = max(CMTimeGetSeconds(loadedDuration), 0)
-        let choices = await ClipAudioTracks.choices(for: asset)
-        let audioTrackCount = ((try? await asset.loadTracks(withMediaType: .audio)) ?? []).count
-        let displaySize = (try? await VideoCropper.geometry(for: asset).displaySize)
-            ?? CGSize(width: 16, height: 9)
-        let sourceBitrateMbps: Double
-        if seconds > 0,
-           let fileSize = try? url.resourceValues(forKeys: [.fileSizeKey]).fileSize,
-           fileSize > 0 {
-            sourceBitrateMbps = Double(fileSize) * 8 / seconds / 1_000_000
-        } else {
-            sourceBitrateMbps = 0
-        }
-
-        await MainActor.run {
-            duration = seconds
-            trimStart = 0
-            trimEnd = seconds
-            audioTrackChoices = choices
-            sourceAudioTrackCount = audioTrackCount
-            sourceTotalBitrateMbps = sourceBitrateMbps
-            videoDisplaySize = displaySize
-            previewSourceStart = 0
-            let newPlayer = AVPlayer(playerItem: AVPlayerItem(asset: asset))
-            ClipAudioTracks.apply(selection: selectedAudioTrackID, choices: choices, to: newPlayer.currentItem)
-            player = newPlayer
-            newPlayer.play()
-        }
-    }
-
-    private func exportTrimmedClip() async {
-        isExporting = true
-        errorMessage = nil
-        previewBuildID = UUID()
-        // Stop the preview so the export isn't decoding the same file as the
-        // player, and so playback isn't left running under the save panel.
-        player?.pause()
-        defer { isExporting = false }
-
-        do {
-            let asset = AVURLAsset(url: url)
-            let crop = activeCrop
-
-            // A solo track selection carries over to the export: the other
-            // audio tracks are dropped from the output file.
-            let soloChoice = audioTrackChoices.first { $0.id == selectedAudioTrackID }
-            let exportAsset: AVAsset
-            if let soloChoice {
-                exportAsset = try await ClipAudioTracks.soloComposition(from: asset, audioTrackID: soloChoice.id)
-            } else {
-                exportAsset = asset
-            }
-
-            var suffixParts = ["Trimmed"]
-            if crop != nil {
-                suffixParts.append("Cropped")
-            }
-            if let soloChoice {
-                suffixParts.append(soloChoice.label.filter { !$0.isWhitespace })
-            }
-            if let resolutionLabel = exportResolution.filenameLabel {
-                suffixParts.append(resolutionLabel)
-            }
-            if let qualityLabel = exportQuality.filenameLabel {
-                suffixParts.append(qualityLabel)
-            }
-            let suffix = suffixParts.joined(separator: "_")
-            let suggestedURL = try ClipMetadata.generateUniqueFileURL(
-                in: url.deletingLastPathComponent(),
-                suffix: suffix
-            )
-            guard let outputURL = await ExportDestinationPicker.chooseDestination(
-                suggestedURL: suggestedURL,
-                contentType: .mpeg4Movie,
-                title: "Export Trimmed Clip"
-            ) else {
-                return
-            }
-            let start = CMTime(seconds: trimStart, preferredTimescale: 600)
-            let end = CMTime(seconds: trimEnd, preferredTimescale: 600)
-            let range = CMTimeRangeFromTimeToTime(start: start, end: end)
-
-            let needsControlledTranscode = exportResolution != .source || exportQuality != .source
-            if needsControlledTranscode {
-                let outputSize = exportOutputSize
-                let selectedQuality = exportQuality == .source ? TrimExportQuality.balanced : exportQuality
-                guard let videoBitrateMbps = selectedQuality.videoBitrateMbps(for: outputSize) else {
-                    throw TrimExportError.cannotCreateSession
-                }
-                let composition = try await VideoCropper.videoComposition(
-                    for: exportAsset,
-                    crop: crop ?? .fullFrame,
-                    outputSize: outputSize
-                )
-                let exporter = TrimVideoTranscoder()
-                activeCustomExporter = exporter
-                defer { activeCustomExporter = nil }
-                try await exporter.export(
-                    asset: exportAsset,
-                    timeRange: range,
-                    videoComposition: composition,
-                    outputSize: outputSize,
-                    videoBitrateMbps: videoBitrateMbps,
-                    to: outputURL
-                )
-            } else {
-                let preset: String
-                if crop != nil {
-                    preset = try await HDRVideoExport.transcodePreset(for: exportAsset)
-                } else if await AVAssetExportSession.compatibility(
-                    ofExportPreset: AVAssetExportPresetPassthrough,
-                    with: exportAsset,
-                    outputFileType: .mp4
-                ) {
-                    preset = AVAssetExportPresetPassthrough
-                } else {
-                    preset = try await HDRVideoExport.transcodePreset(for: exportAsset)
-                }
-
-                guard let exportSession = AVAssetExportSession(asset: exportAsset, presetName: preset) else {
-                    throw TrimExportError.cannotCreateSession
-                }
-
-                exportSession.timeRange = range
-                if let crop {
-                    exportSession.videoComposition = try await VideoCropper.videoComposition(
-                        for: exportAsset,
-                        crop: crop
-                    )
-                }
-                exportSession.shouldOptimizeForNetworkUse = true
-                activeExportSession = exportSession
-                defer { activeExportSession = nil }
-                try await ExportWatchdog.runExport(exportSession, to: outputURL, as: .mp4)
-            }
-
-            onExport()
-            dismiss()
-        } catch is CancellationError {
-            errorMessage = nil
-        } catch {
-            errorMessage = error.localizedDescription
-        }
-
-    }
-
-    private func exportGIF() async {
-        isExportingGIF = true
-        errorMessage = nil
-        previewBuildID = UUID()
-        player?.pause()
-        defer { isExportingGIF = false }
-
-        do {
-            let crop = activeCrop
-            let suggestedURL = GIFExporter.uniqueOutputURL(basedOn: url)
-            guard let outputURL = await ExportDestinationPicker.chooseDestination(
-                suggestedURL: suggestedURL,
-                contentType: .gif,
-                title: "Export GIF"
-            ) else {
-                return
-            }
-            try await GIFExporter.export(
-                sourceURL: url,
-                startSeconds: trimStart,
-                endSeconds: trimEnd,
-                maxWidth: gifWidth.points,
-                crop: crop,
-                to: outputURL
-            )
-
-            // GIFs aren't shown in the library (it lists MP4s only), so reveal
-            // the exported file in Finder instead of reloading the list.
-            NSWorkspace.shared.activateFileViewerSelecting([outputURL])
-            dismiss()
-        } catch {
-            errorMessage = error.localizedDescription
-        }
-
-    }
-
-    private func seek(to seconds: Double) {
-        let previewSeconds = max(0, seconds - previewSourceStart)
-        let time = CMTime(seconds: previewSeconds, preferredTimescale: 600)
-        player?.seek(to: time, toleranceBefore: .zero, toleranceAfter: .zero)
-    }
-
-    /// Replaces the full source item with a zero-based composition of exactly
-    /// the cyan range. This makes AVPlayerView's own duration and scrubber agree
-    /// with the selected length instead of continuing to show the full clip.
-    private func playSelectedRange() {
-        guard trimEnd > trimStart else { return }
-        let selectedStart = trimStart
-        let selectedEnd = trimEnd
-        let buildID = UUID()
-        previewBuildID = buildID
-
-        Task {
-            do {
-                let previewAsset = try await TrimPreviewAsset.make(
-                    from: AVURLAsset(url: url),
-                    startSeconds: selectedStart,
-                    endSeconds: selectedEnd
-                )
-                guard previewBuildID == buildID, let player else { return }
-
-                let item = AVPlayerItem(asset: previewAsset)
-                player.pause()
-                player.replaceCurrentItem(with: item)
-                previewSourceStart = selectedStart
-                ClipAudioTracks.apply(
-                    selection: selectedAudioTrackID,
-                    choices: audioTrackChoices,
-                    to: item
-                )
-                errorMessage = nil
-                player.play()
-            } catch {
-                guard previewBuildID == buildID else { return }
-                errorMessage = error.localizedDescription
-            }
-        }
-    }
-
-    private func loopSelectedPreview() {
-        player?.seek(to: .zero, toleranceBefore: .zero, toleranceAfter: .zero)
-        player?.play()
-    }
-
-    private var cropControls: some View {
-        HStack(spacing: 8) {
-            Toggle(isOn: $cropEnabled) {
-                Label("Crop", systemImage: "crop")
-                    .font(.system(size: 12, weight: .medium, design: .rounded))
-            }
-            .toggleStyle(.switch)
-            .controlSize(.small)
-            .disabled(isBusy)
-            .help("Crop both MP4 and GIF exports to the selected area")
-
-            if cropEnabled {
-                Picker("Crop aspect ratio", selection: $cropAspect) {
-                    ForEach(CropAspectPreset.allCases) { preset in
-                        Text(preset.title).tag(preset)
-                    }
-                }
-                .pickerStyle(.segmented)
-                .labelsHidden()
-                .frame(maxWidth: 310)
-                .disabled(isBusy)
-
-                Button("Reset") {
-                    cropAspect = .free
-                    cropRect = NormalizedVideoCrop.fullFrame.rect
-                }
-                .controlSize(.small)
-                .disabled(isBusy)
-
-                Text("\(Int((cropRect.width * 100).rounded()))% × \(Int((cropRect.height * 100).rounded()))%")
-                    .font(.system(size: 11, design: .monospaced))
-                    .foregroundStyle(AppTheme.textSecondary)
-            }
-
-            Spacer()
-        }
-    }
-
-    private var exportControls: some View {
-        VStack(spacing: 8) {
-            HStack(spacing: 8) {
-                Label("Resolution", systemImage: "rectangle.arrowtriangle.2.outward")
-                    .font(.system(size: 12, weight: .medium, design: .rounded))
-                    .foregroundStyle(AppTheme.textSecondary)
-                    .frame(width: 82, alignment: .leading)
-                Picker("Export resolution", selection: $exportResolution) {
-                    ForEach(TrimExportResolution.allCases) { resolution in
-                        Text(resolution.title).tag(resolution)
-                    }
-                }
-                .pickerStyle(.segmented)
-                .labelsHidden()
-                .frame(maxWidth: 320)
-                .disabled(isBusy)
-
-                Text("\(Int(exportOutputSize.width)) × \(Int(exportOutputSize.height))")
-                    .font(.system(size: 11, design: .monospaced))
-                    .foregroundStyle(AppTheme.textSecondary)
-
-                Spacer()
-            }
-
-            HStack(spacing: 8) {
-                Label("Quality", systemImage: "slider.horizontal.3")
-                    .font(.system(size: 12, weight: .medium, design: .rounded))
-                    .foregroundStyle(AppTheme.textSecondary)
-                    .frame(width: 82, alignment: .leading)
-                Picker("Export quality", selection: $exportQuality) {
-                    ForEach(TrimExportQuality.allCases) { quality in
-                        Text(quality.title)
-                            .tag(quality)
-                            .disabled(quality == .source && exportResolution != .source)
-                    }
-                }
-                .pickerStyle(.segmented)
-                .labelsHidden()
-                .frame(maxWidth: 420)
-                .disabled(isBusy)
-
-                if let bitrate = exportQuality.videoBitrateMbps(for: exportOutputSize) {
-                    Text("HEVC • \(bitrate, specifier: "%.2g") Mbps")
-                        .font(.system(size: 11, design: .monospaced))
-                        .foregroundStyle(AppTheme.textSecondary)
-                } else {
-                    Text("Fast passthrough when possible")
-                        .font(.system(size: 11, design: .rounded))
-                        .foregroundStyle(AppTheme.textSecondary)
-                }
-
-                Spacer()
-            }
-
-            HStack(spacing: 8) {
-                Image(systemName: "externaldrive")
-                    .foregroundStyle(AppTheme.textSecondary)
-                if estimatedExportBytes > 0 {
-                    Text("Estimated size: ~\(estimatedSizeLabel)")
-                        .font(.system(size: 12, weight: .medium, design: .rounded))
-                    Text(discordEstimateLabel)
-                        .font(.system(size: 12, weight: .semibold, design: .rounded))
-                        .foregroundStyle(
-                            estimatedExportBytes <= TrimExportEstimate.discordLimitBytes
-                                ? .green
-                                : .orange
-                        )
-                } else {
-                    Text("Estimated size unavailable")
-                        .font(.system(size: 12, design: .rounded))
-                        .foregroundStyle(AppTheme.textSecondary)
-                }
-                Spacer()
-                Text("Estimate includes audio and container headroom")
-                    .font(.system(size: 10, design: .rounded))
-                    .foregroundStyle(AppTheme.textSecondary)
-            }
-        }
-    }
-
-    private var estimatedSizeLabel: String {
-        ByteCountFormatter.string(
-            fromByteCount: estimatedExportBytes,
-            countStyle: .decimal
-        )
-    }
-
-    private var discordEstimateLabel: String {
-        estimatedExportBytes <= TrimExportEstimate.discordLimitBytes
-            ? "• under Discord 100 MB"
-            : "• over Discord 100 MB"
-    }
-
-}
-
-private enum TrimExportError: LocalizedError {
+enum TrimExportError: LocalizedError {
     case cannotCreateSession
     case cannotBuildComposition
     case exportFailed
@@ -1975,7 +1371,7 @@ private final class ExportSessionBox: @unchecked Sendable {
     init(_ session: AVAssetExportSession) { self.session = session }
 }
 
-private enum ExportWatchdog {
+enum ExportWatchdog {
     /// Seconds of zero progress before an export is treated as wedged.
     static let stallTimeout = 90
 

@@ -3,6 +3,8 @@ import CoreGraphics
 @preconcurrency import AVFoundation
 import CoreVideo
 import ImageIO
+import AppKit
+import QuartzCore
 @testable import UI
 
 final class VideoCropTests: XCTestCase {
@@ -255,10 +257,144 @@ final class VideoCropTests: XCTestCase {
         XCTAssertEqual(previewTracks.count, 1)
         XCTAssertEqual(previewTrackRange?.start, .zero)
         XCTAssertEqual(previewTracks.first?.trackID, sourceTracks.first?.trackID)
+
+        let player = AVPlayer(playerItem: AVPlayerItem(asset: preview))
+        TrimPreviewAsset.restoreSource(to: player, url: sourceURL)
+        let editingAsset = try XCTUnwrap(player.currentItem?.asset)
+        let editingDuration = try await editingAsset.load(.duration)
+        XCTAssertGreaterThan(editingDuration.seconds, 0.04)
+        XCTAssertEqual((editingAsset as? AVURLAsset)?.url, sourceURL)
+        // The new item contains the source before and after the prior selection.
+        XCTAssertGreaterThan(editingDuration.seconds, 0.05)
+        let expandedPreview = try await TrimPreviewAsset.make(
+            from: source, startSeconds: 0, endSeconds: 0.05)
+        let expandedDuration = try await expandedPreview.load(.duration)
+        XCTAssertEqual(expandedDuration.seconds, 0.05, accuracy: 0.001)
     }
 
     @MainActor
-    private func writeTestVideo(to url: URL, size: CGSize) async throws {
+    func testShortGIFEstimateMatchesActualCroppedExportAndCancellation() async throws {
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("ReplayCapGIFEstimateTests-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let sourceURL = directory.appendingPathComponent("source.mp4")
+        let outputURL = directory.appendingPathComponent("sample.gif")
+        try await writeTestVideo(to: sourceURL, size: CGSize(width: 160, height: 120))
+        let crop = NormalizedVideoCrop(CGRect(x: 0, y: 0, width: 0.5, height: 1))
+        let estimate = try await GIFExporter.estimateBytes(
+            sourceURL: sourceURL, startSeconds: 0, endSeconds: 0.03, maxWidth: 40, crop: crop)
+        try await GIFExporter.export(sourceURL: sourceURL, startSeconds: 0, endSeconds: 0.03,
+                                     maxWidth: 40, crop: crop, to: outputURL)
+        let actual = try outputURL.resourceValues(forKeys: [.fileSizeKey]).fileSize
+        XCTAssertEqual(estimate, Int64(try XCTUnwrap(actual)))
+        let cancelled = Task {
+            try await GIFExporter.estimateBytes(sourceURL: sourceURL, startSeconds: 0, endSeconds: 0.03)
+        }
+        cancelled.cancel()
+        do {
+            _ = try await cancelled.value
+            XCTFail("Cancelled GIF estimation must not produce a result")
+        } catch is CancellationError {
+        }
+    }
+
+    @MainActor
+    func testCropPlayerCanReleaseItsLayerRepeatedly() async throws {
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("ReplayCapPlayerTeardownTests-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let sourceURL = directory.appendingPathComponent("source.mp4")
+        try await writeTestVideo(to: sourceURL, size: CGSize(width: 160, height: 120))
+        for _ in 0..<3 {
+            autoreleasepool {
+                let view = TrimNativePlayerView(frame: NSRect(x: 0, y: 0, width: 320, height: 200))
+                view.player = AVPlayer(url: sourceURL)
+                view.layoutSubtreeIfNeeded()
+                _ = view.videoBounds
+                view.player = nil
+            }
+            // AVPlayerLayer deallocation occurs during the transaction flush. An
+            // external dependent-key observer previously caused an exception here.
+            CATransaction.flush()
+        }
+    }
+
+    @MainActor
+    func testGIFKeepsRepeatedFramesAndSampledDuration() async throws {
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("ReplayCapGIFTimingTests-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let source = directory.appendingPathComponent("source.mp4")
+        let output = directory.appendingPathComponent("output.gif")
+        try await writeTestVideo(to: source, size: CGSize(width: 160, height: 120), frameCount: 240)
+        try await GIFExporter.export(sourceURL: source, startSeconds: 0, endSeconds: 8,
+                                     maxWidth: 160, to: output)
+        let gif = try XCTUnwrap(CGImageSourceCreateWithURL(output as CFURL, nil))
+        XCTAssertEqual(CGImageSourceGetCount(gif), 96)
+        var duration = 0.0
+        for index in 0..<CGImageSourceGetCount(gif) {
+            let properties = try XCTUnwrap(CGImageSourceCopyPropertiesAtIndex(gif, index, nil) as? [String: Any])
+            let timing = try XCTUnwrap(properties[kCGImagePropertyGIFDictionary as String] as? [String: Any])
+            duration += try XCTUnwrap(timing[kCGImagePropertyGIFUnclampedDelayTime as String] as? Double)
+        }
+        // GIF stores centiseconds; the 12 fps target rounds to 0.08 s per frame.
+        XCTAssertEqual(duration, 7.68, accuracy: 0.001)
+    }
+
+    @MainActor
+    func testControlledExportCancellationReleasesDrainTasks() async throws {
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("ReplayCapExportCancellationTests-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let source = directory.appendingPathComponent("source.mp4")
+        let output = directory.appendingPathComponent("cancelled.mp4")
+        let size = CGSize(width: 320, height: 180)
+        try await writeTestVideo(to: source, size: size, frameCount: 600)
+        let asset = AVURLAsset(url: source)
+        let duration = try await asset.load(.duration)
+        let composition = try await VideoCropper.videoComposition(for: asset, crop: .fullFrame, outputSize: size)
+        let transcoder = TrimVideoTranscoder()
+        let stopped = expectation(description: "Cancelled export returns without waiting for another readiness callback")
+        let exporting = Task {
+            do {
+                try await transcoder.export(asset: asset,
+                    timeRange: CMTimeRange(start: .zero, duration: duration),
+                    videoComposition: composition, outputSize: size, videoBitrateMbps: 2, to: output)
+                XCTFail("A cancelled export must not succeed")
+            } catch is CancellationError {
+                // Expected, including cancellation during writer setup.
+            } catch {
+                XCTFail("Unexpected cancellation result: \(error)")
+            }
+            stopped.fulfill()
+        }
+        // Writer creation leaves the destination file before draining begins.
+        // Wait for that boundary so cancellation also exercises setup races.
+        for _ in 0..<200 where !FileManager.default.fileExists(atPath: output.path) {
+            try await Task.sleep(for: .milliseconds(5))
+        }
+        try await Task.sleep(for: .milliseconds(20))
+        transcoder.cancel()
+        await fulfillment(of: [stopped], timeout: 5)
+        exporting.cancel()
+
+        let cancelledBeforeStart = TrimVideoTranscoder()
+        cancelledBeforeStart.cancel()
+        do {
+            try await cancelledBeforeStart.export(asset: asset,
+                timeRange: CMTimeRange(start: .zero, duration: duration),
+                videoComposition: composition, outputSize: size, videoBitrateMbps: 2,
+                to: directory.appendingPathComponent("never-started.mp4"))
+            XCTFail("Cancellation before setup must also be retained")
+        } catch is CancellationError { }
+    }
+
+    @MainActor
+    private func writeTestVideo(to url: URL, size: CGSize, frameCount: Int = 2) async throws {
         let writer = try AVAssetWriter(outputURL: url, fileType: .mp4)
         let input = AVAssetWriterInput(
             mediaType: .video,
@@ -285,7 +421,11 @@ final class VideoCropTests: XCTestCase {
         }
         writer.startSession(atSourceTime: .zero)
 
-        for frameIndex in 0..<2 {
+        for frameIndex in 0..<frameCount {
+            while !input.isReadyForMoreMediaData {
+                guard writer.status == .writing else { throw writer.error ?? TestVideoError.cannotAppendFrame }
+                try await Task.sleep(for: .milliseconds(1))
+            }
             guard let pool = adaptor.pixelBufferPool else {
                 throw TestVideoError.cannotCreatePixelBuffer
             }

@@ -14,6 +14,7 @@ struct TrimRangeSelector: View {
     var step: Double = 0.1
     var onSeek: (Double) -> Void = { _ in }
     var onEditingChanged: (Bool) -> Void = { _ in }
+    var editableTimes = false
 
     @State private var activeHandle: Handle?
 
@@ -55,8 +56,15 @@ struct TrimRangeSelector: View {
             }
             .frame(height: 24)
 
-            HStack(alignment: .firstTextBaseline) {
-                endpointLabel("Start", time: start, alignment: .leading)
+            HStack(alignment: .top) {
+                if editableTimes {
+                    TrimTimeField(title: "Start", value: $start, clamped: {
+                        TrimRangeMath.clampedStart($0, end: end, bounds: bounds,
+                                                   minimumSelection: minimumSelection)
+                    }, onSeek: onSeek, onEditingChanged: onEditingChanged)
+                } else {
+                    endpointLabel("Start", time: start, alignment: .leading)
+                }
 
                 Spacer(minLength: 12)
 
@@ -73,7 +81,20 @@ struct TrimRangeSelector: View {
 
                 Spacer(minLength: 12)
 
-                endpointLabel("End", time: end, alignment: .trailing)
+                if editableTimes {
+                    TrimTimeField(title: "End", value: $end, clamped: {
+                        TrimRangeMath.clampedEnd($0, start: start, bounds: bounds,
+                                                 minimumSelection: minimumSelection)
+                    }, onSeek: onSeek, onEditingChanged: onEditingChanged)
+                } else {
+                    endpointLabel("End", time: end, alignment: .trailing)
+                }
+            }
+            if editableTimes {
+                HStack {
+                    Spacer()
+                    TrimHelpButton(text: "Drag either handle or type the Start and End times. Enter seconds, minutes:seconds, or hours:minutes:seconds, with optional tenths. Use the arrows to adjust by 0.1 second. The player loops your selection when you finish editing.")
+                }
             }
         }
         .accessibilityElement(children: .contain)
@@ -157,12 +178,7 @@ struct TrimRangeSelector: View {
     }
 
     private static func timeLabel(_ seconds: Double) -> String {
-        let safeSeconds = seconds.isFinite ? max(0, seconds) : 0
-        let totalTenths = Int((safeSeconds * 10).rounded())
-        let minutes = totalTenths / 600
-        let wholeSeconds = (totalTenths / 10) % 60
-        let tenths = totalTenths % 10
-        return String(format: "%02d:%02d.%d", minutes, wholeSeconds, tenths)
+        TrimTime.label(seconds)
     }
 
     private struct TrackMetrics {
@@ -195,6 +211,76 @@ struct TrimRangeSelector: View {
     }
 }
 
+private struct TrimTimeField: View {
+    let title: String
+    @Binding var value: Double
+    let clamped: (Double) -> Double
+    let onSeek: (Double) -> Void
+    let onEditingChanged: (Bool) -> Void
+    @State private var draft = ""
+    @State private var invalid = false
+    @State private var focused = false
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Text(title).font(.system(size: 10, weight: .medium)).foregroundStyle(.secondary)
+            HStack(spacing: 4) {
+                TrimEndpointInput(title: "Trim \(title.lowercased()) time", text: $draft,
+                                  onEditingChanged: { editing in
+                                      focused = editing
+                                      if editing {
+                                          invalid = false
+                                          onEditingChanged(true)
+                                      } else {
+                                          commit()
+                                          onEditingChanged(false)
+                                      }
+                                  }, onEscape: {
+                                      draft = TrimTime.label(value)
+                                      invalid = false
+                                  }, onAdjust: adjust)
+                    .frame(width: 94, height: 22)
+                    .help("Seconds or colon-separated time; up and down adjust by 0.1 second")
+                Stepper(title, onIncrement: { adjust(0.1) }, onDecrement: { adjust(-0.1) })
+                    .labelsHidden()
+                    .controlSize(.mini)
+                    .accessibilityLabel("Adjust trim \(title.lowercased()) by 0.1 second")
+            }
+            if invalid {
+                Text("Enter a valid time")
+                    .font(.system(size: 10))
+                    .foregroundStyle(.orange)
+                    .accessibilityLabel("Invalid \(title.lowercased()) time. Enter seconds or colon-separated time.")
+            }
+        }
+        .onAppear { draft = TrimTime.label(value) }
+        .onChange(of: value) { _, newValue in
+            if !focused { draft = TrimTime.label(newValue) }
+        }
+    }
+
+    private func commit() {
+        guard let parsed = TrimTime.parse(draft) else {
+            draft = TrimTime.label(value)
+            invalid = true
+            return
+        }
+        value = clamped(parsed)
+        draft = TrimTime.label(value)
+        onSeek(value)
+    }
+
+    private func adjust(_ delta: Double) {
+        if !focused { onEditingChanged(true) }
+        let base = TrimTime.parse(draft) ?? value
+        value = clamped(((base + delta) * 10).rounded() / 10)
+        draft = TrimTime.label(value)
+        invalid = false
+        onSeek(value)
+        if !focused { onEditingChanged(false) }
+    }
+}
+
 enum TrimRangeMath {
     static func clampedStart(
         _ proposed: Double,
@@ -214,5 +300,74 @@ enum TrimRangeMath {
     ) -> Double {
         let gap = min(max(0, minimumSelection), max(0, bounds.upperBound - bounds.lowerBound))
         return max(min(proposed, bounds.upperBound), min(bounds.upperBound, start + gap))
+    }
+}
+
+/// NSTextField's field editor consumes arrow keys before SwiftUI move commands.
+/// Handle them through its delegate so keyboard and stepper edits use the same rules.
+private struct TrimEndpointInput: NSViewRepresentable {
+    let title: String
+    @Binding var text: String
+    let onEditingChanged: (Bool) -> Void
+    let onEscape: () -> Void
+    let onAdjust: (Double) -> Void
+    @Environment(\.isEnabled) private var isEnabled
+
+    func makeCoordinator() -> Coordinator { Coordinator(self) }
+
+    func makeNSView(context: Context) -> NSTextField {
+        let field = NSTextField()
+        field.font = .monospacedDigitSystemFont(ofSize: 12, weight: .medium)
+        field.isBezeled = true
+        field.bezelStyle = .roundedBezel
+        field.focusRingType = .exterior
+        field.delegate = context.coordinator
+        field.setAccessibilityLabel(title)
+        field.setAccessibilityHelp("Seconds or colon-separated time; up and down adjust by 0.1 second")
+        return field
+    }
+
+    func updateNSView(_ field: NSTextField, context: Context) {
+        context.coordinator.parent = self
+        if field.stringValue != text { field.stringValue = text }
+        field.isEnabled = isEnabled
+    }
+
+    final class Coordinator: NSObject, NSTextFieldDelegate {
+        var parent: TrimEndpointInput
+        init(_ parent: TrimEndpointInput) { self.parent = parent }
+
+        func controlTextDidBeginEditing(_ notification: Notification) {
+            parent.onEditingChanged(true)
+        }
+
+        func controlTextDidChange(_ notification: Notification) {
+            guard let field = notification.object as? NSTextField else { return }
+            parent.text = field.stringValue
+        }
+
+        func controlTextDidEndEditing(_ notification: Notification) {
+            guard let field = notification.object as? NSTextField else { return }
+            parent.text = field.stringValue
+            parent.onEditingChanged(false)
+        }
+
+        func control(_ control: NSControl, textView: NSTextView, doCommandBy command: Selector) -> Bool {
+            switch NSStringFromSelector(command) {
+            case "moveUp:":
+                parent.onAdjust(0.1)
+            case "moveDown:":
+                parent.onAdjust(-0.1)
+            case "insertNewline:":
+                control.window?.makeFirstResponder(nil)
+            case "cancelOperation:":
+                parent.onEscape()
+                textView.string = parent.text
+                control.window?.makeFirstResponder(nil)
+            default:
+                return false
+            }
+            return true
+        }
     }
 }

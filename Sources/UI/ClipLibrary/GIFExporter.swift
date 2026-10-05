@@ -103,44 +103,11 @@ enum GIFExporter {
         crop: NormalizedVideoCrop? = nil,
         to outputURL: URL
     ) async throws {
-        let rangeDuration = endSeconds - startSeconds
-        guard rangeDuration > 0 else {
-            throw GIFExportError.noFrames
-        }
-
-        var frameCount = max(1, Int((rangeDuration * frameRate).rounded()))
-        frameCount = min(frameCount, maxFrames)
-        let interval = rangeDuration / Double(frameCount)
-
-        // Deduplicate: a very short range can round two samples onto the same
-        // 1/600s tick, and the generator coalesces identical requested times
-        // into a single callback. The collector counts callbacks, so duplicates
-        // would leave it waiting for a callback that never comes.
-        var seenTicks = Set<Int64>()
-        let sampleTimes: [CMTime] = (0..<frameCount).compactMap { index in
-            let time = CMTime(seconds: startSeconds + Double(index) * interval, preferredTimescale: 600)
-            return seenTicks.insert(time.value).inserted ? time : nil
-        }
-
-        let asset = AVURLAsset(url: sourceURL)
-        let generator = AVAssetImageGenerator(asset: asset)
-        generator.appliesPreferredTrackTransform = true
-        generator.requestedTimeToleranceBefore = .zero
-        generator.requestedTimeToleranceAfter = .zero
-        // Generate enough source pixels that a narrow crop can still reach the
-        // requested output width. AVAssetImageGenerator caps this at the
-        // source's native resolution, so this does not upscale the video.
-        let sourceWidth = crop.map { maxWidth / max($0.rect.width, 0.05) } ?? maxWidth
-        generator.maximumSize = CGSize(width: sourceWidth, height: sourceWidth * 4)
-
-        var frames = await generateFrames(generator: generator, times: sampleTimes)
-        if let crop, !crop.isFullFrame {
-            frames = frames.compactMap { croppedAndScaled($0, crop: crop, maxWidth: maxWidth) }
-        }
-        guard !frames.isEmpty else {
-            throw GIFExportError.noFrames
-        }
-
+        let plan = try GIFSamplingPlan(start: startSeconds, end: endSeconds,
+                                       frameRate: frameRate, maxFrames: maxFrames)
+        let frames = try await renderedFrames(sourceURL: sourceURL, times: plan.times,
+                                             maxWidth: maxWidth, crop: crop)
+        try Task.checkCancellation()
         guard let destination = CGImageDestinationCreateWithURL(
             outputURL as CFURL,
             UTType.gif.identifier as CFString,
@@ -150,26 +117,68 @@ enum GIFExporter {
             throw GIFExportError.cannotCreateDestination
         }
 
+        try encode(frames, interval: plan.interval, destination: destination)
+    }
+
+    /// Content-aware approximation using the same sampled frames and encoder as export.
+    static func estimateBytes(
+        sourceURL: URL, startSeconds: Double, endSeconds: Double,
+        maxWidth: CGFloat = 720, crop: NormalizedVideoCrop? = nil
+    ) async throws -> Int64 {
+        let plan = try GIFSamplingPlan(start: startSeconds, end: endSeconds)
+        let sampleTimes = plan.estimateTimes()
+        let frames = try await renderedFrames(sourceURL: sourceURL, times: sampleTimes,
+                                             maxWidth: maxWidth, crop: crop)
+        try Task.checkCancellation()
+        let data = NSMutableData()
+        guard let destination = CGImageDestinationCreateWithData(
+            data, UTType.gif.identifier as CFString, frames.count, nil
+        ) else { throw GIFExportError.cannotCreateDestination }
+        try encode(frames, interval: plan.interval, destination: destination)
+        try Task.checkCancellation()
+        return Int64((Double(data.length) * Double(plan.times.count) / Double(frames.count)).rounded(.up))
+    }
+
+    private static func renderedFrames(
+        sourceURL: URL, times: [CMTime], maxWidth: CGFloat, crop: NormalizedVideoCrop?
+    ) async throws -> [CGImage] {
+        try Task.checkCancellation()
+        let generator = AVAssetImageGenerator(asset: AVURLAsset(url: sourceURL))
+        generator.appliesPreferredTrackTransform = true
+        generator.requestedTimeToleranceBefore = .zero
+        generator.requestedTimeToleranceAfter = .zero
+        let sourceWidth = crop.map { maxWidth / max($0.rect.width, 0.05) } ?? maxWidth
+        generator.maximumSize = CGSize(width: sourceWidth, height: sourceWidth * 4)
+        let generation = GIFImageGeneration(generator: generator)
+        var frames = await withTaskCancellationHandler {
+            await generateFrames(generation: generation, times: times)
+        } onCancel: {
+            generation.cancel()
+        }
+        try Task.checkCancellation()
+        if let crop, !crop.isFullFrame {
+            frames = frames.compactMap { croppedAndScaled($0, crop: crop, maxWidth: maxWidth) }
+        }
+        guard !frames.isEmpty else { throw GIFExportError.noFrames }
+        return frames
+    }
+
+    private static func encode(_ frames: [CGImage], interval: Double,
+                               destination: CGImageDestination) throws {
         let fileProperties = [
-            kCGImagePropertyGIFDictionary as String: [
-                kCGImagePropertyGIFLoopCount as String: 0  // loop forever
-            ]
+            kCGImagePropertyGIFDictionary as String: [kCGImagePropertyGIFLoopCount as String: 0]
         ] as CFDictionary
         CGImageDestinationSetProperties(destination, fileProperties)
-
         let frameProperties = [
             kCGImagePropertyGIFDictionary as String: [
                 kCGImagePropertyGIFUnclampedDelayTime as String: interval
             ]
         ] as CFDictionary
-
         for frame in frames {
+            try Task.checkCancellation()
             CGImageDestinationAddImage(destination, frame, frameProperties)
         }
-
-        guard CGImageDestinationFinalize(destination) else {
-            throw GIFExportError.finalizeFailed
-        }
+        guard CGImageDestinationFinalize(destination) else { throw GIFExportError.finalizeFailed }
     }
 
     /// A `<clipname>_GIF.gif` URL next to the source, deduped with a counter.
@@ -189,18 +198,19 @@ enum GIFExporter {
     /// invoked once per requested time, possibly out of order, so frames are
     /// sorted by requested time before returning.
     private static func generateFrames(
-        generator: AVAssetImageGenerator,
+        generation: GIFImageGeneration,
         times: [CMTime]
     ) async -> [CGImage] {
         await withCheckedContinuation { continuation in
             let collector = GIFFrameCollector(total: times.count)
 
-            generator.generateCGImagesAsynchronously(
-                forTimes: times.map { NSValue(time: $0) }
-            ) { requestedTime, image, _, _, _ in
+            guard generation.start(times: times, handler: { requestedTime, image, _, _, _ in
                 if let ordered = collector.record(requestedTime: requestedTime, image: image) {
                     continuation.resume(returning: ordered)
                 }
+            }) else {
+                continuation.resume(returning: [])
+                return
             }
         }
     }
@@ -236,5 +246,64 @@ enum GIFExporter {
         context.interpolationQuality = .high
         context.draw(cropped, in: CGRect(x: 0, y: 0, width: outputWidth, height: outputHeight))
         return context.makeImage()
+    }
+}
+
+/// Serialises starting and cancelling generation, including cancellation before start.
+private final class GIFImageGeneration: @unchecked Sendable {
+    private let generator: AVAssetImageGenerator
+    private let lock = NSLock()
+    private var cancelled = false
+    init(generator: AVAssetImageGenerator) { self.generator = generator }
+
+    func start(times: [CMTime], handler: @escaping AVAssetImageGeneratorCompletionHandler) -> Bool {
+        lock.lock()
+        defer { lock.unlock() }
+        guard !cancelled else { return false }
+        generator.generateCGImagesAsynchronously(forTimes: times.map { NSValue(time: $0) },
+                                                completionHandler: handler)
+        return true
+    }
+
+    func cancel() {
+        lock.lock()
+        defer { lock.unlock() }
+        cancelled = true
+        generator.cancelAllCGImageGeneration()
+    }
+}
+
+struct GIFSamplingPlan {
+    let times: [CMTime]
+    let interval: Double
+
+    init(start: Double, end: Double, frameRate: Double = 12, maxFrames: Int = 300) throws {
+        let duration = end - start
+        guard start.isFinite, end.isFinite, start >= 0, duration.isFinite, duration > 0,
+              end < Double(Int64.max) / 600,
+              frameRate.isFinite, frameRate > 0, maxFrames > 0 else {
+            throw GIFExportError.noFrames
+        }
+        let count = Int(min(Double(maxFrames), max(1, (duration * frameRate).rounded())))
+        let samplingInterval = duration / Double(count)
+        interval = samplingInterval
+        var seen = Set<Int64>()
+        times = (0..<count).compactMap { index in
+            // CMTime(seconds:) truncates fractional ticks. Floating-point multiplication
+            // can place an exact frame boundary just below its tick, which AVFoundation
+            // may fail to decode with zero tolerance. Round the shared sequence explicitly.
+            let seconds = start + Double(index) * samplingInterval
+            let time = CMTime(value: Int64((seconds * 600).rounded()), timescale: 600)
+            return seen.insert(time.value).inserted ? time : nil
+        }
+    }
+
+    func estimateTimes(limit: Int = 12) -> [CMTime] {
+        guard limit > 0 else { return [] }
+        guard times.count > limit else { return times }
+        guard limit > 1 else { return [times[times.count / 2]] }
+        return (0..<limit).map { index in
+            times[Int((Double(index) * Double(times.count - 1) / Double(limit - 1)).rounded())]
+        }
     }
 }

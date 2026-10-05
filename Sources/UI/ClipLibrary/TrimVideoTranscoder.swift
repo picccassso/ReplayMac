@@ -40,14 +40,16 @@ final class TrimVideoTranscoder: @unchecked Sendable {
     private let stateLock = NSLock()
     private var activeReader: AVAssetReader?
     private var activeWriter: AVAssetWriter?
+    private var cancelled = false
 
     func cancel() {
         stateLock.lock()
+        cancelled = true
         let reader = activeReader
         let writer = activeWriter
         stateLock.unlock()
-        reader?.cancelReading()
-        writer?.cancelWriting()
+        if reader?.status == .reading { reader?.cancelReading() }
+        if writer?.status == .writing { writer?.cancelWriting() }
     }
 
     func export(
@@ -58,6 +60,7 @@ final class TrimVideoTranscoder: @unchecked Sendable {
         videoBitrateMbps: Double,
         to outputURL: URL
     ) async throws {
+        try checkCancellation()
         let videoTracks = try await asset.loadTracks(withMediaType: .video)
         guard !videoTracks.isEmpty else {
             throw TrimVideoTranscodeError.noVideoTrack
@@ -160,9 +163,7 @@ final class TrimVideoTranscoder: @unchecked Sendable {
             pipes.append(TrackPipe(label: label, output: output, input: input))
         }
 
-        install(reader: reader, writer: writer)
-        defer { clearActiveObjects(reader: reader, writer: writer) }
-
+        try checkCancellation()
         guard reader.startReading() else {
             throw TrimVideoTranscodeError.cannotStartReading(reader.error)
         }
@@ -171,22 +172,26 @@ final class TrimVideoTranscoder: @unchecked Sendable {
             throw TrimVideoTranscodeError.cannotStartWriting(writer.error)
         }
         writer.startSession(atSourceTime: timeRange.start)
+        guard install(reader: reader, writer: writer) else {
+            reader.cancelReading()
+            writer.cancelWriting()
+            throw CancellationError()
+        }
+        defer { clearActiveObjects(reader: reader, writer: writer) }
 
-        let readerBox = ReaderBox(reader)
         let writerBox = WriterBox(writer)
         do {
             try await withTaskCancellationHandler {
                 try await withThrowingTaskGroup(of: Void.self) { group in
                     for pipe in pipes {
                         group.addTask {
-                            try await Self.drain(pipe, writer: writerBox)
+                            try await self.drain(pipe, writer: writerBox)
                         }
                     }
                     try await group.waitForAll()
                 }
             } onCancel: {
-                readerBox.reader.cancelReading()
-                writerBox.writer.cancelWriting()
+                self.cancel()
             }
         } catch {
             reader.cancelReading()
@@ -205,7 +210,9 @@ final class TrimVideoTranscoder: @unchecked Sendable {
             break
         }
 
+        try checkCancellation()
         try await Self.finishWriting(writer)
+        try checkCancellation()
     }
 
     private static var pcmSettings: [String: Any] {
@@ -229,11 +236,21 @@ final class TrimVideoTranscoder: @unchecked Sendable {
         ]
     }
 
-    private func install(reader: AVAssetReader, writer: AVAssetWriter) {
+    private func install(reader: AVAssetReader, writer: AVAssetWriter) -> Bool {
         stateLock.lock()
+        defer { stateLock.unlock() }
+        guard !cancelled else { return false }
         activeReader = reader
         activeWriter = writer
+        return true
+    }
+
+    private func checkCancellation() throws {
+        try Task.checkCancellation()
+        stateLock.lock()
+        let stopped = cancelled
         stateLock.unlock()
+        if stopped { throw CancellationError() }
     }
 
     private func clearActiveObjects(reader: AVAssetReader, writer: AVAssetWriter) {
@@ -243,32 +260,36 @@ final class TrimVideoTranscoder: @unchecked Sendable {
         stateLock.unlock()
     }
 
-    private static func drain(_ pipe: TrackPipe, writer: WriterBox) async throws {
-        let queue = DispatchQueue(label: "com.replaycap.trim-export.\(pipe.label)", qos: .userInitiated)
-        let resume = ResumeOnce()
-        try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
-            pipe.input.requestMediaDataWhenReady(on: queue) {
-                while pipe.input.isReadyForMoreMediaData {
-                    guard let sample = pipe.output.copyNextSampleBuffer() else {
-                        pipe.input.markAsFinished()
-                        if resume.claim() {
-                            continuation.resume()
-                        }
-                        return
-                    }
-                    if !pipe.input.append(sample) {
-                        pipe.input.markAsFinished()
-                        if resume.claim() {
-                            continuation.resume(
-                                throwing: TrimVideoTranscodeError.appendFailed(
-                                    pipe.label,
-                                    writer.writer.error
-                                )
-                            )
-                        }
-                        return
-                    }
-                }
+    private func drain(_ pipe: TrackPipe, writer: WriterBox) async throws {
+        // Cancelling a writer stops its readiness callbacks. Awaiting a callback
+        // continuation can therefore strand the export indefinitely. Cooperatively
+        // drain ready batches, yielding briefly under backpressure and checking both
+        // cancellation and writer failure even when the input is not ready.
+        while true {
+            try checkCancellation()
+            switch writer.writer.status {
+            case .cancelled:
+                throw CancellationError()
+            case .failed:
+                throw TrimVideoTranscodeError.writeFailed(writer.writer.error)
+            case .writing:
+                break
+            default:
+                throw TrimVideoTranscodeError.cannotStartWriting(writer.writer.error)
+            }
+            guard pipe.input.isReadyForMoreMediaData else {
+                try await Task.sleep(for: .milliseconds(2))
+                continue
+            }
+            guard let sample = pipe.output.copyNextSampleBuffer() else {
+                try checkCancellation()
+                pipe.input.markAsFinished()
+                return
+            }
+            guard pipe.input.append(sample) else {
+                try checkCancellation()
+                if writer.writer.status == .cancelled { throw CancellationError() }
+                throw TrimVideoTranscodeError.appendFailed(pipe.label, writer.writer.error)
             }
         }
     }
@@ -300,26 +321,9 @@ final class TrimVideoTranscoder: @unchecked Sendable {
         }
     }
 
-    private final class ReaderBox: @unchecked Sendable {
-        let reader: AVAssetReader
-        init(_ reader: AVAssetReader) { self.reader = reader }
-    }
-
     private final class WriterBox: @unchecked Sendable {
         let writer: AVAssetWriter
         init(_ writer: AVAssetWriter) { self.writer = writer }
     }
 
-    private final class ResumeOnce: @unchecked Sendable {
-        private let lock = NSLock()
-        private var claimed = false
-
-        func claim() -> Bool {
-            lock.lock()
-            defer { lock.unlock() }
-            if claimed { return false }
-            claimed = true
-            return true
-        }
-    }
 }
