@@ -21,7 +21,11 @@ public struct ClipLibraryView: View {
     }
 
     public var body: some View {
-        Group {
+        VStack(spacing: 0) {
+            if !model.rows.isEmpty {
+                librarySummaryHeader
+                Divider()
+            }
             if visibleRows.isEmpty {
                 emptyStateView
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -115,13 +119,59 @@ public struct ClipLibraryView: View {
     /// Selection details float over the table as one glass panel. Its own
     /// buttons stay bordered, since glass controls on glass lose contrast.
     private func panel<Content: View>(@ViewBuilder _ content: () -> Content) -> some View {
-        ScrollView(.horizontal, showsIndicators: false) { content().frame(minWidth: 800) }
+        // Fill the panel's width when there's room, and scroll below 800pt.
+        ScrollView(.horizontal, showsIndicators: false) {
+            content().containerRelativeFrame(.horizontal) { width, _ in max(width, 800) }
+        }
             .fixedSize(horizontal: false, vertical: true)
             .padding(14)
             .glassPanel()
             .padding(.horizontal, 16)
             .padding(.bottom, 12)
             .buttonStyle(.bordered)
+    }
+
+    private var librarySummaryHeader: some View {
+        HStack(spacing: 8) {
+            let summary = model.storageSummary
+            let clips = summary.clipCount == 1 ? "1 clip" : "\(summary.clipCount) clips"
+            let size = ByteCountFormatter.string(fromByteCount: summary.totalBytes, countStyle: .file)
+
+            if state.favoritesOnly {
+                let filteredCount = visibleRows.count
+                let filteredBytes = visibleRows.reduce(Int64(0)) { $0 + $1.info.fileSize }
+                let filteredSize = ByteCountFormatter.string(fromByteCount: filteredBytes, countStyle: .file)
+                Image(systemName: "star.fill")
+                    .font(.system(size: 11))
+                    .foregroundStyle(.yellow)
+                Text("\(filteredCount) favorites · \(filteredSize)")
+                    .foregroundStyle(AppTheme.textPrimary)
+                Text("(\(clips) · \(size) total)")
+                    .foregroundStyle(AppTheme.textSecondary)
+            } else if !state.searchText.isEmpty {
+                let filteredCount = visibleRows.count
+                let filteredBytes = visibleRows.reduce(Int64(0)) { $0 + $1.info.fileSize }
+                let filteredSize = ByteCountFormatter.string(fromByteCount: filteredBytes, countStyle: .file)
+                Image(systemName: "magnifyingglass")
+                    .font(.system(size: 11))
+                    .foregroundStyle(AppTheme.accent)
+                Text("\(filteredCount) matching · \(filteredSize)")
+                    .foregroundStyle(AppTheme.textPrimary)
+                Text("(\(clips) · \(size) total)")
+                    .foregroundStyle(AppTheme.textSecondary)
+            } else {
+                Image(systemName: "film.stack")
+                    .font(.system(size: 11))
+                    .foregroundStyle(AppTheme.accent)
+                Text("\(clips) · \(size)")
+                    .foregroundStyle(AppTheme.textSecondary)
+            }
+            Spacer()
+        }
+        .font(.system(size: 11, weight: .medium, design: .rounded))
+        .padding(.horizontal, 16)
+        .padding(.vertical, 7)
+        .background(AppTheme.backgroundSecondary.opacity(0.35))
     }
 
     @ViewBuilder

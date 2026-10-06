@@ -5,7 +5,6 @@ import SwiftUI
 public struct MainWindowView: View {
     @ObservedObject private var state: MainWindowState
     @ObservedObject private var exports: ClipExportCoordinator
-    @ObservedObject private var libraryModel: ClipLibraryViewModel
     @Environment(\.accessibilityShowBorders) private var showBorders
     @Environment(\.colorSchemeContrast) private var contrast
     @State private var discardPresented = false
@@ -13,7 +12,6 @@ public struct MainWindowView: View {
     public init(state: MainWindowState) {
         self.state = state
         self.exports = state.exports
-        self.libraryModel = state.library.model
     }
 
     public var body: some View {
@@ -24,8 +22,7 @@ public struct MainWindowView: View {
                 .toolbar(removing: .sidebarToggle)
         } detail: {
             detail
-                .navigationTitle(state.isEditing ? "Trim & Export" : state.page.title)
-                .navigationSubtitle(subtitle)
+                .navigationTitle(pageTitle)
                 .toolbar { detailToolbar }
         }
         .onChange(of: state.isWindowVisible) { _, visible in
@@ -65,7 +62,7 @@ public struct MainWindowView: View {
                     .font(.system(size: 17, weight: .bold, design: .rounded))
             }
             .padding(.horizontal, 12)
-            .padding(.top, 8)
+            .padding(.top, 52)
             .padding(.bottom, 22)
             .accessibilityElement(children: .ignore)
             .accessibilityLabel(AppBranding.name)
@@ -96,6 +93,7 @@ public struct MainWindowView: View {
         }
         .padding(.horizontal, 10)
         .frame(maxWidth: .infinity, alignment: .leading)
+        .ignoresSafeArea(.container, edges: .top)
     }
 
     private func sidebarRow(_ title: String, detail: String? = nil, icon: String,
@@ -166,16 +164,20 @@ public struct MainWindowView: View {
         .floatingBottomBar { statusBars }
     }
 
-    private var subtitle: String {
-        if state.isEditing { return state.editor?.url.lastPathComponent ?? "" }
-        guard state.page == .library else { return "" }
-        let summary = libraryModel.storageSummary
-        let clips = summary.clipCount == 1 ? "1 clip" : "\(summary.clipCount) clips"
-        return "\(clips) · \(ByteCountFormatter.string(fromByteCount: summary.totalBytes, countStyle: .file))"
+    private var pageTitle: String {
+        if state.isEditing, let editor = state.editor {
+            return "Trim & Export — \(editor.url.lastPathComponent)"
+        }
+        return state.page.title
     }
 
     @ToolbarContentBuilder
     private var detailToolbar: some ToolbarContent {
+        // A persistent toolbar item ensures macOS keeps the window toolbar
+        // at the exact same height across all pages without collapsing.
+        ToolbarItem(placement: .automatic) {
+            Color.clear.frame(width: 0, height: 0)
+        }
         // The always-visible sidebar already leads back to the library.
         if state.isEditing {
             ToolbarItem(placement: .primaryAction) {
