@@ -16,7 +16,7 @@ struct ClipTrimView: View {
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
             Divider()
             sidebar
-                .frame(width: 300)
+                .frame(width: 352)
                 .background(AppTheme.backgroundSecondary)
         }
         .tint(AppTheme.accent)
@@ -129,25 +129,25 @@ struct ClipTrimView: View {
                         sectionHeading("Resolution", icon: "rectangle.arrowtriangle.2.outward",
                                        detail: "\(Int(session.exportOutputSize.width)) × \(Int(session.exportOutputSize.height))",
                                        help: "Fit the video or crop within the selected resolution, preserving its aspect ratio. Smaller videos are never upscaled. Original retains the crop’s original dimensions.")
-                        Picker("Export resolution", selection: $session.exportResolution) {
-                            ForEach(TrimExportResolution.allCases) { resolution in
-                                Text(resolution.title).tag(resolution)
+                        fittingPicker {
+                            Picker("Export resolution", selection: $session.exportResolution) {
+                                ForEach(TrimExportResolution.allCases) { resolution in
+                                    Text(resolution.title).tag(resolution)
+                                }
                             }
                         }
-                        .pickerStyle(.segmented)
-                        .labelsHidden()
                     }
                     VStack(alignment: .leading, spacing: 8) {
                         sectionHeading("Quality", icon: "slider.horizontal.3", detail: bitrateLabel,
                                        help: "Source uses fast passthrough when possible. Cropping may require re-encoding. Compact, Balanced, and High export HEVC with increasing target bitrates. Choosing a smaller resolution selects Balanced when Source was selected.")
-                        Picker("Export quality", selection: $session.exportQuality) {
-                            ForEach(TrimExportQuality.allCases) { quality in
-                                Text(quality.title).tag(quality)
-                                    .disabled(quality == .source && session.exportResolution != .source)
+                        fittingPicker {
+                            Picker("Export quality", selection: $session.exportQuality) {
+                                ForEach(TrimExportQuality.allCases) { quality in
+                                    Text(quality.title).tag(quality)
+                                        .disabled(quality == .source && session.exportResolution != .source)
+                                }
                             }
                         }
-                        .pickerStyle(.segmented)
-                        .labelsHidden()
                     }
                     if !session.audioTrackChoices.isEmpty {
                         VStack(alignment: .leading, spacing: 8) {
@@ -209,6 +209,18 @@ struct ClipTrimView: View {
         .tint(AppTheme.accent)
     }
 
+    /// Segmented when it fits the sidebar, otherwise a pop-up menu. A segmented
+    /// control cannot shrink below its labels, and one wider than the sidebar
+    /// widens the whole scroll column, pushing the help buttons out of view.
+    private func fittingPicker<Content: View>(@ViewBuilder _ picker: () -> Content) -> some View {
+        let picker = picker()
+        return ViewThatFits(in: .horizontal) {
+            picker.pickerStyle(.segmented)
+            picker.pickerStyle(.menu)
+        }
+        .labelsHidden()
+    }
+
     private var bitrateLabel: String? {
         session.exportQuality.videoBitrateMbps(for: session.exportOutputSize)
             .map { "HEVC | \(String(format: "%.3g", $0)) Mbps" }
@@ -254,7 +266,13 @@ struct ClipTrimView: View {
                     session.gifExpanded.toggle()
                 } label: {
                     HStack {
-                        Label("Export a GIF", systemImage: "photo.stack")
+                        Label {
+                            Text("Export a GIF")
+                        } icon: {
+                            // Accent while expanded to show the GIF export is active.
+                            Image(systemName: "photo.stack")
+                                .foregroundStyle(session.gifExpanded ? AppTheme.accent : AppTheme.textSecondary)
+                        }
                         Spacer()
                         Image(systemName: session.gifExpanded ? "chevron.up" : "chevron.down")
                     }
