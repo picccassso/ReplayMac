@@ -261,7 +261,7 @@ public final class StatusItemController: NSObject, NSMenuDelegate, @unchecked Se
 
     private func refreshMenuItems() {
         let replaySeconds = AppSettings.bufferDurationSeconds
-        saveItem?.title = "Save Last \(replaySeconds) Seconds"
+        saveItem?.title = ReplayControlLabels.saveReplay(seconds: replaySeconds).title
         saveItem?.isEnabled = SavePreflight.canSaveQuickReplay(
             isRecording: state.isRecording,
             bufferedSeconds: state.bufferedSeconds,
@@ -269,41 +269,29 @@ public final class StatusItemController: NSObject, NSMenuDelegate, @unchecked Se
         )
 
         let longBufferSeconds = AppSettings.longBufferDurationSeconds
-        saveLongBufferItem?.title = "Save Last \(MenuBarState.formattedDuration(TimeInterval(longBufferSeconds)))"
+        saveLongBufferItem?.title = ReplayControlLabels.saveExtendedReplay(seconds: longBufferSeconds).title
         saveLongBufferItem?.isHidden = !AppSettings.longBufferEnabled
         saveLongBufferItem?.isEnabled = SavePreflight.canSaveLongReplay(
             isRecording: state.isRecording,
             saveInProgress: state.isSaveInProgress
         )
 
-        toggleSessionRecordingItem?.title = state.isSessionRecording
-            ? "Stop & Save Session"
-            : "Start Session Recording"
+        toggleSessionRecordingItem?.title = ReplayControlLabels.session(isRecording: state.isSessionRecording).title
         toggleSessionRecordingItem?.isEnabled = !state.isSaveInProgress
 
-        toggleRecordingItem?.title = state.isRecording ? "Stop Replay Buffer" : "Start Replay Buffer"
+        toggleRecordingItem?.title = ReplayControlLabels.replayBuffer(isRecording: state.isRecording).title
 
-        if !AppSettings.captureMicrophone {
-            toggleMicMuteItem?.title = "Enable & Unmute Microphone"
-            toggleMicMuteItem?.image = NSImage(systemSymbolName: "mic.slash", accessibilityDescription: "Microphone disabled")
-        } else if state.isMicrophoneMuted {
-            toggleMicMuteItem?.title = "Unmute Microphone"
-            toggleMicMuteItem?.image = NSImage(systemSymbolName: "mic.slash.fill", accessibilityDescription: "Microphone muted")
-        } else {
-            toggleMicMuteItem?.title = "Mute Microphone"
-            toggleMicMuteItem?.image = NSImage(systemSymbolName: "mic.fill", accessibilityDescription: "Microphone active")
-        }
+        let microphone = ReplayControlLabels.microphone(isEnabled: AppSettings.captureMicrophone,
+                                                         isMuted: state.isMicrophoneMuted)
+        toggleMicMuteItem?.title = microphone.title
+        toggleMicMuteItem?.image = NSImage(systemSymbolName: microphone.symbol,
+                                           accessibilityDescription: microphone.accessibilityDescription)
 
-        if !AppSettings.captureSystemAudio {
-            toggleSystemAudioMuteItem?.title = "Enable & Unmute System Audio"
-            toggleSystemAudioMuteItem?.image = NSImage(systemSymbolName: "speaker.slash", accessibilityDescription: "System audio disabled")
-        } else if state.isSystemAudioMuted {
-            toggleSystemAudioMuteItem?.title = "Unmute System Audio"
-            toggleSystemAudioMuteItem?.image = NSImage(systemSymbolName: "speaker.slash.fill", accessibilityDescription: "System audio muted")
-        } else {
-            toggleSystemAudioMuteItem?.title = "Mute System Audio"
-            toggleSystemAudioMuteItem?.image = NSImage(systemSymbolName: "speaker.wave.2.fill", accessibilityDescription: "System audio active")
-        }
+        let systemAudio = ReplayControlLabels.systemAudio(isEnabled: AppSettings.captureSystemAudio,
+                                                           isMuted: state.isSystemAudioMuted)
+        toggleSystemAudioMuteItem?.title = systemAudio.title
+        toggleSystemAudioMuteItem?.image = NSImage(systemSymbolName: systemAudio.symbol,
+                                                   accessibilityDescription: systemAudio.accessibilityDescription)
 
         // Drop the reference if the clip has since been moved, renamed, or deleted.
         if let url = lastClipURL, !FileManager.default.fileExists(atPath: url.path) {
@@ -328,33 +316,19 @@ public final class StatusItemController: NSObject, NSMenuDelegate, @unchecked Se
             displayItem?.isHidden = true
         }
 
-        let quickReplayCap = TimeInterval(replaySeconds)
-        let capLabel = MenuBarState.formattedDuration(quickReplayCap)
-        // The buffer retains headroom beyond the replay window; don't surface more
-        // than the window the user can actually save.
-        let bufferedLabel = MenuBarState.formattedDuration(min(state.bufferedSeconds, quickReplayCap))
-        var bufferLine = "Quick replay: \(bufferedLabel) / \(capLabel) · \(state.formattedBufferMemory)"
-        if state.isRecording && state.bufferedSeconds < TimeInterval(replaySeconds) {
-            bufferLine += " (filling…)"
-        } else if state.isRecording {
-            bufferLine += " (ready)"
-        }
-        bufferUsageItem?.title = bufferLine
-        // A session recording that started capture on its own deliberately
-        // leaves the replay buffers empty, so reporting them would just look
-        // like something had gone wrong.
-        let isSessionOnlyCapture = state.isSessionRecording && !state.isRecording
+        bufferUsageItem?.title = ReplayControlLabels.quickReplayLine(
+            bufferedSeconds: state.bufferedSeconds, capSeconds: replaySeconds,
+            memory: state.formattedBufferMemory, isRecording: state.isRecording
+        )
+        let isSessionOnlyCapture = ReplayControlLabels.isSessionOnlyCapture(
+            isRecording: state.isRecording, isSessionRecording: state.isSessionRecording
+        )
         bufferUsageItem?.isHidden = isSessionOnlyCapture
 
-        let longReplayCap = TimeInterval(longBufferSeconds)
-        let longReplayAvailable = min(state.extendedBufferElapsedSeconds, longReplayCap)
-        var longBufferLine = "Extended replay: \(MenuBarState.formattedDuration(longReplayAvailable)) / \(MenuBarState.formattedDuration(longReplayCap))"
-        if state.isRecording && longReplayAvailable < longReplayCap {
-            longBufferLine += " (filling…)"
-        } else if state.isRecording {
-            longBufferLine += " (ready)"
-        }
-        longBufferUsageItem?.title = longBufferLine
+        longBufferUsageItem?.title = ReplayControlLabels.extendedReplayLine(
+            elapsedSeconds: state.extendedBufferElapsedSeconds, capSeconds: longBufferSeconds,
+            isRecording: state.isRecording
+        )
         longBufferUsageItem?.isHidden = !AppSettings.longBufferEnabled || isSessionOnlyCapture
 
         hotkeyHintItem?.isHidden = hasSaveHotkeyConfigured

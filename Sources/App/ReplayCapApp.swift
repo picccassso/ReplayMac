@@ -10,7 +10,7 @@ struct ReplayCapApp: App {
     var body: some Scene {
         let _ = appDelegate.installMainWindowOpener { openWindow(id: "main") }
         Window(AppBranding.name, id: "main") {
-            MainWindowView(state: appDelegate.mainWindowState)
+            MainWindowView(state: appDelegate.mainWindowState, menuBar: appDelegate.menuBarState)
                 .background(MainWindowRegistration(appDelegate: appDelegate))
         }
         .defaultSize(width: 1120, height: 720)

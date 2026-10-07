@@ -5,6 +5,8 @@
 - Bring back the Clip Library item in the menu bar. It was renamed to "Open ReplayMac" when the library and settings moved into one window, which made the library hard to find. It now always opens straight to your clips, has its own icon, and sits in its own section with the last clip actions
 - Open Trim & Export in its own window instead of the library sidebar. Each clip gets its own editor window, so you can work on several clips at once without the "Replace Current Edit?" prompt. Closing an editor window ends that edit; an export already running keeps going and shows its progress in the library
 - Fix the Trim & Export settings panel spilling past the window edge and cutting off its help buttons, most visibly after expanding or collapsing Export a GIF. The Quality picker was wider than the panel; the panel is now wide enough for it and falls back to a pop-up menu if it still doesn't fit. The GIF icon now uses the accent colour while the section is expanded and is greyed out when collapsed
+- Add a Home page to the main window: the menu bar's actions as large buttons (save a replay, start or stop the replay buffer or a session recording, mute the microphone or system audio), live status with replay buffer fill, extended replay, session time and the recorded display, and each action's hotkey with a shortcut to set one. Home is the first page for new installs and opens when you click ReplayMac in the Dock
+- Move the sidebar's ReplayMac header up in full screen, where the traffic lights it made room for are hidden
 
 ## 1.7.3
 

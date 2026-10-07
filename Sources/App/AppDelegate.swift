@@ -202,6 +202,14 @@ class AppDelegate: NSObject, NSApplicationDelegate, @unchecked Sendable {
         statusItemController.onOpenSettings = { [weak self] in
             self?.openSettingsWindow()
         }
+        mainWindowState.controls = ReplayControls(
+            saveReplay: { [weak self] in self?.saveClipFromUI() },
+            saveExtendedReplay: { [weak self] in self?.saveLongBufferFromUI() },
+            toggleSession: { [weak self] in self?.toggleSessionRecording() },
+            toggleBuffer: { [weak self] in self?.toggleCapturePipeline() },
+            toggleMicrophone: { [weak self] in self?.toggleMicrophoneMuteFromUI() },
+            toggleSystemAudio: { [weak self] in self?.toggleSystemAudioMuteFromUI() }
+        )
         applyEffectiveAudioVolumes()
         syncAudioMuteStateToUI()
         statusItemController.setup(state: menuBarState)
@@ -301,7 +309,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, @unchecked Sendable {
     }
 
     func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
-        openMainWindow()
+        openMainWindow(page: .home)
         return false
     }
 

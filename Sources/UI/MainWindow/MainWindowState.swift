@@ -7,10 +7,11 @@ public extension Notification.Name {
 }
 
 public enum MainWindowPage: String, CaseIterable, Identifiable {
-    case library, general, video, audio, profiles, hotkeys, advanced
+    case home, library, general, video, audio, profiles, hotkeys, advanced
     public var id: String { rawValue }
     public var title: String {
         switch self {
+        case .home: "Home"
         case .library: "Clip Library"
         case .general: "General"
         case .video: "Video"
@@ -22,6 +23,7 @@ public enum MainWindowPage: String, CaseIterable, Identifiable {
     }
     var icon: String {
         switch self {
+        case .home: "house"
         case .library: "film.stack"
         case .general: "gearshape"
         case .video: "video"
@@ -39,9 +41,13 @@ public final class MainWindowState: ObservableObject {
     /// Open Trim & Export sessions, one per clip, each shown in its own window.
     @Published private(set) var editors: [URL: ClipEditorSession] = [:]
     @Published public var isWindowVisible = false
+    /// The sidebar header drops its traffic-light inset in full screen.
+    @Published public var isFullScreen = false
     @Published var hasVisitedSettings: Bool
     @Published var settingsTab: SettingsTab = .general
     public let exports = ClipExportCoordinator()
+    /// Capture actions for the Home page, wired by the app delegate.
+    public var controls = ReplayControls()
     let library: ClipLibraryState
     /// Brings a session's editor window forward. Tests leave it nil so no windows are created.
     var presentEditor: ((ClipEditorSession) -> Void)?
@@ -50,9 +56,9 @@ public final class MainWindowState: ObservableObject {
 
     public init(defaults: UserDefaults = .standard) {
         self.defaults = defaults
-        let restoredPage = MainWindowPage(rawValue: defaults.string(forKey: "mainWindowPage") ?? "") ?? .library
+        let restoredPage = MainWindowPage(rawValue: defaults.string(forKey: "mainWindowPage") ?? "") ?? .home
         page = restoredPage
-        hasVisitedSettings = restoredPage != .library
+        hasVisitedSettings = SettingsTab(rawValue: restoredPage.rawValue) != nil
         library = ClipLibraryState()
         if let tab = SettingsTab(rawValue: page.rawValue) { settingsTab = tab }
         exports.objectWillChange.sink { [weak self] _ in self?.objectWillChange.send() }.store(in: &subscriptions)
@@ -64,6 +70,7 @@ public final class MainWindowState: ObservableObject {
     }
 
     public var isLibraryFrontmost: Bool { page == .library }
+    var isSettingsPage: Bool { SettingsTab(rawValue: page.rawValue) != nil }
 
     /// Returns whether the caller should hide the native window. Otherwise the
     /// shortcut selects the library before the caller brings the window forward.

@@ -24,7 +24,7 @@ ReplayMac is a macOS menu bar instant-replay clipper. It continuously buffers re
 
 ### Clip Library & Export
 
-Choose **Clip Library** from the menu bar to browse your clips, or **Settings…** to configure ReplayMac; both open the same window. The sidebar puts Clip Library above General, Video, Audio, Profiles, Hotkeys and Advanced. Trim & Export opens each clip in its own window, so you can have several edits open at once. Exports run one at a time and keep going if you close the editor, with progress and completion shown in the library.
+Click ReplayMac in the Dock to open **Home**, a control centre with the same actions as the menu bar (save a replay, start or stop the replay buffer or a session, mute the microphone or system audio), live buffer status, and each action's hotkey. It works well on a second screen. Choose **Clip Library** from the menu bar to browse your clips, or **Settings…** to configure ReplayMac; all three open the same window. The sidebar puts Home and Clip Library above General, Video, Audio, Profiles, Hotkeys and Advanced. Trim & Export opens each clip in its own window, so you can have several edits open at once. Exports run one at a time and keep going if you close the editor, with progress and completion shown in the library.
 
 - **Native appearance**: Liquid Glass navigation and controls on macOS 26+, following your system glass appearance, accent colour, and Light/Dark mode. Earlier macOS versions use native controls.
 - **Built-in library and editor**: Preview, trim, and search clips, with support for favorites, tags, notes, and batch actions.

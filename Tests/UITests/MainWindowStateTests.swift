@@ -25,22 +25,30 @@ final class MainWindowStateTests: XCTestCase {
     @MainActor
     func testFirstPageAndSettingsShortcutRestoration() {
         withState { state, defaults in
-            XCTAssertEqual(state.page, .library)
+            XCTAssertEqual(state.page, .home)
             XCTAssertFalse(state.hasVisitedSettings)
+            state.select(.library)
+            XCTAssertFalse(state.hasVisitedSettings)
+            XCTAssertFalse(MainWindowState(defaults: defaults).hasVisitedSettings)
+            state.select(.home)
+            XCTAssertFalse(state.isSettingsPage)
             state.select(.audio)
+            XCTAssertTrue(state.isSettingsPage)
             XCTAssertTrue(state.hasVisitedSettings)
             XCTAssertEqual(MainWindowState(defaults: defaults).page, .audio)
             XCTAssertEqual(MainWindowState(defaults: defaults).settingsTab, .audio)
             state.select(.general)
             XCTAssertEqual(state.settingsTab, .general)
             defaults.set("removed-page", forKey: "mainWindowPage")
-            XCTAssertEqual(MainWindowState(defaults: defaults).page, .library)
+            XCTAssertEqual(MainWindowState(defaults: defaults).page, .home)
         }
     }
 
     @MainActor
     func testLibraryShortcutRoutesFromSettingsAndOnlyHidesFrontmostLibrary() {
         withState { state, _ in
+            XCTAssertFalse(state.routeLibraryShortcut(windowIsFrontmost: true))
+            XCTAssertEqual(state.page, .library)
             state.select(.audio)
             XCTAssertFalse(state.routeLibraryShortcut(windowIsFrontmost: true))
             XCTAssertEqual(state.page, .library)

@@ -5,12 +5,14 @@ import SwiftUI
 public struct MainWindowView: View {
     @ObservedObject private var state: MainWindowState
     @ObservedObject private var exports: ClipExportCoordinator
+    private let menuBar: MenuBarState
     @Environment(\.accessibilityShowBorders) private var showBorders
     @Environment(\.colorSchemeContrast) private var contrast
 
-    public init(state: MainWindowState) {
+    public init(state: MainWindowState, menuBar: MenuBarState) {
         self.state = state
         self.exports = state.exports
+        self.menuBar = menuBar
     }
 
     public var body: some View {
@@ -40,13 +42,16 @@ public struct MainWindowView: View {
                     .font(.system(size: 17, weight: .bold, design: .rounded))
             }
             .padding(.horizontal, 12)
-            .padding(.top, 52)
+            // Clears the traffic lights, which full screen hides.
+            .padding(.top, state.isFullScreen ? 20 : 52)
             .padding(.bottom, 22)
             .accessibilityElement(children: .ignore)
             .accessibilityLabel(AppBranding.name)
 
-            sidebarRow(MainWindowPage.library.title, icon: MainWindowPage.library.icon,
-                       isSelected: state.isLibraryFrontmost) { state.select(.library) }
+            ForEach([MainWindowPage.home, .library]) { page in
+                sidebarRow(page.title, icon: page.icon,
+                           isSelected: state.page == page) { state.select(page) }
+            }
 
             Text("SETTINGS")
                 .font(.system(size: 10, weight: .semibold))
@@ -55,7 +60,7 @@ public struct MainWindowView: View {
                 .padding(.top, 24)
                 .padding(.bottom, 8)
                 .accessibilityAddTraits(.isHeader)
-            ForEach(MainWindowPage.allCases.filter { $0 != .library }) { page in
+            ForEach(MainWindowPage.allCases.filter { $0 != .home && $0 != .library }) { page in
                 sidebarRow(page.title, icon: page.icon,
                            isSelected: state.page == page) { state.select(page) }
             }
@@ -119,11 +124,14 @@ public struct MainWindowView: View {
             }
             if state.hasVisitedSettings {
                 SettingsView(selectedTab: $state.settingsTab,
-                             isVisible: state.page != .library && state.isWindowVisible)
-                    .opacity(state.page != .library ? 1 : 0)
-                    .allowsHitTesting(state.page != .library)
-                    .disabled(state.page == .library)
-                    .accessibilityHidden(state.page == .library)
+                             isVisible: state.isSettingsPage && state.isWindowVisible)
+                    .opacity(state.isSettingsPage ? 1 : 0)
+                    .allowsHitTesting(state.isSettingsPage)
+                    .disabled(!state.isSettingsPage)
+                    .accessibilityHidden(!state.isSettingsPage)
+            }
+            if state.page == .home {
+                HomeView(windowState: state, menuBar: menuBar)
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)

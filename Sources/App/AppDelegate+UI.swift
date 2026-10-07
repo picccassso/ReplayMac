@@ -241,6 +241,7 @@ extension AppDelegate {
             window.setFrame(MainWindowGeometry.visibleFrame(window.frame, within: visible), display: true)
         }
         mainWindowState.isWindowVisible = window.isVisible
+        mainWindowState.isFullScreen = window.styleMask.contains(.fullScreen)
         _ = enforceOnboardingWindowExclusivity()
     }
 
@@ -422,7 +423,12 @@ final class SharedWindowDelegate: NSObject, NSWindowDelegate {
     }
     func windowWillEnterFullScreen(_ notification: Notification) {
         fullscreenTransition = true
+        appDelegate?.mainWindowState.isFullScreen = true
         forwarding?.windowWillEnterFullScreen?(notification)
+    }
+    func windowWillExitFullScreen(_ notification: Notification) {
+        appDelegate?.mainWindowState.isFullScreen = false
+        forwarding?.windowWillExitFullScreen?(notification)
     }
     func windowDidExitFullScreen(_ notification: Notification) {
         fullscreenTransition = false
