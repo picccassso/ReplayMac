@@ -6,6 +6,7 @@ public struct SettingsView: View {
     @Default(.bufferDurationSeconds) var bufferDurationSeconds
     @Default(.outputDirectoryPath) var outputDirectoryPath
     @Default(.launchAtLogin) var launchAtLogin
+    @Default(.mainWindowStartPage) var mainWindowStartPage
     @Default(.autoStartRecordingOnLaunch) var autoStartRecordingOnLaunch
     @Default(.resumeRecordingAfterWake) var resumeRecordingAfterWake
     @Default(.autoRecordGamesEnabled) var autoRecordGamesEnabled

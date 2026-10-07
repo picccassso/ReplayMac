@@ -1,5 +1,6 @@
 import SwiftUI
 import AppKit
+import Branding
 import Defaults
 import ServiceManagement
 import Save
@@ -97,6 +98,12 @@ extension SettingsView {
 
             Section {
                 Toggle("Launch at login", isOn: $launchAtLogin)
+                Picker("Open window to", selection: $mainWindowStartPage) {
+                    ForEach(MainWindowStartPage.allCases) { page in
+                        Text(page.title).tag(page.rawValue)
+                    }
+                }
+                .help("The page shown when you open \(AppBranding.name) from the Dock or at launch. The menu bar's Clip Library and Settings items always go to their own pages.")
                 Toggle("Auto-start recording on launch", isOn: $autoStartRecordingOnLaunch)
                     .disabled(autoRecordGamesEnabled)
                 Toggle("Resume recording after wake", isOn: $resumeRecordingAfterWake)

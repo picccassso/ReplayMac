@@ -245,9 +245,14 @@ extension AppDelegate {
         _ = enforceOnboardingWindowExclusivity()
     }
 
+    /// Without a page, a window that isn't already open shows the start page
+    /// chosen in Settings; an open window keeps the page it's on.
     func openMainWindow(page: MainWindowPage? = nil) {
         guard !enforceOnboardingWindowExclusivity() else { return }
-        if let page { mainWindowState.select(page) }
+        let isAlreadyOpen = mainWindow.map { $0.isVisible || $0.isMiniaturized } ?? false
+        if let destination = page ?? (isAlreadyOpen ? nil : mainWindowState.startPageDestination) {
+            mainWindowState.select(destination)
+        }
         NSApp.setActivationPolicy(.regular)
         NSApp.activate(ignoringOtherApps: true)
         if let mainWindow {
@@ -265,7 +270,7 @@ extension AppDelegate {
         } ?? false
         if mainWindowState.routeLibraryShortcut(windowIsFrontmost: frontmost) {
             hideMainWindow()
-        } else { openMainWindow() }
+        } else { openMainWindow(page: .library) }
     }
 
     func hideMainWindow() {

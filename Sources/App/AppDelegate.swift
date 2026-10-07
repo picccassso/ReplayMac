@@ -309,7 +309,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, @unchecked Sendable {
     }
 
     func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
-        openMainWindow(page: .home)
+        openMainWindow()
         return false
     }
 

@@ -384,6 +384,7 @@ public extension Defaults.Keys {
     static let bufferDurationSeconds = Key<Int>("bufferDurationSeconds", default: 30)
     static let outputDirectoryPath = Key<String>("outputDirectoryPath", default: AppSettings.defaultOutputDirectoryPath)
     static let launchAtLogin = Key<Bool>("launchAtLogin", default: false)
+    static let mainWindowStartPage = Key<String>(MainWindowState.startPageKey, default: MainWindowStartPage.home.rawValue)
     static let autoStartRecordingOnLaunch = Key<Bool>("autoStartRecordingOnLaunch", default: true)
     static let resumeRecordingAfterWake = Key<Bool>("resumeRecordingAfterWake", default: true)
     static let autoRecordGamesEnabled = Key<Bool>("autoRecordGamesEnabled", default: false)

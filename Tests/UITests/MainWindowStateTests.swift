@@ -35,12 +35,31 @@ final class MainWindowStateTests: XCTestCase {
             state.select(.audio)
             XCTAssertTrue(state.isSettingsPage)
             XCTAssertTrue(state.hasVisitedSettings)
+            defaults.set(MainWindowStartPage.lastViewed.rawValue, forKey: MainWindowState.startPageKey)
             XCTAssertEqual(MainWindowState(defaults: defaults).page, .audio)
             XCTAssertEqual(MainWindowState(defaults: defaults).settingsTab, .audio)
             state.select(.general)
             XCTAssertEqual(state.settingsTab, .general)
             defaults.set("removed-page", forKey: "mainWindowPage")
             XCTAssertEqual(MainWindowState(defaults: defaults).page, .home)
+        }
+    }
+
+    @MainActor
+    func testStartPageSettingChoosesTheOpeningPage() {
+        withState { state, defaults in
+            state.select(.general)
+            // Home is the default, whatever page was open last.
+            XCTAssertEqual(MainWindowState(defaults: defaults).page, .home)
+            XCTAssertEqual(state.startPageDestination, .home)
+            defaults.set(MainWindowStartPage.library.rawValue, forKey: MainWindowState.startPageKey)
+            XCTAssertEqual(MainWindowState(defaults: defaults).page, .library)
+            XCTAssertEqual(state.startPageDestination, .library)
+            defaults.set(MainWindowStartPage.lastViewed.rawValue, forKey: MainWindowState.startPageKey)
+            XCTAssertEqual(MainWindowState(defaults: defaults).page, .general)
+            XCTAssertNil(state.startPageDestination)
+            defaults.set("removed-choice", forKey: MainWindowState.startPageKey)
+            XCTAssertEqual(state.startPageDestination, .home)
         }
     }
 

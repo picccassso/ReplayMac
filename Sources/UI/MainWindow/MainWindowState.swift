@@ -36,8 +36,31 @@ public enum MainWindowPage: String, CaseIterable, Identifiable {
     }
 }
 
+/// The page the main window shows when it opens without a specific destination,
+/// such as at launch or from the Dock. Set in Settings > General.
+public enum MainWindowStartPage: String, CaseIterable, Identifiable {
+    case home, library, lastViewed
+    public var id: String { rawValue }
+    public var title: String {
+        switch self {
+        case .home: "Home"
+        case .library: "Clip Library"
+        case .lastViewed: "Last Viewed Page"
+        }
+    }
+    /// Nil restores whichever page was open last.
+    var page: MainWindowPage? {
+        switch self {
+        case .home: .home
+        case .library: .library
+        case .lastViewed: nil
+        }
+    }
+}
+
 @MainActor
 public final class MainWindowState: ObservableObject {
+    nonisolated public static let startPageKey = "mainWindowStartPage"
     @Published public private(set) var page: MainWindowPage
     /// Open Trim & Export sessions, one per clip, each shown in its own window.
     @Published private(set) var editors: [URL: ClipEditorSession] = [:]
@@ -61,7 +84,10 @@ public final class MainWindowState: ObservableObject {
 
     public init(defaults: UserDefaults = .standard) {
         self.defaults = defaults
-        let restoredPage = MainWindowPage(rawValue: defaults.string(forKey: "mainWindowPage") ?? "") ?? .home
+        let startPage = MainWindowStartPage(rawValue: defaults.string(forKey: Self.startPageKey) ?? "") ?? .home
+        let restoredPage = startPage.page
+            ?? MainWindowPage(rawValue: defaults.string(forKey: "mainWindowPage") ?? "")
+            ?? .home
         page = restoredPage
         hasVisitedSettings = SettingsTab(rawValue: restoredPage.rawValue) != nil
         library = ClipLibraryState()
@@ -75,6 +101,12 @@ public final class MainWindowState: ObservableObject {
     }
 
     public var isLibraryFrontmost: Bool { page == .library }
+
+    /// The page to show when the window opens without a specific destination,
+    /// or nil to keep the page that was open last.
+    public var startPageDestination: MainWindowPage? {
+        (MainWindowStartPage(rawValue: defaults.string(forKey: Self.startPageKey) ?? "") ?? .home).page
+    }
     var isSettingsPage: Bool { SettingsTab(rawValue: page.rawValue) != nil }
 
     /// Returns whether the caller should hide the native window. Otherwise the
