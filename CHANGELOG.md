@@ -7,6 +7,7 @@
 - Fix the Trim & Export settings panel spilling past the window edge and cutting off its help buttons, most visibly after expanding or collapsing Export a GIF. The Quality picker was wider than the panel; the panel is now wide enough for it and falls back to a pop-up menu if it still doesn't fit. The GIF icon now uses the accent colour while the section is expanded and is greyed out when collapsed
 - Add a Home page to the main window: the menu bar's actions as large buttons (save a replay, start or stop the replay buffer or a session recording, mute the microphone or system audio), live status with replay buffer fill, extended replay, session time and the recorded display, and each action's hotkey with a shortcut to set one. Home is the first page for new installs and opens when you click ReplayMac in the Dock
 - Move the sidebar's ReplayMac header up in full screen, where the traffic lights it made room for are hidden
+- Give the Trim & Export window the same translucent, desktop-tinted background as the main window's sidebar, staying translucent while another app is in front, and put the trim range controls on a Liquid Glass panel that follows your glass appearance setting. Both become opaque with Reduce Transparency. The selected duration is now shown in the primary text colour so it stays readable on the glass, and the window title names the clip being edited
 
 ## 1.7.3
 

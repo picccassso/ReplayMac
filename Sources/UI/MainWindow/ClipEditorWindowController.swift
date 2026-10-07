@@ -26,15 +26,20 @@ final class ClipEditorWindowController: NSWindowController, NSWindowDelegate {
         self.session = session
         self.state = state
         let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 1280, height: 800),
-                              styleMask: [.titled, .closable, .miniaturizable, .resizable],
+                              styleMask: [.titled, .closable, .miniaturizable, .resizable, .fullSizeContentView],
                               backing: .buffered, defer: false)
         super.init(window: window)
-        window.title = "Trim & Export"
-        window.subtitle = session.url.lastPathComponent
+        window.title = "Trim & Export — \(session.url.lastPathComponent)"
+        // The translucent backdrop runs under the title bar, as in the main window.
+        // A clear window background lets the backdrop show the desktop fully.
+        window.titlebarAppearsTransparent = true
+        window.isOpaque = false
+        window.backgroundColor = .clear
         window.collectionBehavior.insert(.fullScreenPrimary)
         window.isReleasedWhenClosed = false
         let editor = ClipTrimView(session: session, exports: session.exports) { [weak self] in self?.close() }
             .tint(AppTheme.accent)
+            .background(WindowBackdrop().ignoresSafeArea())
         window.contentViewController = NSHostingController(rootView: editor)
         let titleBarHeight = window.frame.height - window.contentRect(forFrameRect: window.frame).height
         let screen = NSScreen.main ?? NSScreen.screens.first
@@ -86,4 +91,20 @@ final class ClipEditorWindowController: NSWindowController, NSWindowDelegate {
         // retains the controller until the end of this run-loop iteration.
         window?.contentViewController = nil
     }
+}
+
+/// The translucent, desktop-tinted material behind the main window's sidebar.
+/// It stays translucent while another app is in front, so the editor keeps its
+/// look on a second screen. A system material, so Reduce Transparency and
+/// Increase Contrast make it opaque automatically.
+private struct WindowBackdrop: NSViewRepresentable {
+    func makeNSView(context: Context) -> NSVisualEffectView {
+        let view = NSVisualEffectView()
+        view.material = .sidebar
+        view.blendingMode = .behindWindow
+        view.state = .active
+        return view
+    }
+
+    func updateNSView(_ view: NSVisualEffectView, context: Context) {}
 }

@@ -74,9 +74,11 @@ struct TrimRangeSelector: View {
                             TrimHelpButton(text: "Drag either handle or type the Start and End times. Enter seconds, minutes:seconds, or hours:minutes:seconds, with optional tenths. Use the arrows to adjust by 0.1 second. The player loops your selection when you finish editing.")
                         }
                     }
+                    // Primary rather than accent: accent text loses contrast on
+                    // the dark glass panel, especially over a tinted backdrop.
                     Text(Self.timeLabel(max(0, end - start)))
                         .font(.system(size: 12, weight: .semibold, design: .monospaced))
-                        .foregroundStyle(AppTheme.accent)
+                        .foregroundStyle(AppTheme.textPrimary)
                         .accessibilityLabel("Selected duration")
                         .accessibilityValue(Self.timeLabel(max(0, end - start)))
                 }

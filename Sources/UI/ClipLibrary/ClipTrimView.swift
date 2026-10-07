@@ -78,8 +78,9 @@ struct ClipTrimView: View {
                               onSeek: session.seek, onEditingChanged: session.rangeEditingChanged,
                               editableTimes: true)
                 .padding(12)
-                .background(AppTheme.backgroundSecondary,
-                            in: RoundedRectangle(cornerRadius: AppTheme.cornerRadiusMedium))
+                // The same Liquid Glass as the library's floating bars, following
+                // the user's glass appearance setting.
+                .glassPanel(cornerRadius: AppTheme.cornerRadiusMedium)
                 .disabled(session.isBusy || session.duration <= 0)
         }
         .padding(16)
