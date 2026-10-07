@@ -41,6 +41,7 @@ final class ClipEditorWindowController: NSWindowController, NSWindowDelegate {
             .tint(AppTheme.accent)
             .background(WindowBackdrop().ignoresSafeArea())
         window.contentViewController = NSHostingController(rootView: editor)
+        window.addTitlebarAccessoryViewController(Self.overviewHelpAccessory())
         let titleBarHeight = window.frame.height - window.contentRect(forFrameRect: window.frame).height
         let screen = NSScreen.main ?? NSScreen.screens.first
         if let visible = screen?.visibleFrame {
@@ -64,6 +65,19 @@ final class ClipEditorWindowController: NSWindowController, NSWindowDelegate {
     }
 
     required init?(coder: NSCoder) { nil }
+
+    /// The editor-wide help sits at the trailing end of the title bar, beside
+    /// the window's title, rather than in the crop controls.
+    private static func overviewHelpAccessory() -> NSTitlebarAccessoryViewController {
+        let accessory = NSTitlebarAccessoryViewController()
+        accessory.layoutAttribute = .trailing
+        let button = NSHostingView(rootView: TrimHelpButton(text: ClipTrimView.overviewHelp, arrowEdge: .bottom)
+            .padding(.horizontal, 12)
+            .frame(maxHeight: .infinity))
+        button.frame = NSRect(origin: .zero, size: NSSize(width: button.fittingSize.width, height: 28))
+        accessory.view = button
+        return accessory
+    }
 
     // A shared autosave name can belong to only one live NSWindow. Save explicitly
     // so every editor window remembers the last ordinary window frame.

@@ -6,6 +6,9 @@ import Save
 import UniformTypeIdentifiers
 
 struct ClipTrimView: View {
+    /// Shown from the window's title bar, as it covers the whole editor.
+    static let overviewHelp = "Crop the picture, select a time range, then choose your export settings. Save exports an MP4; Export GIF creates a looping image without audio."
+
     @ObservedObject var session: ClipEditorSession
     @ObservedObject var exports: ClipExportCoordinator
     let onClose: () -> Void
@@ -92,7 +95,8 @@ struct ClipTrimView: View {
                 .toggleStyle(.switch)
                 .controlSize(.small)
                 .fixedSize()
-            TrimHelpButton(text: "Crop both MP4 and GIF exports to the selected area. Drag the centre to move it and the edges to resize it. Turning Crop off retains your selection.")
+            TrimHelpButton(text: "Crop both MP4 and GIF exports to the selected area. Drag the centre to move it and the edges to resize it. Turning Crop off retains your selection.",
+                           arrowEdge: .bottom)
             if session.cropEnabled {
                 Text("\(Int((session.cropRect.width * 100).rounded()))% × \(Int((session.cropRect.height * 100).rounded()))%")
                     .font(.system(size: 10, design: .monospaced))
@@ -116,7 +120,6 @@ struct ClipTrimView: View {
             } else {
                 Spacer()
             }
-            TrimHelpButton(text: "Crop the picture, select a time range, then choose your export settings. Save exports an MP4; Export GIF creates a looping image without audio.")
         }
         .font(.system(size: 12))
         .disabled(session.isBusy || session.duration <= 0)
@@ -236,7 +239,7 @@ struct ClipTrimView: View {
                 Text(detail).foregroundStyle(.secondary).lineLimit(1).minimumScaleFactor(0.85)
             }
             Spacer(minLength: 0)
-            TrimHelpButton(text: help)
+            TrimHelpButton(text: help, arrowEdge: .leading)
         }
         .font(.system(size: 11))
     }
@@ -282,7 +285,8 @@ struct ClipTrimView: View {
                 .buttonStyle(.plain)
                 .accessibilityLabel("Export a GIF")
                 .accessibilityValue(session.gifExpanded ? "Expanded" : "Collapsed")
-                TrimHelpButton(text: "Export the selected range and crop as a looping GIF without audio. GIF size is independent of MP4 resolution and quality. The approximate estimate samples image content; the final file size can differ.")
+                TrimHelpButton(text: "Export the selected range and crop as a looping GIF without audio. GIF size is independent of MP4 resolution and quality. The approximate estimate samples image content; the final file size can differ.",
+                               arrowEdge: .leading)
             }
             .font(.system(size: 12, weight: .medium))
             .foregroundStyle(session.gifExpanded ? AppTheme.textPrimary : AppTheme.textSecondary)
@@ -317,6 +321,8 @@ struct ClipTrimView: View {
 
 struct TrimHelpButton: View {
     let text: String
+    /// Where the popover opens. Buttons near a window edge open inwards.
+    var arrowEdge: Edge = .top
     @State private var presented = false
 
     var body: some View {
@@ -328,8 +334,16 @@ struct TrimHelpButton: View {
         .help(text)
         .accessibilityLabel("Help")
         .accessibilityHint(text)
-        .popover(isPresented: $presented) {
-            Text(text).font(.system(size: 12)).padding(14).frame(width: 280)
+        .popover(isPresented: $presented, arrowEdge: arrowEdge) {
+            // Wrap at a fixed width before sizing, so the popover is never
+            // narrower than its text, and draw an opaque background so the
+            // controls underneath do not show through the help text.
+            Text(text)
+                .font(.system(size: 12))
+                .fixedSize(horizontal: false, vertical: true)
+                .frame(width: 260, alignment: .leading)
+                .padding(14)
+                .presentationBackground(Color(nsColor: .windowBackgroundColor))
         }
     }
 }
