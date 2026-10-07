@@ -65,6 +65,9 @@ public final class MainWindowState: ObservableObject {
     /// Open Trim & Export sessions, one per clip, each shown in its own window.
     @Published private(set) var editors: [URL: ClipEditorSession] = [:]
     @Published public var isWindowVisible = false
+    /// True until the window has opened for the first time, and whenever the
+    /// window has been closed (ordered out), but false while minimized.
+    @Published public var isWindowClosed = true
     /// The sidebar header drops its traffic-light inset in full screen.
     @Published public var isFullScreen = false
     @Published var hasVisitedSettings: Bool
@@ -169,5 +172,29 @@ public final class MainWindowState: ObservableObject {
 
     public func windowDidHide() {
         isWindowVisible = false
+    }
+
+    /// Closing marks the window as closed and hidden. Destination routing is
+    /// handled when reopening so the window does not flash while hiding and
+    /// the last viewed page is preserved.
+    public func windowDidClose() {
+        windowDidHide()
+        isWindowClosed = true
+    }
+
+    /// Prepares the active page when opening or reopening the window.
+    /// An explicit destination is always selected. When no page is specified,
+    /// a closed window resets to the startup destination (if configured),
+    /// while an already-open or minimized window keeps its current page.
+    public func willOpenWindow(page: MainWindowPage? = nil) {
+        if let page {
+            select(page)
+        } else if isWindowClosed {
+            if let start = startPageDestination {
+                select(start)
+            }
+        }
+        isWindowClosed = false
+        isWindowVisible = true
     }
 }

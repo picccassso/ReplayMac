@@ -64,6 +64,58 @@ final class MainWindowStateTests: XCTestCase {
     }
 
     @MainActor
+    func testClosingTheWindowResetsToTheStartPageOnReopenButMinimisingDoesNot() {
+        withState { state, defaults in
+            defaults.set(MainWindowStartPage.library.rawValue, forKey: MainWindowState.startPageKey)
+            state.select(.general)
+            state.isWindowVisible = true
+            state.isWindowClosed = false
+
+            // Minimising keeps the page the user was on.
+            state.windowDidHide()
+            XCTAssertFalse(state.isWindowVisible)
+            XCTAssertFalse(state.isWindowClosed)
+            state.willOpenWindow()
+            XCTAssertEqual(state.page, .general)
+            XCTAssertTrue(state.isWindowVisible)
+            XCTAssertFalse(state.isWindowClosed)
+
+            // Closing does not flash or alter the page before hiding.
+            state.windowDidClose()
+            XCTAssertFalse(state.isWindowVisible)
+            XCTAssertTrue(state.isWindowClosed)
+            XCTAssertEqual(state.page, .general)
+
+            // Reopening resets to the start page (Clip Library).
+            state.willOpenWindow()
+            XCTAssertEqual(state.page, .library)
+            XCTAssertTrue(state.isWindowVisible)
+            XCTAssertFalse(state.isWindowClosed)
+
+            // Start page set to Home.
+            defaults.set(MainWindowStartPage.home.rawValue, forKey: MainWindowState.startPageKey)
+            state.select(.video)
+            state.windowDidClose()
+            XCTAssertEqual(state.page, .video)
+            state.willOpenWindow()
+            XCTAssertEqual(state.page, .home)
+
+            // Last Viewed Page leaves the page alone on close and reopen.
+            defaults.set(MainWindowStartPage.lastViewed.rawValue, forKey: MainWindowState.startPageKey)
+            state.select(.audio)
+            state.windowDidClose()
+            XCTAssertEqual(state.page, .audio)
+            state.willOpenWindow()
+            XCTAssertEqual(state.page, .audio)
+
+            // Explicit target always takes priority even after close.
+            state.windowDidClose()
+            state.willOpenWindow(page: .profiles)
+            XCTAssertEqual(state.page, .profiles)
+        }
+    }
+
+    @MainActor
     func testLibraryShortcutRoutesFromSettingsAndOnlyHidesFrontmostLibrary() {
         withState { state, _ in
             XCTAssertFalse(state.routeLibraryShortcut(windowIsFrontmost: true))

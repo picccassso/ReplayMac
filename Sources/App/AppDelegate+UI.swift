@@ -245,21 +245,18 @@ extension AppDelegate {
         _ = enforceOnboardingWindowExclusivity()
     }
 
-    /// Without a page, a window that isn't already open shows the start page
-    /// chosen in Settings; an open window keeps the page it's on.
+    /// Opens the main window, respecting the start page chosen in Settings when
+    /// reopening after closure or on fresh launch, or retaining the current page
+    /// when already open or minimized.
     func openMainWindow(page: MainWindowPage? = nil) {
         guard !enforceOnboardingWindowExclusivity() else { return }
-        let isAlreadyOpen = mainWindow.map { $0.isVisible || $0.isMiniaturized } ?? false
-        if let destination = page ?? (isAlreadyOpen ? nil : mainWindowState.startPageDestination) {
-            mainWindowState.select(destination)
-        }
+        mainWindowState.willOpenWindow(page: page)
         NSApp.setActivationPolicy(.regular)
         NSApp.activate(ignoringOtherApps: true)
         if let mainWindow {
             mainWindow.deminiaturize(nil)
             mainWindow.makeKeyAndOrderFront(nil)
         } else { mainWindowOpener?() }
-        mainWindowState.isWindowVisible = true
     }
 
     func openClipLibraryWindow() { openMainWindow(page: .library) }
@@ -274,7 +271,7 @@ extension AppDelegate {
     }
 
     func hideMainWindow() {
-        mainWindowState.windowDidHide()
+        mainWindowState.windowDidClose()
         mainWindow?.orderOut(nil)
         updateActivationPolicy()
     }
@@ -313,6 +310,7 @@ extension AppDelegate {
     private func completeOnboarding() {
         Defaults[.hasCompletedOnboarding] = true
         onboardingWindowController?.close()
+        openMainWindow()
     }
 
     /// Cleans up the window and starts recording only after the setup assistant

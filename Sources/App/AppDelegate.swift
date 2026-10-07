@@ -123,6 +123,15 @@ class AppDelegate: NSObject, NSApplicationDelegate, @unchecked Sendable {
     /// the stall watchdog must not judge it by the main stream's samples.
     var isCapturingMainSystemAudio = false
 
+    /// Detects if the application was started automatically at login via SMAppService / Login Items.
+    private var isLaunchedAsLoginItem: Bool {
+        guard let event = NSAppleEventManager.shared().currentAppleEvent else {
+            return false
+        }
+        return event.eventID == kAEOpenApplication &&
+               event.paramDescriptor(forKeyword: keyAEPropData)?.enumCodeValue == keyAELaunchedAsLogInItem
+    }
+
     override init() {
         // Branding must be set before anything builds user-facing strings or
         // compares against branded defaults (migrateLegacyBrandDefaults). The
@@ -259,7 +268,11 @@ class AppDelegate: NSObject, NSApplicationDelegate, @unchecked Sendable {
         syncMemoryCapsToSettings()
 
         DispatchQueue.main.async { [weak self] in
-            self?.updateActivationPolicy(bringVisibleWindowToFront: true)
+            guard let self else { return }
+            if Defaults[.hasCompletedOnboarding] && !self.isLaunchedAsLoginItem {
+                self.openMainWindow()
+            }
+            self.updateActivationPolicy(bringVisibleWindowToFront: true)
         }
     }
 
