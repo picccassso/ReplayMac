@@ -14,7 +14,6 @@ public final class StatusItemController: NSObject, NSMenuDelegate, @unchecked Se
     private var toggleRecordingItem: NSMenuItem?
     private var toggleMicMuteItem: NSMenuItem?
     private var toggleSystemAudioMuteItem: NSMenuItem?
-    private var libraryItem: NSMenuItem?
     private var copyLastClipItem: NSMenuItem?
     private var revealLastClipItem: NSMenuItem?
     private var openLastClipItem: NSMenuItem?
@@ -36,6 +35,7 @@ public final class StatusItemController: NSObject, NSMenuDelegate, @unchecked Se
     public var onToggleSystemAudioMute: (() -> Void)?
     public var onCopyLastClip: (() -> Void)?
     public var onOpenMainWindow: (() -> Void)?
+    public var onOpenClipLibrary: (() -> Void)?
     public var onOpenSettings: (() -> Void)?
     public var onQuit: (() -> Void)?
 
@@ -179,8 +179,11 @@ public final class StatusItemController: NSObject, NSMenuDelegate, @unchecked Se
         toggleSystemAudioMuteItem.target = self
         menu.addItem(toggleSystemAudioMuteItem)
 
-        let libraryItem = NSMenuItem(title: "Open \(AppBranding.name)", action: #selector(openClipLibrary), keyEquivalent: "")
+        menu.addItem(NSMenuItem.separator())
+
+        let libraryItem = NSMenuItem(title: "Clip Library", action: #selector(openClipLibrary), keyEquivalent: "")
         libraryItem.target = self
+        libraryItem.image = NSImage(systemSymbolName: "film.stack", accessibilityDescription: "Clip Library")
         menu.addItem(libraryItem)
 
         let copyLastClipItem = NSMenuItem(title: "Copy Last Clip", action: #selector(copyLastClip), keyEquivalent: "")
@@ -194,6 +197,8 @@ public final class StatusItemController: NSObject, NSMenuDelegate, @unchecked Se
         let revealLastClipItem = NSMenuItem(title: "Reveal Last Clip in Finder", action: #selector(revealLastClip), keyEquivalent: "")
         revealLastClipItem.target = self
         menu.addItem(revealLastClipItem)
+
+        menu.addItem(NSMenuItem.separator())
 
         let recordingDurationItem = NSMenuItem(title: "", action: nil, keyEquivalent: "")
         recordingDurationItem.isEnabled = false
@@ -236,7 +241,6 @@ public final class StatusItemController: NSObject, NSMenuDelegate, @unchecked Se
         self.toggleRecordingItem = toggleRecordingItem
         self.toggleMicMuteItem = toggleMicMuteItem
         self.toggleSystemAudioMuteItem = toggleSystemAudioMuteItem
-        self.libraryItem = libraryItem
         self.copyLastClipItem = copyLastClipItem
         self.openLastClipItem = openLastClipItem
         self.revealLastClipItem = revealLastClipItem
@@ -300,8 +304,6 @@ public final class StatusItemController: NSObject, NSMenuDelegate, @unchecked Se
             toggleSystemAudioMuteItem?.title = "Mute System Audio"
             toggleSystemAudioMuteItem?.image = NSImage(systemSymbolName: "speaker.wave.2.fill", accessibilityDescription: "System audio active")
         }
-
-        libraryItem?.title = "Open \(AppBranding.name)"
 
         // Drop the reference if the clip has since been moved, renamed, or deleted.
         if let url = lastClipURL, !FileManager.default.fileExists(atPath: url.path) {
@@ -440,8 +442,10 @@ public final class StatusItemController: NSObject, NSMenuDelegate, @unchecked Se
     }
 
     @objc private func openClipLibrary() {
-        if let onOpenMainWindow {
-            onOpenMainWindow()
+        if let onOpenClipLibrary {
+            onOpenClipLibrary()
+        } else {
+            onOpenMainWindow?()
         }
     }
 

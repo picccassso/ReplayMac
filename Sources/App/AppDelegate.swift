@@ -196,6 +196,9 @@ class AppDelegate: NSObject, NSApplicationDelegate, @unchecked Sendable {
         statusItemController.onOpenMainWindow = { [weak self] in
             self?.openMainWindow()
         }
+        statusItemController.onOpenClipLibrary = { [weak self] in
+            self?.openClipLibraryWindow()
+        }
         statusItemController.onOpenSettings = { [weak self] in
             self?.openSettingsWindow()
         }
