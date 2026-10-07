@@ -178,6 +178,7 @@ extension AppDelegate {
 
             menuBarState.finishSaving(success: true)
             statusItemController.setLastClip(savedURL)
+            mainWindowState.recordSavedClips([savedURL], kind: .session)
             isSessionFinalizeInProgress = false
             statusItemController.refreshPresentation()
 

@@ -4,7 +4,6 @@ public enum AppTheme {
     // Resolve the system colour dynamically, including changes while open.
     public static var accent: Color { Color(nsColor: .controlAccentColor) }
     public static var accentSecondary: Color { accent }
-    public static let brandAccent = Color.teal
 
     public static let backgroundPrimary = Color(nsColor: .windowBackgroundColor)
     public static let backgroundSecondary = Color(nsColor: .secondarySystemFill).opacity(0.5)

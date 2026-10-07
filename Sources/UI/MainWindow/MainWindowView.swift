@@ -16,10 +16,12 @@ public struct MainWindowView: View {
     }
 
     public var body: some View {
-        // The sidebar is always shown at a fixed width; there is no collapsing.
+        // The sidebar is always shown at a fixed width; it cannot be collapsed
+        // or resized, so its layout never needs adjusting.
         NavigationSplitView(columnVisibility: .constant(.all)) {
             sidebar
-                .navigationSplitViewColumnWidth(220)
+                .navigationSplitViewColumnWidth(Self.sidebarWidth)
+                .background(SidebarWidthLock(width: Self.sidebarWidth))
                 .toolbar(removing: .sidebarToggle)
         } detail: {
             detail
@@ -31,17 +33,22 @@ public struct MainWindowView: View {
 
     // MARK: Sidebar
 
+    private static let sidebarWidth: CGFloat = 220
+
     private var sidebar: some View {
         VStack(alignment: .leading, spacing: 0) {
-            HStack(spacing: 9) {
-                Image(systemName: "arrow.counterclockwise.circle.fill")
-                    .font(.system(size: 23))
-                    .foregroundStyle(AppTheme.brandAccent)
-                    .frame(width: 20)
+            // The app's own icon, so each edition shows its own artwork. The
+            // icon's built-in margin keeps the name aligned with the row labels.
+            HStack(spacing: 6) {
+                Image(nsImage: NSApp.applicationIconImage)
+                    .resizable()
+                    .interpolation(.high)
+                    .frame(width: 26, height: 26)
                 Text(AppBranding.name)
                     .font(.system(size: 17, weight: .bold, design: .rounded))
             }
-            .padding(.horizontal, 12)
+            .padding(.leading, 10)
+            .padding(.trailing, 12)
             // Clears the traffic lights, which full screen hides.
             .padding(.top, state.isFullScreen ? 20 : 52)
             .padding(.bottom, 22)
@@ -195,5 +202,51 @@ public struct MainWindowView: View {
             }
         }
         .floatingPill()
+    }
+}
+
+/// Pins the sidebar's split view item to a fixed width. On macOS, SwiftUI's
+/// `navigationSplitViewColumnWidth(min:ideal:max:)` leaves the AppKit item
+/// resizable, so the limits are set on the item itself, and reapplied on
+/// layout in case SwiftUI resets them.
+private struct SidebarWidthLock: NSViewRepresentable {
+    let width: CGFloat
+
+    func makeNSView(context: Context) -> LockView {
+        let view = LockView()
+        view.width = width
+        return view
+    }
+
+    func updateNSView(_ view: LockView, context: Context) {
+        view.width = width
+        view.needsLayout = true
+    }
+
+    final class LockView: NSView {
+        var width: CGFloat = 0
+
+        override func viewDidMoveToWindow() {
+            super.viewDidMoveToWindow()
+            applyLock()
+        }
+
+        override func layout() {
+            super.layout()
+            applyLock()
+        }
+
+        private func applyLock() {
+            var ancestor = superview
+            while let view = ancestor, !(view is NSSplitView) { ancestor = view.superview }
+            guard let splitView = ancestor as? NSSplitView,
+                  let controller = splitView.delegate as? NSSplitViewController,
+                  let item = controller.splitViewItems.first,
+                  item.minimumThickness != width || item.maximumThickness != width || item.canCollapse
+            else { return }
+            item.minimumThickness = width
+            item.maximumThickness = width
+            item.canCollapse = false
+        }
     }
 }

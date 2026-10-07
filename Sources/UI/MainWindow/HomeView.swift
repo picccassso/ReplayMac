@@ -1,3 +1,5 @@
+import AppKit
+import Branding
 import Defaults
 import Hotkeys
 import KeyboardShortcuts
@@ -29,14 +31,15 @@ struct HomeView: View {
         ScrollView {
             VStack(alignment: .leading, spacing: 20) {
                 statusCard
-                LazyVGrid(columns: [GridItem(.adaptive(minimum: 220), spacing: 12, alignment: .top)],
+                // Three flexible columns stretch the tiles to fill any window width.
+                LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 12, alignment: .top), count: 3),
                           alignment: .leading, spacing: 16) {
                     tiles
                 }
+                sessionHistory
             }
             .padding(24)
-            .frame(maxWidth: 920, alignment: .leading)
-            .frame(maxWidth: .infinity)
+            .frame(maxWidth: .infinity, alignment: .leading)
         }
         .onAppear(perform: reloadShortcuts)
     }
@@ -116,6 +119,104 @@ struct HomeView: View {
                 .foregroundStyle(.secondary)
         }
         .accessibilityElement(children: .combine)
+    }
+
+    // MARK: Session history
+
+    /// Renamed, moved or deleted clips drop out rather than offering a dead Trim button.
+    private var visibleRecentClips: [RecentClip] {
+        windowState.recentClips.filter { FileManager.default.fileExists(atPath: $0.url.path) }
+    }
+
+    private var sessionHistory: some View {
+        let clips = visibleRecentClips
+        return VStack(alignment: .leading, spacing: 10) {
+            HStack(alignment: .firstTextBaseline) {
+                Text("This Session")
+                    .font(.system(size: 15, weight: .semibold, design: .rounded))
+                    .accessibilityAddTraits(.isHeader)
+                Spacer()
+                if !clips.isEmpty {
+                    Button("Show All in Clip Library") { windowState.select(.library) }
+                        .buttonStyle(.link)
+                        .font(.system(size: 12, design: .rounded))
+                }
+            }
+            if clips.isEmpty {
+                Text("Clips you save appear here until you quit \(AppBranding.name).")
+                    .font(.system(size: 12, design: .rounded))
+                    .foregroundStyle(.secondary)
+                    .padding(16)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .background(AppTheme.backgroundSecondary,
+                                in: RoundedRectangle(cornerRadius: AppTheme.cornerRadiusMedium, style: .continuous))
+            } else {
+                VStack(spacing: 0) {
+                    ForEach(clips) { clip in
+                        recentClipRow(clip)
+                        if clip.id != clips.last?.id {
+                            Divider().padding(.leading, 122)
+                        }
+                    }
+                }
+                .glassPanel(cornerRadius: AppTheme.cornerRadiusMedium)
+            }
+        }
+        .padding(.top, 8)
+    }
+
+    private func recentClipRow(_ clip: RecentClip) -> some View {
+        HStack(spacing: 12) {
+            Group {
+                if let data = clip.thumbnail, let image = NSImage(data: data) {
+                    Image(nsImage: image).resizable().aspectRatio(contentMode: .fill)
+                } else {
+                    ZStack {
+                        Color.black.opacity(0.35)
+                        Image(systemName: "film").foregroundStyle(.secondary)
+                    }
+                }
+            }
+            .frame(width: 96, height: 54)
+            .clipShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
+            .accessibilityHidden(true)
+
+            VStack(alignment: .leading, spacing: 3) {
+                Text(clip.url.deletingPathExtension().lastPathComponent)
+                    .font(.system(size: 13, weight: .medium, design: .rounded))
+                    .lineLimit(1)
+                    .truncationMode(.middle)
+                Text(details(for: clip))
+                    .font(.system(size: 11, design: .rounded))
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+            }
+            Spacer(minLength: 8)
+            Button {
+                NSWorkspace.shared.activateFileViewerSelecting([clip.url])
+            } label: {
+                Image(systemName: "folder")
+            }
+            .buttonStyle(.borderless)
+            .help("Show in Finder")
+            .accessibilityLabel("Show \(clip.url.lastPathComponent) in Finder")
+            Button("Trim", systemImage: "scissors") { windowState.openEditor(clip.url) }
+                .buttonStyle(AppButtonStyle())
+                .help("Trim or crop this clip and export it")
+        }
+        .padding(.horizontal, 14)
+        .padding(.vertical, 10)
+        .accessibilityElement(children: .contain)
+    }
+
+    private func details(for clip: RecentClip) -> String {
+        var parts = [clip.kind.title]
+        if let duration = clip.duration { parts.append(MenuBarState.formattedDuration(duration)) }
+        if let size = clip.fileSize {
+            parts.append(ByteCountFormatter.string(fromByteCount: size, countStyle: .file))
+        }
+        parts.append("Saved \(clip.savedAt.formatted(date: .omitted, time: .shortened))")
+        return parts.joined(separator: " · ")
     }
 
     // MARK: Actions

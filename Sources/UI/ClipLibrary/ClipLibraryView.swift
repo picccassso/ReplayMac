@@ -998,7 +998,7 @@ final class ClipLibraryViewModel: ObservableObject {
         return candidate
     }
 
-    private static func thumbnailData(for url: URL) async -> Data? {
+    static func thumbnailData(for url: URL) async -> Data? {
         let asset = AVURLAsset(url: url)
         let generator = AVAssetImageGenerator(asset: asset)
         generator.appliesPreferredTrackTransform = true

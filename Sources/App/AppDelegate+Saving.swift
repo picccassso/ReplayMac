@@ -99,6 +99,7 @@ extension AppDelegate {
 
             menuBarState.finishSaving(success: true)
             statusItemController.setLastClip(finalURLs.first)
+            mainWindowState.recordSavedClips(finalURLs, kind: .replay)
             statusItemController.refreshPresentation()
 
             if AppSettings.playAudioCueOnSave {
@@ -169,6 +170,7 @@ extension AppDelegate {
 
             menuBarState.finishSaving(success: true)
             statusItemController.setLastClip(savedURL)
+            mainWindowState.recordSavedClips([savedURL], kind: .extendedReplay)
             statusItemController.refreshPresentation()
 
             if AppSettings.playAudioCueOnSave {

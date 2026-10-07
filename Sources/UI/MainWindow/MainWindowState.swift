@@ -1,5 +1,6 @@
 import AppKit
 import Combine
+import Save
 import SwiftUI
 
 public extension Notification.Name {
@@ -48,6 +49,10 @@ public final class MainWindowState: ObservableObject {
     public let exports = ClipExportCoordinator()
     /// Capture actions for the Home page, wired by the app delegate.
     public var controls = ReplayControls()
+    /// Clips saved since launch, newest first. Deliberately never persisted,
+    /// so Home's session history starts empty on every launch.
+    @Published private(set) var recentClips: [RecentClip] = []
+    static let recentClipLimit = 20
     let library: ClipLibraryState
     /// Brings a session's editor window forward. Tests leave it nil so no windows are created.
     var presentEditor: ((ClipEditorSession) -> Void)?
@@ -102,6 +107,26 @@ public final class MainWindowState: ObservableObject {
     /// Ends the edit. A running export keeps going; the coordinator owns it.
     func closeEditor(_ url: URL) {
         editors.removeValue(forKey: url.standardizedFileURL)?.dispose()
+    }
+
+    public func recordSavedClips(_ urls: [URL], kind: SavedClipKind, at date: Date = Date()) {
+        let clips = urls.map { RecentClip(url: $0.standardizedFileURL, kind: kind, savedAt: date) }
+        recentClips = Array((clips + recentClips).prefix(Self.recentClipLimit))
+        for clip in clips {
+            Task { await loadDetails(for: clip) }
+        }
+    }
+
+    private func loadDetails(for clip: RecentClip) async {
+        let size = (try? clip.url.resourceValues(forKeys: [.fileSizeKey]).fileSize).map(Int64.init)
+        let info = await ClipMetadata.enrichClipInfo(
+            ClipInfo(fileURL: clip.url, creationDate: clip.savedAt, duration: 0, fileSize: size ?? 0)
+        )
+        let thumbnail = await ClipLibraryViewModel.thumbnailData(for: clip.url)
+        guard let index = recentClips.firstIndex(where: { $0.id == clip.id }) else { return }
+        recentClips[index].duration = info.duration > 0 ? info.duration : nil
+        recentClips[index].fileSize = size
+        recentClips[index].thumbnail = thumbnail
     }
 
     func isProtected(_ url: URL) -> Bool {

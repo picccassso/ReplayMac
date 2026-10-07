@@ -113,6 +113,28 @@ final class MainWindowStateTests: XCTestCase {
     }
 
     @MainActor
+    func testSessionHistoryIsNewestFirstCappedAndStartsEmpty() {
+        withState { state, defaults in
+            XCTAssertTrue(state.recentClips.isEmpty)
+            let first = URL(fileURLWithPath: "/private/tmp/first.mp4")
+            state.recordSavedClips([first], kind: .replay)
+            // A separate dual-display save records both files.
+            let left = URL(fileURLWithPath: "/private/tmp/left.mp4")
+            let right = URL(fileURLWithPath: "/private/tmp/right.mp4")
+            state.recordSavedClips([left, right], kind: .session)
+            XCTAssertEqual(state.recentClips.map(\.url), [left, right, first])
+            XCTAssertEqual(state.recentClips.first?.kind, .session)
+            for index in 0..<MainWindowState.recentClipLimit {
+                state.recordSavedClips([URL(fileURLWithPath: "/private/tmp/\(index).mp4")], kind: .extendedReplay)
+            }
+            XCTAssertEqual(state.recentClips.count, MainWindowState.recentClipLimit)
+            XCTAssertFalse(state.recentClips.contains { $0.url == first })
+            // History is never persisted: a relaunch starts empty.
+            XCTAssertTrue(MainWindowState(defaults: defaults).recentClips.isEmpty)
+        }
+    }
+
+    @MainActor
     func testExportSurvivesNavigationHideAndEditorCloseAndBlocksConcurrentJobs() async throws {
         let name = "MainWindowTests.\(UUID().uuidString)"
         let defaults = UserDefaults(suiteName: name)!
