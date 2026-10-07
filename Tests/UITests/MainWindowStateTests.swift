@@ -11,7 +11,15 @@ final class MainWindowStateTests: XCTestCase {
         let name = "MainWindowTests.\(UUID().uuidString)"
         let defaults = UserDefaults(suiteName: name)!
         defer { defaults.removePersistentDomain(forName: name) }
-        try run(MainWindowState(defaults: defaults), defaults)
+        try run(makeState(defaults), defaults)
+    }
+
+    /// Editor windows are not created in tests.
+    @MainActor
+    private func makeState(_ defaults: UserDefaults) -> MainWindowState {
+        let state = MainWindowState(defaults: defaults)
+        state.presentEditor = nil
+        return state
     }
 
     @MainActor
@@ -31,7 +39,7 @@ final class MainWindowStateTests: XCTestCase {
     }
 
     @MainActor
-    func testLibraryShortcutRoutesFromSettingsAndEditorAndOnlyHidesFrontmostLibrary() {
+    func testLibraryShortcutRoutesFromSettingsAndOnlyHidesFrontmostLibrary() {
         withState { state, _ in
             state.select(.audio)
             XCTAssertFalse(state.routeLibraryShortcut(windowIsFrontmost: true))
@@ -40,72 +48,68 @@ final class MainWindowStateTests: XCTestCase {
             XCTAssertTrue(state.routeLibraryShortcut(windowIsFrontmost: true))
             XCTAssertFalse(state.isWindowVisible)
             XCTAssertFalse(state.routeLibraryShortcut(windowIsFrontmost: false))
+            // An open editor lives in its own window and never hides the library.
             state.openEditor(URL(fileURLWithPath: "/private/tmp/first.mp4"))
-            let editor = state.editor
-            XCTAssertFalse(state.routeLibraryShortcut(windowIsFrontmost: true))
             XCTAssertTrue(state.isLibraryFrontmost)
-            XCTAssertTrue(state.editor === editor)
-            state.discardEditor()
+            XCTAssertTrue(state.routeLibraryShortcut(windowIsFrontmost: true))
+            state.closeEditor(URL(fileURLWithPath: "/private/tmp/first.mp4"))
         }
     }
 
     @MainActor
-    func testDraftAndLibraryStateSurviveNavigationAndWindowHiding() throws {
+    func testEditorsAreOnePerClipAndSurviveMainWindowNavigation() throws {
         try withState { state, _ in
+            let first = URL(fileURLWithPath: "/private/tmp/first.mp4")
+            let second = URL(fileURLWithPath: "/private/tmp/second.mp4")
+            var presented: [URL] = []
+            state.presentEditor = { presented.append($0.url) }
             state.library.searchText = "goal"
-            state.library.selection = ["clip.mp4"]
-            state.library.metadataDraft.notes = "Keep this note"
-            state.openEditor(URL(fileURLWithPath: "/private/tmp/first.mp4"))
-            let editor = try XCTUnwrap(state.editor)
+            state.openEditor(first)
+            let editor = try XCTUnwrap(state.editors[first])
             editor.trimStart = 4
             editor.trimEnd = 12
-            editor.cropEnabled = true
-            editor.exportQuality = .compact
-            XCTAssertTrue(state.isEditing)
+            state.openEditor(second)
+            state.openEditor(first)
+            XCTAssertEqual(state.editors.count, 2)
+            XCTAssertTrue(state.editors[first] === editor)
+            XCTAssertEqual(presented, [first, second, first])
             state.select(.video)
             state.windowDidHide()
-            XCTAssertFalse(editor.isVisible)
             state.select(.library)
-            XCTAssertTrue(state.isLibraryFrontmost)
             XCTAssertEqual(state.library.searchText, "goal")
-            XCTAssertEqual(state.library.selection, ["clip.mp4"])
-            XCTAssertEqual(state.library.metadataDraft.notes, "Keep this note")
-            state.resumeEditor()
-            XCTAssertTrue(state.editor === editor)
             XCTAssertEqual(editor.trimStart, 4)
             XCTAssertEqual(editor.trimEnd, 12)
-            XCTAssertTrue(editor.cropEnabled)
-            XCTAssertEqual(editor.exportQuality, .compact)
-            state.discardEditor()
+            state.closeEditor(first)
+            state.closeEditor(second)
         }
     }
 
     @MainActor
-    func testReplacementRequiresExplicitConfirmationAndReleasesProtection() throws {
+    func testClosingAnEditorDisposesItAndReleasesProtection() throws {
         try withState { state, _ in
             let first = URL(fileURLWithPath: "/private/tmp/first.mp4")
             let second = URL(fileURLWithPath: "/private/tmp/second.mp4")
             state.openEditor(first)
-            let editor = try XCTUnwrap(state.editor)
             state.openEditor(second)
-            XCTAssertTrue(state.editor === editor)
-            XCTAssertEqual(state.replacementCandidate, second)
+            let editor = try XCTUnwrap(state.editors[first])
             XCTAssertTrue(state.isProtected(first))
-            state.replaceEditor()
-            XCTAssertEqual(state.editor?.url, second)
+            XCTAssertTrue(state.isProtected(second))
+            state.closeEditor(first)
+            XCTAssertTrue(editor.isClosed)
+            XCTAssertNil(state.editors[first])
             XCTAssertFalse(state.isProtected(first))
             XCTAssertTrue(state.isProtected(second))
-            state.discardEditor()
+            state.closeEditor(second)
             XCTAssertFalse(state.isProtected(second))
         }
     }
 
     @MainActor
-    func testExportSurvivesNavigationAndHideAndBlocksConcurrentJobs() async throws {
+    func testExportSurvivesNavigationHideAndEditorCloseAndBlocksConcurrentJobs() async throws {
         let name = "MainWindowTests.\(UUID().uuidString)"
         let defaults = UserDefaults(suiteName: name)!
         defer { defaults.removePersistentDomain(forName: name) }
-        let state = MainWindowState(defaults: defaults)
+        let state = makeState(defaults)
         let source = URL(fileURLWithPath: "/private/tmp/first.mp4")
         let result = URL(fileURLWithPath: "/private/tmp/result.mp4")
         let finished = expectation(description: "Job completes independently of the visible page")
@@ -119,8 +123,12 @@ final class MainWindowStateTests: XCTestCase {
         state.windowDidHide()
         XCTAssertTrue(state.exports.isBusy)
         XCTAssertTrue(state.isProtected(source))
+        // An editor can open during an export, and closing it leaves the export running.
         state.openEditor(source)
-        XCTAssertNil(state.editor)
+        XCTAssertNotNil(state.editors[source])
+        state.closeEditor(source)
+        XCTAssertTrue(state.exports.isBusy)
+        XCTAssertTrue(state.isProtected(source))
         await fulfillment(of: [finished], timeout: 2)
         await state.exports.cancelAndWait()
         XCTAssertEqual(state.page, .general)

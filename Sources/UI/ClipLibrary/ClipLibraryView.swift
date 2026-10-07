@@ -90,7 +90,7 @@ public struct ClipLibraryView: View {
         }
         .sheet(isPresented: $state.cleanupSheetPresented) {
             VStack(spacing: 0) {
-                if windowState.editor != nil || windowState.exports.isBusy {
+                if !windowState.editors.isEmpty || windowState.exports.isBusy {
                     Text("Clips currently being edited or exported are kept.")
                         .font(.caption)
                         .foregroundStyle(.secondary)
@@ -279,7 +279,6 @@ public struct ClipLibraryView: View {
                     IconActionButton(icon: "scissors", color: AppTheme.accentSecondary) {
                         openTrim(row.info.fileURL)
                     }
-                    .disabled(windowState.exports.isBusy)
                     .help("Trim & Export")
 
                     ClipShareLink(url: row.info.fileURL)
@@ -312,7 +311,6 @@ public struct ClipLibraryView: View {
                 if let row = targets.first, targets.count == 1 {
                     Button("Quick Preview") { state.previewURL = row.info.fileURL }
                     Button("Trim & Export…") { openTrim(row.info.fileURL) }
-                        .disabled(windowState.exports.isBusy)
                     Button("Copy File") { copyFile(row.info.fileURL) }
                 }
                 Button("Reveal in Finder") {
@@ -378,7 +376,6 @@ public struct ClipLibraryView: View {
                 }
                 .buttonStyle(.bordered)
                 .controlSize(.small)
-                .disabled(windowState.exports.isBusy)
                 .help("Trim or crop the clip, choose an audio track, and export as MP4 or GIF")
 
                 ShareLink(item: row.info.fileURL) {

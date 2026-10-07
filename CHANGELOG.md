@@ -3,6 +3,7 @@
 ## Unreleased
 
 - Bring back the Clip Library item in the menu bar. It was renamed to "Open ReplayMac" when the library and settings moved into one window, which made the library hard to find. It now always opens straight to your clips, has its own icon, and sits in its own section with the last clip actions
+- Open Trim & Export in its own window instead of the library sidebar. Each clip gets its own editor window, so you can work on several clips at once without the "Replace Current Edit?" prompt. Closing an editor window ends that edit; an export already running keeps going and shows its progress in the library
 
 ## 1.7.3
 

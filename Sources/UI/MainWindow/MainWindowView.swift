@@ -7,7 +7,6 @@ public struct MainWindowView: View {
     @ObservedObject private var exports: ClipExportCoordinator
     @Environment(\.accessibilityShowBorders) private var showBorders
     @Environment(\.colorSchemeContrast) private var contrast
-    @State private var discardPresented = false
 
     public init(state: MainWindowState) {
         self.state = state
@@ -25,28 +24,7 @@ public struct MainWindowView: View {
                 .navigationTitle(pageTitle)
                 .toolbar { detailToolbar }
         }
-        .onChange(of: state.isWindowVisible) { _, visible in
-            if state.isEditing {
-                if visible { state.editor?.isVisible = true }
-                else { state.editor?.pause() }
-            }
-        }
         .tint(AppTheme.accent)
-        .alert("Replace Current Edit?", isPresented: Binding(
-            get: { state.replacementCandidate != nil },
-            set: { if !$0 { state.replacementCandidate = nil } }
-        )) {
-            Button("Replace Edit", role: .destructive) { state.replaceEditor() }
-            Button("Keep Current Edit", role: .cancel) { state.replacementCandidate = nil }
-        } message: {
-            Text("Your current trim and crop choices will be discarded. Exported files are kept.")
-        }
-        .alert("Discard Current Edit?", isPresented: $discardPresented) {
-            Button("Discard Edit", role: .destructive) { state.discardEditor() }
-            Button("Keep Editing", role: .cancel) {}
-        } message: {
-            Text("This clears your trim and crop choices. The original clip and exported files are kept.")
-        }
     }
 
     // MARK: Sidebar
@@ -69,14 +47,6 @@ public struct MainWindowView: View {
 
             sidebarRow(MainWindowPage.library.title, icon: MainWindowPage.library.icon,
                        isSelected: state.isLibraryFrontmost) { state.select(.library) }
-            if let editor = state.editor {
-                sidebarRow("Trim & Export", detail: editor.url.lastPathComponent, icon: "scissors",
-                           isSelected: state.isEditing) { state.resumeEditor() }
-                    .contextMenu {
-                        Button("Discard Edit…", role: .destructive) { discardPresented = true }
-                            .disabled(exports.isBusy)
-                    }
-            }
 
             Text("SETTINGS")
                 .font(.system(size: 10, weight: .semibold))
@@ -87,7 +57,7 @@ public struct MainWindowView: View {
                 .accessibilityAddTraits(.isHeader)
             ForEach(MainWindowPage.allCases.filter { $0 != .library }) { page in
                 sidebarRow(page.title, icon: page.icon,
-                           isSelected: !state.isEditing && state.page == page) { state.select(page) }
+                           isSelected: state.page == page) { state.select(page) }
             }
             Spacer(minLength: 0)
         }
@@ -155,21 +125,12 @@ public struct MainWindowView: View {
                     .disabled(state.page == .library)
                     .accessibilityHidden(state.page == .library)
             }
-            if state.isEditing, let editor = state.editor {
-                ClipTrimView(session: editor, exports: exports) { state.select(.library) }
-                    .id(editor.url)
-            }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .floatingBottomBar { statusBars }
     }
 
-    private var pageTitle: String {
-        if state.isEditing, let editor = state.editor {
-            return "Trim & Export — \(editor.url.lastPathComponent)"
-        }
-        return state.page.title
-    }
+    private var pageTitle: String { state.page.title }
 
     @ToolbarContentBuilder
     private var detailToolbar: some ToolbarContent {
@@ -177,14 +138,6 @@ public struct MainWindowView: View {
         // at the exact same height across all pages without collapsing.
         ToolbarItem(placement: .automatic) {
             Color.clear.frame(width: 0, height: 0)
-        }
-        // The always-visible sidebar already leads back to the library.
-        if state.isEditing {
-            ToolbarItem(placement: .primaryAction) {
-                Button("Discard Edit", systemImage: "trash", role: .destructive) { discardPresented = true }
-                    .disabled(exports.isBusy)
-                    .help("Discard the current trim and crop choices")
-            }
         }
     }
 
@@ -194,35 +147,16 @@ public struct MainWindowView: View {
         exports.isBusy || exports.completedURL != nil || exports.errorMessage != nil
     }
 
-    private var showsResumeBar: Bool {
-        state.page == .library && !state.isEditing && state.editor != nil
-    }
-
     @ViewBuilder
     private var statusBars: some View {
-        if showsExportStatus || showsResumeBar {
+        if showsExportStatus {
             GlassGroup(spacing: 8) {
-                VStack(spacing: 8) {
-                    if showsExportStatus { exportStatus }
-                    if showsResumeBar, let editor = state.editor { resumeBar(editor) }
-                }
+                exportStatus
             }
             .frame(maxWidth: 620)
             .padding(.horizontal, 16)
             .padding(.bottom, 12)
         }
-    }
-
-    private func resumeBar(_ editor: ClipEditorSession) -> some View {
-        HStack(spacing: 10) {
-            Image(systemName: "scissors").foregroundStyle(AppTheme.accent)
-            Text(editor.url.lastPathComponent).lineLimit(1).truncationMode(.middle)
-            Text("Editing paused").foregroundStyle(.secondary)
-            Spacer(minLength: 8)
-            Button("Discard") { discardPresented = true }.disabled(exports.isBusy)
-            Button("Resume Editing") { state.resumeEditor() }.buttonStyle(.borderedProminent)
-        }
-        .floatingPill()
     }
 
     private var exportStatus: some View {
@@ -236,9 +170,6 @@ public struct MainWindowView: View {
                     Text(source.lastPathComponent).foregroundStyle(.secondary).lineLimit(1).truncationMode(.middle)
                 }
                 Spacer(minLength: 8)
-                if state.editor != nil, !state.isEditing {
-                    Button("Editor") { state.resumeEditor() }
-                }
                 Button("Cancel Export") { exports.cancel() }
             } else {
                 Image(systemName: exports.errorMessage == nil ? "checkmark.circle.fill" : "exclamationmark.triangle.fill")

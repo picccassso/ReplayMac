@@ -36,14 +36,15 @@ public enum MainWindowPage: String, CaseIterable, Identifiable {
 @MainActor
 public final class MainWindowState: ObservableObject {
     @Published public private(set) var page: MainWindowPage
-    @Published var isEditing = false
-    @Published var editor: ClipEditorSession?
-    @Published var replacementCandidate: URL?
+    /// Open Trim & Export sessions, one per clip, each shown in its own window.
+    @Published private(set) var editors: [URL: ClipEditorSession] = [:]
     @Published public var isWindowVisible = false
     @Published var hasVisitedSettings: Bool
     @Published var settingsTab: SettingsTab = .general
     public let exports = ClipExportCoordinator()
     let library: ClipLibraryState
+    /// Brings a session's editor window forward. Tests leave it nil so no windows are created.
+    var presentEditor: ((ClipEditorSession) -> Void)?
     private let defaults: UserDefaults
     private var subscriptions = Set<AnyCancellable>()
 
@@ -56,9 +57,13 @@ public final class MainWindowState: ObservableObject {
         if let tab = SettingsTab(rawValue: page.rawValue) { settingsTab = tab }
         exports.objectWillChange.sink { [weak self] _ in self?.objectWillChange.send() }.store(in: &subscriptions)
         library.model.isProtected = { [weak self] url in self?.isProtected(url) ?? false }
+        presentEditor = { [weak self] session in
+            guard let self else { return }
+            ClipEditorWindowController.show(session: session, state: self)
+        }
     }
 
-    public var isLibraryFrontmost: Bool { page == .library && !isEditing }
+    public var isLibraryFrontmost: Bool { page == .library }
 
     /// Returns whether the caller should hide the native window. Otherwise the
     /// shortcut selects the library before the caller brings the window forward.
@@ -72,8 +77,6 @@ public final class MainWindowState: ObservableObject {
     }
 
     public func select(_ page: MainWindowPage) {
-        editor?.pause()
-        isEditing = false
         self.page = page
         defaults.set(page.rawValue, forKey: "mainWindowPage")
         if let tab = SettingsTab(rawValue: page.rawValue) {
@@ -83,45 +86,24 @@ public final class MainWindowState: ObservableObject {
     }
 
     func openEditor(_ url: URL) {
-        guard !exports.isBusy else { return }
         let source = url.standardizedFileURL
-        if let editor, editor.url != source {
-            replacementCandidate = source
-            return
-        }
-        if editor == nil { editor = ClipEditorSession(url: source, exports: exports) }
-        resumeEditor()
+        let session = editors[source] ?? ClipEditorSession(url: source, exports: exports)
+        editors[source] = session
+        presentEditor?(session)
     }
 
-    func replaceEditor() {
-        guard !exports.isBusy, let url = replacementCandidate else { return }
-        editor?.dispose()
-        editor = nil
-        replacementCandidate = nil
-        openEditor(url)
-    }
-
-    func resumeEditor() {
-        guard editor != nil else { return }
-        page = .library
-        defaults.set(MainWindowPage.library.rawValue, forKey: "mainWindowPage")
-        isEditing = true
-    }
-
-    func discardEditor() {
-        guard !exports.isBusy else { return }
-        editor?.dispose()
-        editor = nil
-        select(.library)
+    /// Ends the edit. A running export keeps going; the coordinator owns it.
+    func closeEditor(_ url: URL) {
+        editors.removeValue(forKey: url.standardizedFileURL)?.dispose()
     }
 
     func isProtected(_ url: URL) -> Bool {
         let key = url.standardizedFileURL.resolvingSymlinksInPath()
-        return editor?.url.resolvingSymlinksInPath() == key || exports.sourceURL?.resolvingSymlinksInPath() == key
+        return editors.keys.contains { $0.resolvingSymlinksInPath() == key }
+            || exports.sourceURL?.resolvingSymlinksInPath() == key
     }
 
     public func windowDidHide() {
         isWindowVisible = false
-        editor?.pause()
     }
 }
