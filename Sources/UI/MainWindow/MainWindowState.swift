@@ -186,7 +186,7 @@ public final class MainWindowState: ObservableObject {
         onRecentClipsUpdated?()
     }
 
-    func isProtected(_ url: URL) -> Bool {
+    public func isProtected(_ url: URL) -> Bool {
         let key = url.standardizedFileURL.resolvingSymlinksInPath()
         return editors.keys.contains { $0.resolvingSymlinksInPath() == key }
             || exports.sourceURL?.resolvingSymlinksInPath() == key

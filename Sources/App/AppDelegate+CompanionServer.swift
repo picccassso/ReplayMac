@@ -103,6 +103,7 @@ extension AppDelegate {
             longBufferEnabled: AppSettings.longBufferEnabled,
             longBufferDurationSeconds: AppSettings.longBufferDurationSeconds,
             capturedDisplayName: menuBarState.capturedDisplayName,
+            isUsingFallbackDisplay: menuBarState.isUsingFallbackDisplay,
             isMicrophoneEnabled: AppSettings.captureMicrophone,
             isMicrophoneMuted: menuBarState.isMicrophoneMuted,
             isSystemAudioEnabled: AppSettings.captureSystemAudio,

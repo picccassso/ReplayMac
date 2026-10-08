@@ -374,6 +374,7 @@ public final class CompanionServer: ObservableObject {
             longBufferEnabled: snapshot.longBufferEnabled,
             longBufferDurationSeconds: snapshot.longBufferDurationSeconds,
             capturedDisplayName: snapshot.capturedDisplayName,
+            isUsingFallbackDisplay: snapshot.isUsingFallbackDisplay,
             isMicrophoneEnabled: snapshot.isMicrophoneEnabled,
             isMicrophoneMuted: snapshot.isMicrophoneMuted,
             isSystemAudioEnabled: snapshot.isSystemAudioEnabled,

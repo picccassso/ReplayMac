@@ -102,6 +102,8 @@ public struct CompanionStateSnapshot: Codable, Sendable, Equatable {
     public let longBufferEnabled: Bool
     public let longBufferDurationSeconds: Int
     public let capturedDisplayName: String?
+    /// The chosen display was unavailable, so capture fell back to another one.
+    public let isUsingFallbackDisplay: Bool
     public let isMicrophoneEnabled: Bool
     public let isMicrophoneMuted: Bool
     public let isSystemAudioEnabled: Bool
@@ -123,6 +125,7 @@ public struct CompanionStateSnapshot: Codable, Sendable, Equatable {
         longBufferEnabled: Bool,
         longBufferDurationSeconds: Int,
         capturedDisplayName: String?,
+        isUsingFallbackDisplay: Bool = false,
         isMicrophoneEnabled: Bool,
         isMicrophoneMuted: Bool,
         isSystemAudioEnabled: Bool,
@@ -143,6 +146,7 @@ public struct CompanionStateSnapshot: Codable, Sendable, Equatable {
         self.longBufferEnabled = longBufferEnabled
         self.longBufferDurationSeconds = longBufferDurationSeconds
         self.capturedDisplayName = capturedDisplayName
+        self.isUsingFallbackDisplay = isUsingFallbackDisplay
         self.isMicrophoneEnabled = isMicrophoneEnabled
         self.isMicrophoneMuted = isMicrophoneMuted
         self.isSystemAudioEnabled = isSystemAudioEnabled
