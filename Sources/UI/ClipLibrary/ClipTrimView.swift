@@ -17,7 +17,9 @@ struct ClipTrimView: View {
         HStack(spacing: 0) {
             workspace
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
+            // Runs under the title bar with the sidebar's fill, so the line meets the top edge.
             Divider()
+                .ignoresSafeArea(edges: .top)
             sidebar
                 .frame(width: 352)
                 .background(AppTheme.backgroundSecondary)
