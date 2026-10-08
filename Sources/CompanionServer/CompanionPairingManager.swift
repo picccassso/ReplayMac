@@ -23,7 +23,7 @@ public final class CompanionPairingManager: ObservableObject {
     /// Allows tests to simulate user approval/denial without showing native modal dialogs.
     public var promptHandler: (@MainActor (String, String) async -> Bool)?
 
-    private var inFlightPrompts = Set<String>()
+    private var inFlightPrompts: [String: [CheckedContinuation<Bool, Never>]] = [:]
     private let defaults: UserDefaults
 
     public init(defaults: UserDefaults = .standard) {
@@ -51,9 +51,12 @@ public final class CompanionPairingManager: ObservableObject {
     }
 
     public func approveDevice(id: String, name: String) {
-        guard !isDeviceApproved(id: id) else { return }
-        let newDevice = PairedDevice(id: id, name: name.isEmpty ? "Android Device" : name, pairedAt: Date())
-        pairedDevices.append(newDevice)
+        let cleanName = name.isEmpty ? "Android Device" : name
+        if let idx = pairedDevices.firstIndex(where: { $0.id == id }) {
+            pairedDevices[idx] = PairedDevice(id: id, name: cleanName, pairedAt: pairedDevices[idx].pairedAt)
+        } else {
+            pairedDevices.append(PairedDevice(id: id, name: cleanName, pairedAt: Date()))
+        }
         saveDevices()
     }
 
@@ -85,11 +88,12 @@ public final class CompanionPairingManager: ObservableObject {
             return approved
         }
 
-        guard !inFlightPrompts.contains(id) else {
-            return false
+        if inFlightPrompts[id] != nil {
+            return await withCheckedContinuation { continuation in
+                inFlightPrompts[id]?.append(continuation)
+            }
         }
-        inFlightPrompts.insert(id)
-        defer { inFlightPrompts.remove(id) }
+        inFlightPrompts[id] = []
 
         NSApp.activate(ignoringOtherApps: true)
 
@@ -100,13 +104,21 @@ public final class CompanionPairingManager: ObservableObject {
         alert.alertStyle = .informational
         alert.addButton(withTitle: "Allow")
         alert.addButton(withTitle: "Deny")
+        alert.window.level = .floating
 
         let response = alert.runModal()
+        let result: Bool
         if response == .alertFirstButtonReturn {
             approveDevice(id: id, name: displayName)
-            return true
+            result = true
         } else {
-            return false
+            result = false
         }
+
+        let pending = inFlightPrompts.removeValue(forKey: id) ?? []
+        for continuation in pending {
+            continuation.resume(returning: result)
+        }
+        return result
     }
 }

@@ -27,26 +27,42 @@ extension AppDelegate {
         }
         companionServer.onRevealClip = { [weak self] clipId in
             guard let self,
-                  let clip = self.mainWindowState.recentClips.first(where: { $0.id.uuidString == clipId }) else { return }
+                  let clip = self.mainWindowState.recentClips.first(where: {
+                      $0.id.uuidString.caseInsensitiveCompare(clipId) == .orderedSame || $0.id.uuidString == clipId
+                  }) else { return }
             NSWorkspace.shared.activateFileViewerSelecting([clip.url])
         }
         companionServer.onDeleteClip = { [weak self] clipId in
             guard let self,
-                  let clip = self.mainWindowState.recentClips.first(where: { $0.id.uuidString == clipId }) else { return }
+                  let clip = self.mainWindowState.recentClips.first(where: {
+                      $0.id.uuidString.caseInsensitiveCompare(clipId) == .orderedSame || $0.id.uuidString == clipId
+                  }),
+                  !self.mainWindowState.isProtected(clip.url) else { return }
             try? FileManager.default.trashItem(at: clip.url, resultingItemURL: nil)
             self.mainWindowState.removeRecentClip(id: clip.id)
             self.broadcastCompanionSnapshot()
         }
         companionServer.onGetThumbnail = { [weak self] clipId in
-            guard let self,
-                  let uuid = UUID(uuidString: clipId) else { return nil }
-            return await self.mainWindowState.thumbnailData(for: uuid)
+            guard let self else { return nil }
+            if let uuid = UUID(uuidString: clipId) {
+                return await self.mainWindowState.thumbnailData(for: uuid)
+            }
+            if let clip = self.mainWindowState.recentClips.first(where: {
+                $0.id.uuidString.caseInsensitiveCompare(clipId) == .orderedSame
+            }) {
+                return await self.mainWindowState.thumbnailData(for: clip.id)
+            }
+            return nil
         }
         companionServer.snapshotProvider = { [weak self] in
-            self?.buildCompanionStateSnapshot() ?? CompanionStateSnapshot.empty
+            self?.buildCompanionStateSnapshot(type: "state_snapshot") ?? CompanionStateSnapshot.empty
         }
 
         mainWindowState.onRecentClipsUpdated = { [weak self] in
+            self?.broadcastCompanionSnapshot()
+        }
+
+        menuBarState.onSaveStatusChanged = { [weak self] in
             self?.broadcastCompanionSnapshot()
         }
 
@@ -95,9 +111,13 @@ extension AppDelegate {
         )
     }
 
-    func broadcastCompanionSnapshot() {
+    func broadcastCompanionSnapshot(isStateChange: Bool = true) {
         guard companionServer.isRunning else { return }
-        let snapshot = buildCompanionStateSnapshot()
-        companionServer.broadcastSnapshot(snapshot)
+        let snapshot = buildCompanionStateSnapshot(type: isStateChange ? "state_changed" : "state_snapshot")
+        if isStateChange {
+            companionServer.broadcastStateChanged(snapshot)
+        } else {
+            companionServer.broadcastSnapshot(snapshot)
+        }
     }
 }

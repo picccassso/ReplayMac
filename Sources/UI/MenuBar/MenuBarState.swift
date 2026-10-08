@@ -23,6 +23,7 @@ public final class MenuBarState: ObservableObject {
     @Published public private(set) var isUsingFallbackDisplay = false
     @Published public private(set) var isMicrophoneMuted = false
     @Published public private(set) var isSystemAudioMuted = false
+    public var onSaveStatusChanged: (@MainActor () -> Void)?
 
     private var saveStatusResetTask: Task<Void, Never>?
     private var recordingStartedAt: Date?
@@ -122,28 +123,33 @@ public final class MenuBarState: ObservableObject {
 
         saveStatusResetTask?.cancel()
         saveStatus = .saving
+        onSaveStatusChanged?()
         return true
     }
 
     public func finishSaving(success: Bool) {
         saveStatusResetTask?.cancel()
         saveStatus = success ? .saved : .failed
+        onSaveStatusChanged?()
 
         saveStatusResetTask = Task { @MainActor [weak self] in
             try? await Task.sleep(for: .seconds(2))
             guard !Task.isCancelled else { return }
             self?.saveStatus = .idle
+            self?.onSaveStatusChanged?()
         }
     }
 
     public func showSaveFailedBriefly() {
         saveStatusResetTask?.cancel()
         saveStatus = .failed
+        onSaveStatusChanged?()
 
         saveStatusResetTask = Task { @MainActor [weak self] in
             try? await Task.sleep(for: .seconds(2))
             guard !Task.isCancelled else { return }
             self?.saveStatus = .idle
+            self?.onSaveStatusChanged?()
         }
     }
 

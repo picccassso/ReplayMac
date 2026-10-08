@@ -166,7 +166,11 @@ public final class MainWindowState: ObservableObject {
             return data
         }
         guard let clip = recentClips.first(where: { $0.id == id }) else { return nil }
-        return await ClipLibraryViewModel.thumbnailData(for: clip.url)
+        let thumb = await ClipLibraryViewModel.thumbnailData(for: clip.url)
+        if let thumb, let index = recentClips.firstIndex(where: { $0.id == id }) {
+            recentClips[index].thumbnail = thumb
+        }
+        return thumb
     }
 
     private func loadDetails(for clip: RecentClip) async {

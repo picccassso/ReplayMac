@@ -1,6 +1,7 @@
 import Foundation
 import Network
 import AppKit
+import Branding
 
 public enum CompanionServerError: Error, LocalizedError {
     case invalidPort
@@ -54,7 +55,7 @@ public final class CompanionServer: ObservableObject {
     }
 
     public func start(port: UInt16 = defaultPort) throws {
-        guard !isRunning else { return }
+        guard !isRunning && listener == nil else { return }
 
         let tcpOptions = NWProtocolTCP.Options()
         let wsOptions = NWProtocolWebSocket.Options()
@@ -70,7 +71,7 @@ public final class CompanionServer: ObservableObject {
 
         let newListener = try NWListener(using: parameters, on: endpointPort)
         newListener.service = NWListener.Service(
-            name: Host.current().localizedName ?? "ReplayMac",
+            name: Host.current().localizedName ?? AppBranding.name,
             type: Self.bonjourServiceType
         )
 
@@ -155,6 +156,23 @@ public final class CompanionServer: ObservableObject {
                 return
             }
 
+            // Check for WebSocket close frame
+            if let wsMetadata = context?.protocolMetadata(definition: NWProtocolWebSocket.definition) as? NWProtocolWebSocket.Metadata,
+               wsMetadata.opcode == .close {
+                Task { @MainActor in
+                    self.handleConnectionDisconnection(connectionId: connectionId)
+                }
+                return
+            }
+
+            // Check for EOF (stream completed without content)
+            if content == nil && isComplete {
+                Task { @MainActor in
+                    self.handleConnectionDisconnection(connectionId: connectionId)
+                }
+                return
+            }
+
             if let data = content, !data.isEmpty {
                 Task { @MainActor in
                     self.handleIncomingData(data, connectionId: connectionId, connection: connection)
@@ -168,7 +186,9 @@ public final class CompanionServer: ObservableObject {
     }
 
     private func handleConnectionDisconnection(connectionId: UUID) {
-        activeConnections.removeValue(forKey: connectionId)
+        if let conn = activeConnections.removeValue(forKey: connectionId) {
+            conn.cancel()
+        }
         connectionDevices.removeValue(forKey: connectionId)
         connectedClientsCount = connectionDevices.count
     }
@@ -180,8 +200,8 @@ public final class CompanionServer: ObservableObject {
                 send(
                     CompanionAuthResponse(
                         status: "denied",
-                        serverName: Host.current().localizedName ?? "ReplayMac",
-                        serverVersion: "1.7.3"
+                        serverName: Host.current().localizedName ?? AppBranding.name,
+                        serverVersion: Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "1.7.3"
                     ),
                     to: conn
                 )
@@ -207,59 +227,73 @@ public final class CompanionServer: ObservableObject {
         case CompanionClientMessageType.ping.rawValue:
             send(CompanionPongMessage(), to: connection)
 
-        case CompanionClientMessageType.action.rawValue:
+        default:
             guard connectionDevices[connectionId] != nil else {
                 send(CompanionErrorMessage(message: "Device not authorized"), to: connection)
                 return
             }
-            if let actionStr = message.action, let action = CompanionClientAction(rawValue: actionStr) {
-                handleAction(action)
-            }
 
-        case CompanionClientMessageType.getThumbnail.rawValue:
-            guard connectionDevices[connectionId] != nil else { return }
-            guard let clipId = message.clipId else { return }
-            Task { @MainActor in
-                let base64 = await self.onGetThumbnail?(clipId)
-                self.send(
-                    CompanionThumbnailResponse(
-                        clipId: clipId,
-                        thumbnailBase64: base64?.base64EncodedString()
-                    ),
-                    to: connection
-                )
-            }
+            let actionName = (message.type == "action" ? message.action : message.type) ?? message.type
 
-        case CompanionClientMessageType.revealClip.rawValue:
-            guard connectionDevices[connectionId] != nil else { return }
-            if let clipId = message.clipId {
-                onRevealClip?(clipId)
-            }
-
-        case CompanionClientMessageType.deleteClip.rawValue:
-            guard connectionDevices[connectionId] != nil else { return }
-            if let clipId = message.clipId {
-                onDeleteClip?(clipId)
-            }
-
-        default:
-            // Check if action was passed directly as the message type
-            if let directAction = CompanionClientAction(rawValue: message.type) {
-                guard connectionDevices[connectionId] != nil else {
-                    send(CompanionErrorMessage(message: "Device not authorized"), to: connection)
-                    return
+            switch actionName {
+            case "saveReplay", "save_replay":
+                onSaveReplay?()
+            case "saveExtendedReplay", "save_extended_replay":
+                onSaveExtendedReplay?()
+            case "toggleBuffer", "toggle_buffer":
+                onToggleBuffer?()
+            case "toggleSession", "toggle_session":
+                onToggleSession?()
+            case "toggleMicrophone", "toggle_microphone":
+                onToggleMicrophone?()
+            case "toggleSystemAudio", "toggle_system_audio":
+                onToggleSystemAudio?()
+            case "reveal_clip", "revealClip":
+                if let clipId = message.clipId {
+                    onRevealClip?(clipId)
                 }
-                handleAction(directAction)
+            case "delete_clip", "deleteClip":
+                if let clipId = message.clipId {
+                    onDeleteClip?(clipId)
+                }
+            case "get_thumbnail", "getThumbnail":
+                if let clipId = message.clipId {
+                    Task { @MainActor in
+                        let base64 = await self.onGetThumbnail?(clipId)
+                        self.send(
+                            CompanionThumbnailResponse(
+                                clipId: clipId,
+                                thumbnailBase64: base64?.base64EncodedString()
+                            ),
+                            to: connection
+                        )
+                    }
+                }
+            default:
+                break
             }
         }
     }
 
     private func handleHello(_ message: CompanionClientMessage, connectionId: UUID, connection: NWConnection) {
-        let deviceId = message.deviceId ?? connectionId.uuidString
-        let deviceName = (message.deviceName?.isEmpty ?? true) ? "Android Device" : message.deviceName!
+        guard activeConnections[connectionId] != nil else { return }
 
-        let serverName = Host.current().localizedName ?? "ReplayMac"
+        let rawId = message.deviceId?.trimmingCharacters(in: .whitespacesAndNewlines)
+        let deviceId = (rawId?.isEmpty == false) ? rawId! : connectionId.uuidString
+        let rawName = message.deviceName?.trimmingCharacters(in: .whitespacesAndNewlines)
+        let deviceName = (rawName?.isEmpty == false) ? rawName! : "Android Device"
+
+        let serverName = Host.current().localizedName ?? AppBranding.name
         let serverVersion = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "1.7.3"
+
+        // Cancel previous stale connection for same deviceId
+        let staleConnections = connectionDevices.filter { $0.key != connectionId && $0.value == deviceId }
+        for (staleId, _) in staleConnections {
+            if let staleConn = activeConnections.removeValue(forKey: staleId) {
+                staleConn.cancel()
+            }
+            connectionDevices.removeValue(forKey: staleId)
+        }
 
         if pairingManager.isDeviceApproved(id: deviceId) {
             connectionDevices[connectionId] = deviceId
@@ -280,6 +314,8 @@ public final class CompanionServer: ObservableObject {
             Task { @MainActor [weak self, weak connection] in
                 guard let self, let connection else { return }
                 let approved = await self.pairingManager.promptApprovalForDevice(id: deviceId, name: deviceName)
+                guard self.activeConnections[connectionId] != nil else { return }
+
                 if approved {
                     self.connectionDevices[connectionId] = deviceId
                     self.connectedClientsCount = self.connectionDevices.count
@@ -295,27 +331,9 @@ public final class CompanionServer: ObservableObject {
                         CompanionAuthResponse(status: "denied", serverName: serverName, serverVersion: serverVersion),
                         to: connection
                     )
-                    connection.cancel()
                     self.handleConnectionDisconnection(connectionId: connectionId)
                 }
             }
-        }
-    }
-
-    private func handleAction(_ action: CompanionClientAction) {
-        switch action {
-        case .saveReplay:
-            onSaveReplay?()
-        case .saveExtendedReplay:
-            onSaveExtendedReplay?()
-        case .toggleBuffer:
-            onToggleBuffer?()
-        case .toggleSession:
-            onToggleSession?()
-        case .toggleMicrophone:
-            onToggleMicrophone?()
-        case .toggleSystemAudio:
-            onToggleSystemAudio?()
         }
     }
 
@@ -368,16 +386,22 @@ public final class CompanionServer: ObservableObject {
     private func broadcast<T: Encodable>(_ message: T) {
         guard isRunning, !connectionDevices.isEmpty else { return }
         guard let data = try? JSONEncoder().encode(message) else { return }
-        let metadata = NWProtocolWebSocket.Metadata(opcode: .text)
-        let context = NWConnection.ContentContext(identifier: "text", metadata: [metadata])
 
         for (connId, _) in connectionDevices {
             if let connection = activeConnections[connId], connection.state == .ready {
+                let metadata = NWProtocolWebSocket.Metadata(opcode: .text)
+                let context = NWConnection.ContentContext(identifier: "text", metadata: [metadata])
                 connection.send(
                     content: data,
                     contentContext: context,
                     isComplete: true,
-                    completion: .contentProcessed { _ in }
+                    completion: .contentProcessed { [weak self] error in
+                        if error != nil {
+                            Task { @MainActor in
+                                self?.handleConnectionDisconnection(connectionId: connId)
+                            }
+                        }
+                    }
                 )
             }
         }
