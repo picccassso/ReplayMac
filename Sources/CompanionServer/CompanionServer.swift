@@ -22,6 +22,12 @@ public final class CompanionServer: ObservableObject {
     public static let shared = CompanionServer()
     public static let defaultPort: UInt16 = 7375
     public static let bonjourServiceType = "_replaymac._tcp"
+    /// Bonjour TXT key that carries ``serverId``.
+    public static let serverIdTXTKey = "id"
+    static let serverIdDefaultsKey = "companionServerId"
+
+    /// Stays the same across launches and networks; paired phones use it to find this Mac again.
+    public let serverId: String
 
     @Published public private(set) var isRunning: Bool = false
     @Published public private(set) var listeningPort: UInt16 = defaultPort
@@ -46,8 +52,9 @@ public final class CompanionServer: ObservableObject {
     private var connectionDevices: [UUID: String] = [:]
     private let pairingManager: CompanionPairingManager
 
-    public init(pairingManager: CompanionPairingManager = .shared) {
+    public init(pairingManager: CompanionPairingManager = .shared, defaults: UserDefaults = .standard) {
         self.pairingManager = pairingManager
+        self.serverId = Self.loadOrCreateServerId(in: defaults)
         self.localIPAddresses = Self.resolveLocalIPAddresses()
         self.pairingManager.onDeviceRevoked = { [weak self] revokedId in
             self?.handleDeviceRevoked(revokedId)
@@ -71,8 +78,10 @@ public final class CompanionServer: ObservableObject {
 
         let newListener = try NWListener(using: parameters, on: endpointPort)
         newListener.service = NWListener.Service(
-            name: Host.current().localizedName ?? AppBranding.name,
-            type: Self.bonjourServiceType
+            name: serverName,
+            type: Self.bonjourServiceType,
+            domain: nil,
+            txtRecord: NWTXTRecord([Self.serverIdTXTKey: serverId])
         )
 
         newListener.stateUpdateHandler = { [weak self] state in
@@ -198,14 +207,7 @@ public final class CompanionServer: ObservableObject {
         let matching = connectionDevices.filter { $0.value == deviceId }
         for (connId, _) in matching {
             if let conn = activeConnections[connId] {
-                send(
-                    CompanionAuthResponse(
-                        status: "denied",
-                        serverName: Host.current().localizedName ?? AppBranding.name,
-                        serverVersion: Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "1.7.3"
-                    ),
-                    to: conn
-                )
+                send(authResponse(status: "denied"), to: conn)
                 conn.cancel()
             }
             activeConnections.removeValue(forKey: connId)
@@ -284,9 +286,6 @@ public final class CompanionServer: ObservableObject {
         let rawName = message.deviceName?.trimmingCharacters(in: .whitespacesAndNewlines)
         let deviceName = (rawName?.isEmpty == false) ? rawName! : "Android Device"
 
-        let serverName = Host.current().localizedName ?? AppBranding.name
-        let serverVersion = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "1.7.3"
-
         // Cancel previous stale connection for same deviceId
         let staleConnections = connectionDevices.filter { $0.key != connectionId && $0.value == deviceId }
         for (staleId, _) in staleConnections {
@@ -300,7 +299,7 @@ public final class CompanionServer: ObservableObject {
             connectionDevices[connectionId] = deviceId
             connectedClientsCount = connectionDevices.count
             send(
-                CompanionAuthResponse(status: "approved", serverName: serverName, serverVersion: serverVersion),
+                authResponse(status: "approved"),
                 to: connection
             )
             if let snapshot = snapshotProvider?() {
@@ -308,7 +307,7 @@ public final class CompanionServer: ObservableObject {
             }
         } else {
             send(
-                CompanionAuthResponse(status: "pending", serverName: serverName, serverVersion: serverVersion),
+                authResponse(status: "pending"),
                 to: connection
             )
 
@@ -321,7 +320,7 @@ public final class CompanionServer: ObservableObject {
                     self.connectionDevices[connectionId] = deviceId
                     self.connectedClientsCount = self.connectionDevices.count
                     self.send(
-                        CompanionAuthResponse(status: "approved", serverName: serverName, serverVersion: serverVersion),
+                        authResponse(status: "approved"),
                         to: connection
                     )
                     if let snapshot = self.snapshotProvider?() {
@@ -329,13 +328,37 @@ public final class CompanionServer: ObservableObject {
                     }
                 } else {
                     self.send(
-                        CompanionAuthResponse(status: "denied", serverName: serverName, serverVersion: serverVersion),
+                        authResponse(status: "denied"),
                         to: connection
                     )
                     self.handleConnectionDisconnection(connectionId: connectionId)
                 }
             }
         }
+    }
+
+    // MARK: - Identity
+
+    private var serverName: String {
+        Host.current().localizedName ?? AppBranding.name
+    }
+
+    private func authResponse(status: String) -> CompanionAuthResponse {
+        CompanionAuthResponse(
+            status: status,
+            serverName: serverName,
+            serverVersion: Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "1.7.3",
+            serverId: serverId
+        )
+    }
+
+    static func loadOrCreateServerId(in defaults: UserDefaults) -> String {
+        if let existing = defaults.string(forKey: serverIdDefaultsKey), !existing.isEmpty {
+            return existing
+        }
+        let created = UUID().uuidString
+        defaults.set(created, forKey: serverIdDefaultsKey)
+        return created
     }
 
     // MARK: - Sending & Broadcasting

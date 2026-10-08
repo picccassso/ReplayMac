@@ -213,17 +213,21 @@ public struct CompanionAuthResponse: Codable, Sendable, Equatable {
     public let status: String
     public let serverName: String
     public let serverVersion: String
+    /// This Mac's stable companion identity, so a paired phone can find it on any network.
+    public let serverId: String?
 
     public init(
         type: String = "auth_response",
         status: String,
         serverName: String,
-        serverVersion: String
+        serverVersion: String,
+        serverId: String? = nil
     ) {
         self.type = type
         self.status = status
         self.serverName = serverName
         self.serverVersion = serverVersion
+        self.serverId = serverId
     }
 }
 
