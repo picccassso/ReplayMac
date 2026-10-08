@@ -51,6 +51,15 @@ extension SettingsView {
                     }
                 }
 
+                if captureModeRawValue == CaptureMode.dualSideBySide.rawValue {
+                    Label(
+                        "Recording two displays captures and encodes twice the pixels, and the replay buffers split the memory cap between them, so each display keeps less footage.",
+                        systemImage: "gauge.with.dots.needle.67percent"
+                    )
+                    .foregroundStyle(AppTheme.textSecondary)
+                    .font(.system(size: 12, design: .rounded))
+                }
+
                 if displays.isEmpty {
                     HStack {
                         Text("Capture source")
@@ -148,6 +157,12 @@ extension SettingsView {
                     Text("120 fps").tag(120)
                 }
 
+                ForEach(encoderLoadHints, id: \.self) { hint in
+                    Label(hint, systemImage: "gauge.with.dots.needle.67percent")
+                        .foregroundStyle(AppTheme.textSecondary)
+                        .font(.system(size: 12, design: .rounded))
+                }
+
                 VStack(alignment: .leading, spacing: 6) {
                     HStack {
                         Text("Bitrate")
@@ -230,6 +245,19 @@ extension SettingsView {
         if !remaining.contains(where: { $0.id == captureDisplayID2 }) {
             captureDisplayID2 = remaining.first?.id ?? ""
         }
+    }
+
+    /// Notes on settings that add noticeable GPU or encoder load.
+    var encoderLoadHints: [String] {
+        var hints: [String] = []
+        if frameRate >= 120 {
+            hints.append("120 fps roughly doubles the encoding work and replay buffer size compared to 60 fps. Fine on most Apple silicon Macs, but it can cost game performance on older or busier ones.")
+        }
+        let dimensions = effectiveVideoDimensions(resolutionRawValue: captureResolutionRawValue)
+        if dimensions.width * dimensions.height > 3840 * 2160 {
+            hints.append("Recording above 4K adds GPU and encoder load. Half or a custom size is lighter if games stutter while recording.")
+        }
+        return hints
     }
 
     var longBufferToggleBinding: Binding<Bool> {

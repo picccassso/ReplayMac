@@ -12,6 +12,9 @@ extension SettingsView {
                 Stepper(value: $bufferDurationSeconds, in: 15...300, step: 5) {
                     Text("Buffer duration: \(bufferDurationSeconds) seconds")
                 }
+                ReplayBufferMemoryHint {
+                    selectedTab = .video
+                }
             } header: {
                 Text("Replay")
             }
@@ -127,6 +130,7 @@ extension SettingsView {
             }
         }
         .formStyle(.grouped)
+        .longReplayTip()
     }
 
     private var filenamePreview: String {

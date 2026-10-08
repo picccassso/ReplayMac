@@ -12,6 +12,10 @@
 - Add an "Open window to" setting in Settings > General > Startup: choose whether the main window opens on Home (the default), Clip Library or the last page you viewed when you launch ReplayMac or reopen it after closing the window. Minimising keeps your page, and the menu bar's Clip Library and Settings items still go straight to their pages
 - Move the sidebar's ReplayMac header up in full screen, where the traffic lights it made room for are hidden
 - Give the Trim & Export window the same translucent, desktop-tinted background as the main window's sidebar, staying translucent while another app is in front, and put the trim range controls on a Liquid Glass panel that follows your glass appearance setting. Both become opaque with Reduce Transparency. The selected duration is now shown in the primary text colour so it stays readable on the glass, and the window title names the clip being edited
+- Show how much memory the replay buffer uses. Settings > General and the setup assistant now show an estimate under the buffer length that updates as you change it, and long buffers point you to extended replay, which keeps footage on disk instead of in RAM
+- Suggest extended replay when the replay buffer reaches 5 minutes. The pop-up can turn extended replay on and set the replay buffer back to 60 seconds in one click, and has a "Don't show this again" option
+- Warn when the memory cap is too small for the replay buffer. At high bitrates, or when recording two displays, the cap could quietly cut a 5 minute buffer down to around 3 and a half minutes. Settings > General and Settings > Advanced now say how much the cap actually holds and offer to raise it to the size that fits
+- Add short notes in Settings > Video when 120 fps, a resolution above 4K or dual-display capture is selected, since these add GPU and encoder load
 
 ## 1.7.3
 

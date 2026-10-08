@@ -424,6 +424,7 @@ public extension Defaults.Keys {
     static let longBufferEnabled = Key<Bool>("longBufferEnabled", default: false)
     static let longBufferDurationMinutes = Key<Int>("longBufferDurationMinutes", default: LongBufferDuration.fiveMinutes.rawValue)
     static let longBufferWarningAccepted = Key<Bool>("longBufferWarningAccepted", default: false)
+    static let longReplayTipDismissed = Key<Bool>("longReplayTipDismissed", default: false)
     static let captureProfilesJSON = Key<String>("captureProfilesJSON", default: "[]")
 
     static let systemAudioVolume = Key<Double>("systemAudioVolume", default: 1.0)

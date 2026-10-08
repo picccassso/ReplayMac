@@ -22,6 +22,8 @@ extension SettingsView {
                     .foregroundStyle(AppTheme.textSecondary)
                     .font(.system(size: 12, design: .rounded))
 
+                memoryNeedLabel
+
                 Stepper(value: $queueDepth, in: 3...10) {
                     Text("SCK queue depth: \(queueDepth)")
                 }
@@ -44,9 +46,33 @@ extension SettingsView {
     }
 
     var memoryCapLabel: String {
-        if memoryCapMB >= 1024 {
-            return String(format: "%.1f GB", memoryCapMB / 1024)
+        ReplayMemoryEstimate.formatCapMB(memoryCapMB)
+    }
+
+    var replayMemoryEstimate: ReplayMemoryEstimate {
+        ReplayMemoryEstimate.make(
+            bufferSeconds: bufferDurationSeconds,
+            bitrateMbps: bitrateMbps,
+            isDualMode: captureModeRawValue == CaptureMode.dualSideBySide.rawValue,
+            isSeparateDualSave: dualCaptureSaveModeRawValue == DualCaptureSaveMode.separateFiles.rawValue,
+            captureSystemAudio: captureSystemAudio,
+            captureMicrophone: captureMicrophone,
+            memoryCapMB: memoryCapMB
+        )
+    }
+
+    @ViewBuilder
+    private var memoryNeedLabel: some View {
+        let estimate = replayMemoryEstimate
+        if estimate.isCapLimited {
+            ReplayMemoryCapWarning(estimate: estimate) { memoryCapMB = $0 }
+        } else {
+            Label(
+                "Your replay buffer needs about \(estimate.formattedRequired) (\(ReplayMemoryEstimate.formatDuration(estimate.requestedSeconds)) at \(Int(estimate.bitrateMbps)) Mbps), which fits within this cap.",
+                systemImage: "memorychip"
+            )
+            .foregroundStyle(AppTheme.textSecondary)
+            .font(.system(size: 12, design: .rounded))
         }
-        return "\(Int(memoryCapMB)) MB"
     }
 }

@@ -185,6 +185,7 @@ public struct OnboardingView: View {
                         Text("Replay buffer: last \(bufferDurationSeconds) seconds")
                     }
                 }
+                ReplayBufferMemoryHint()
 
                 Divider()
 
@@ -210,6 +211,7 @@ public struct OnboardingView: View {
                     .font(.caption)
                     .foregroundStyle(AppTheme.textSecondary)
             }
+            .longReplayTip()
         }
     }
 
