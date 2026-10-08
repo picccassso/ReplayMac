@@ -24,6 +24,8 @@ public final class MenuBarState: ObservableObject {
     @Published public private(set) var isMicrophoneMuted = false
     @Published public private(set) var isSystemAudioMuted = false
     public var onSaveStatusChanged: (@MainActor () -> Void)?
+    /// Fires when the buffer, session, captured display or mute state shown to the user changes.
+    public var onDisplayedStateChanged: (@MainActor () -> Void)?
 
     private var saveStatusResetTask: Task<Void, Never>?
     private var recordingStartedAt: Date?
@@ -53,7 +55,9 @@ public final class MenuBarState: ObservableObject {
             recordingStartedAt = nil
             recordingElapsedSeconds = 0
         }
+        guard self.isRecording != isRecording else { return }
         self.isRecording = isRecording
+        onDisplayedStateChanged?()
     }
 
     public func updateRecordingElapsed(at date: Date = Date()) {
@@ -86,7 +90,9 @@ public final class MenuBarState: ObservableObject {
             sessionStartedAt = nil
             sessionElapsedSeconds = 0
         }
+        guard isSessionRecording != isRecording else { return }
         isSessionRecording = isRecording
+        onDisplayedStateChanged?()
     }
 
     public func setBufferedSeconds(_ bufferedSeconds: TimeInterval) {
@@ -102,17 +108,17 @@ public final class MenuBarState: ObservableObject {
     }
 
     public func setCapturedDisplay(name: String?, isFallback: Bool = false) {
+        guard capturedDisplayName != name || isUsingFallbackDisplay != isFallback else { return }
         capturedDisplayName = name
         isUsingFallbackDisplay = isFallback
+        onDisplayedStateChanged?()
     }
 
     public func setAudioMuteState(isMicrophoneMuted: Bool, isSystemAudioMuted: Bool) {
-        if self.isMicrophoneMuted != isMicrophoneMuted {
-            self.isMicrophoneMuted = isMicrophoneMuted
-        }
-        if self.isSystemAudioMuted != isSystemAudioMuted {
-            self.isSystemAudioMuted = isSystemAudioMuted
-        }
+        guard self.isMicrophoneMuted != isMicrophoneMuted || self.isSystemAudioMuted != isSystemAudioMuted else { return }
+        self.isMicrophoneMuted = isMicrophoneMuted
+        self.isSystemAudioMuted = isSystemAudioMuted
+        onDisplayedStateChanged?()
     }
 
     @discardableResult

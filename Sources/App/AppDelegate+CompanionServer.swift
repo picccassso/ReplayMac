@@ -66,6 +66,12 @@ extension AppDelegate {
             self?.broadcastCompanionSnapshot()
         }
 
+        // Broadcast once the desktop's own state has settled, so the phone
+        // never sees capture running before the buffer and display are set.
+        menuBarState.onDisplayedStateChanged = { [weak self] in
+            self?.broadcastCompanionSnapshot()
+        }
+
         if AppSettings.companionServerEnabled {
             do {
                 try companionServer.start(port: UInt16(AppSettings.companionServerPort))
@@ -90,8 +96,10 @@ extension AppDelegate {
 
         return CompanionStateSnapshot(
             type: type,
-            isRecording: isCaptureRunning,
-            isSessionRecording: isSessionRecording,
+            // The replay buffer, as the desktop shows it. Capture also runs for a
+            // session alone, and that must not read as the buffer running.
+            isRecording: menuBarState.isRecording,
+            isSessionRecording: menuBarState.isSessionRecording,
             saveStatus: menuBarState.saveStatusString,
             recordingElapsedSeconds: menuBarState.recordingElapsedSeconds,
             extendedBufferElapsedSeconds: menuBarState.extendedBufferElapsedSeconds,

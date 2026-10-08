@@ -50,12 +50,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, @unchecked Sendable {
     /// than by buffer recording, and so should be torn down when it stops.
     var sessionOwnsCapturePipeline = false
     /// True while a start→stop session recording is actively writing to disk.
-    var isSessionRecording = false {
-        didSet {
-            guard isSessionRecording != oldValue else { return }
-            broadcastCompanionSnapshot()
-        }
-    }
+    var isSessionRecording = false
     var isSessionFinalizeInProgress = false
     var isTerminatingAfterSessionSave = false
 
@@ -75,7 +70,6 @@ class AppDelegate: NSObject, NSApplicationDelegate, @unchecked Sendable {
         didSet {
             guard isCaptureRunning != oldValue else { return }
             AudioLevelPreview.shared.setCaptureActive(isCaptureRunning)
-            broadcastCompanionSnapshot()
         }
     }
     var isWorkspaceSessionActive = true
