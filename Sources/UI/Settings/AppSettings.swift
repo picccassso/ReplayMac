@@ -302,6 +302,8 @@ public enum AppSettings {
     public static var longBufferDurationSeconds: Int {
         LongBufferDuration(rawValue: longBufferDurationMinutes)?.seconds ?? LongBufferDuration.fiveMinutes.seconds
     }
+    public static var companionServerEnabled: Bool { Defaults[.companionServerEnabled] }
+    public static var companionServerPort: Int { Defaults[.companionServerPort] }
 
     public static func ringBufferMemoryCaps(
         isDualMode: Bool,
@@ -431,6 +433,9 @@ public extension Defaults.Keys {
     static let microphoneVolume = Key<Double>("microphoneVolume", default: 1.0)
     static let isSystemAudioMuted = Key<Bool>("isSystemAudioMuted", default: false)
     static let isMicrophoneMuted = Key<Bool>("isMicrophoneMuted", default: false)
+
+    static let companionServerEnabled = Key<Bool>("companionServerEnabled", default: true)
+    static let companionServerPort = Key<Int>("companionServerPort", default: 7375)
 
     static let hasCompletedOnboarding = Key<Bool>("hasCompletedOnboarding", default: false)
 }

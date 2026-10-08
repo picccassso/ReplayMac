@@ -84,6 +84,7 @@ public struct SettingsView: View {
             case .audio: audioTab
             case .profiles: profilesTab
             case .hotkeys: hotkeysTab
+            case .companion: companionTab
             case .advanced: advancedTab
             }
         }
@@ -150,5 +151,9 @@ public struct SettingsView: View {
         .onChange(of: dualCaptureSaveModeRawValue) { _, _ in
             updateBitrateForCurrentPresetIfNeeded()
         }
+    }
+
+    var companionTab: some View {
+        CompanionSettingsView()
     }
 }

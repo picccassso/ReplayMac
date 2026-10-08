@@ -11,7 +11,7 @@ let package = Package(
         // Sources/App itself and links these modules.
         .library(
             name: "ReplayCapKit",
-            targets: ["Branding", "Capture", "Encode", "RingBuffer", "Save", "Audio", "UI", "Hotkeys", "Feedback"]
+            targets: ["Branding", "Capture", "Encode", "RingBuffer", "Save", "Audio", "UI", "Hotkeys", "Feedback", "CompanionServer"]
         )
     ],
     dependencies: [
@@ -23,7 +23,7 @@ let package = Package(
         .executableTarget(
             name: "ReplayCap",
             dependencies: [
-                "Branding", "Capture", "Encode", "RingBuffer", "Save", "Audio", "UI", "Hotkeys", "Feedback",
+                "Branding", "Capture", "Encode", "RingBuffer", "Save", "Audio", "UI", "Hotkeys", "Feedback", "CompanionServer",
                 .product(name: "Defaults", package: "Defaults")
             ],
             path: "Sources/App",
@@ -87,6 +87,7 @@ let package = Package(
                 "Capture",
                 "Save",
                 "Hotkeys",
+                "CompanionServer",
                 .product(name: "KeyboardShortcuts", package: "KeyboardShortcuts"),
                 .product(name: "Defaults", package: "Defaults")
             ],
@@ -110,11 +111,23 @@ let package = Package(
                 .linkedFramework("UserNotifications")
             ]
         ),
+        .target(
+            name: "CompanionServer",
+            dependencies: [
+                "Branding",
+                .product(name: "Defaults", package: "Defaults")
+            ],
+            path: "Sources/CompanionServer",
+            linkerSettings: [
+                .linkedFramework("Network")
+            ]
+        ),
         .testTarget(name: "RingBufferTests", dependencies: ["RingBuffer"], path: "Tests/RingBufferTests"),
         .testTarget(name: "EncoderTests", dependencies: ["Encode"], path: "Tests/EncoderTests"),
         .testTarget(name: "SavePipelineTests", dependencies: ["Save", "RingBuffer", "Encode", "UI"], path: "Tests/SavePipelineTests"),
         .testTarget(name: "CaptureTests", dependencies: ["Capture"], path: "Tests/CaptureTests"),
         .testTarget(name: "AudioTests", dependencies: ["Audio"], path: "Tests/AudioTests"),
-        .testTarget(name: "UITests", dependencies: ["UI"], path: "Tests/UITests")
+        .testTarget(name: "UITests", dependencies: ["UI"], path: "Tests/UITests"),
+        .testTarget(name: "CompanionServerTests", dependencies: ["CompanionServer"], path: "Tests/CompanionServerTests")
     ]
 )

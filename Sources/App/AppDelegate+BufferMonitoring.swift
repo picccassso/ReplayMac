@@ -3,6 +3,7 @@ import Foundation
 
 import Capture
 import UI
+import CompanionServer
 
 @MainActor
 extension AppDelegate {
@@ -112,6 +113,18 @@ extension AppDelegate {
                 self.menuBarState.updateRecordingElapsed()
                 self.menuBarState.setBufferedSeconds(bufferedSeconds)
                 self.statusItemController.refreshPresentation()
+
+                if self.companionServer.isRunning {
+                    let tick = CompanionTelemetryTick(
+                        recordingElapsedSeconds: self.menuBarState.recordingElapsedSeconds,
+                        extendedBufferElapsedSeconds: self.menuBarState.extendedBufferElapsedSeconds,
+                        sessionElapsedSeconds: self.menuBarState.sessionElapsedSeconds,
+                        bufferedSeconds: bufferedSeconds,
+                        bufferMemoryBytes: self.menuBarState.bufferMemoryBytes,
+                        bufferMemoryFormatted: self.menuBarState.formattedBufferMemory
+                    )
+                    self.companionServer.broadcastTelemetryTick(tick)
+                }
 
                 guard tick % 5 == 0 else {
                     continue

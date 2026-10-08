@@ -20,5 +20,8 @@
     <!-- GitHub release update check; dev/direct builds only -->
     <key>com.apple.security.network.client</key>
     <true/>
+    <!-- Companion WebSocket server; incoming connections -->
+    <key>com.apple.security.network.server</key>
+    <true/>
 </dict>
 </plist>

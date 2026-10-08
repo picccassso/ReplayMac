@@ -34,5 +34,11 @@
 	<string>ReplayCap needs microphone access to include your voice in captured clips.</string>
 	<key>NSScreenCaptureUsageDescription</key>
 	<string>Screen recording access is required to keep a rolling replay buffer and save clips when you ask.</string>
+	<key>NSBonjourServices</key>
+	<array>
+		<string>_replaymac._tcp</string>
+	</array>
+	<key>NSLocalNetworkUsageDescription</key>
+	<string>ReplayCap needs local network access to communicate with the ReplayMac Companion app.</string>
 </dict>
 </plist>

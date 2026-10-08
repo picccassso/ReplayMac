@@ -1,0 +1,427 @@
+import Foundation
+import Network
+import AppKit
+
+public enum CompanionServerError: Error, LocalizedError {
+    case invalidPort
+    case listenerFailed(String)
+
+    public var errorDescription: String? {
+        switch self {
+        case .invalidPort:
+            return "Invalid port number."
+        case .listenerFailed(let reason):
+            return "Server listener failed: \(reason)"
+        }
+    }
+}
+
+@MainActor
+public final class CompanionServer: ObservableObject {
+    public static let shared = CompanionServer()
+    public static let defaultPort: UInt16 = 7375
+    public static let bonjourServiceType = "_replaymac._tcp"
+
+    @Published public private(set) var isRunning: Bool = false
+    @Published public private(set) var listeningPort: UInt16 = defaultPort
+    @Published public private(set) var connectedClientsCount: Int = 0
+    @Published public private(set) var localIPAddresses: [String] = []
+
+    // Callback hooks for application integration
+    public var onSaveReplay: (@MainActor () -> Void)?
+    public var onSaveExtendedReplay: (@MainActor () -> Void)?
+    public var onToggleBuffer: (@MainActor () -> Void)?
+    public var onToggleSession: (@MainActor () -> Void)?
+    public var onToggleMicrophone: (@MainActor () -> Void)?
+    public var onToggleSystemAudio: (@MainActor () -> Void)?
+    public var onRevealClip: (@MainActor (String) -> Void)?
+    public var onDeleteClip: (@MainActor (String) -> Void)?
+    public var onGetThumbnail: (@MainActor (String) async -> Data?)?
+    public var snapshotProvider: (@MainActor () -> CompanionStateSnapshot)?
+
+    private var listener: NWListener?
+    private let serverQueue = DispatchQueue(label: "com.replaymac.companion-server", qos: .userInitiated)
+    private var activeConnections: [UUID: NWConnection] = [:]
+    private var connectionDevices: [UUID: String] = [:]
+    private let pairingManager: CompanionPairingManager
+
+    public init(pairingManager: CompanionPairingManager = .shared) {
+        self.pairingManager = pairingManager
+        self.localIPAddresses = Self.resolveLocalIPAddresses()
+        self.pairingManager.onDeviceRevoked = { [weak self] revokedId in
+            self?.handleDeviceRevoked(revokedId)
+        }
+    }
+
+    public func start(port: UInt16 = defaultPort) throws {
+        guard !isRunning else { return }
+
+        let tcpOptions = NWProtocolTCP.Options()
+        let wsOptions = NWProtocolWebSocket.Options()
+        wsOptions.autoReplyPing = true
+
+        let parameters = NWParameters(tls: nil, tcp: tcpOptions)
+        parameters.defaultProtocolStack.applicationProtocols.insert(wsOptions, at: 0)
+        parameters.allowLocalEndpointReuse = true
+
+        guard let endpointPort = NWEndpoint.Port(rawValue: port) else {
+            throw CompanionServerError.invalidPort
+        }
+
+        let newListener = try NWListener(using: parameters, on: endpointPort)
+        newListener.service = NWListener.Service(
+            name: Host.current().localizedName ?? "ReplayMac",
+            type: Self.bonjourServiceType
+        )
+
+        newListener.stateUpdateHandler = { [weak self] state in
+            Task { @MainActor [weak self] in
+                self?.handleListenerState(state)
+            }
+        }
+
+        newListener.newConnectionHandler = { [weak self] connection in
+            Task { @MainActor [weak self] in
+                self?.handleNewConnection(connection)
+            }
+        }
+
+        newListener.start(queue: serverQueue)
+        self.listener = newListener
+        self.listeningPort = port
+        self.localIPAddresses = Self.resolveLocalIPAddresses()
+    }
+
+    public func stop() {
+        guard isRunning || listener != nil else { return }
+
+        for (_, connection) in activeConnections {
+            connection.cancel()
+        }
+        activeConnections.removeAll()
+        connectionDevices.removeAll()
+        connectedClientsCount = 0
+
+        listener?.cancel()
+        listener = nil
+        isRunning = false
+    }
+
+    // MARK: - State & Connection Management
+
+    private func handleListenerState(_ state: NWListener.State) {
+        switch state {
+        case .ready:
+            isRunning = true
+        case .failed(let error):
+            print("CompanionServer failed: \(error)")
+            stop()
+        case .cancelled:
+            isRunning = false
+        default:
+            break
+        }
+    }
+
+    private func handleNewConnection(_ connection: NWConnection) {
+        let connectionId = UUID()
+        activeConnections[connectionId] = connection
+
+        connection.stateUpdateHandler = { [weak self, weak connection] state in
+            guard let self, let connection else { return }
+            switch state {
+            case .ready:
+                self.receiveNextMessage(on: connection, connectionId: connectionId)
+            case .failed, .cancelled:
+                Task { @MainActor in
+                    self.handleConnectionDisconnection(connectionId: connectionId)
+                }
+            default:
+                break
+            }
+        }
+
+        connection.start(queue: serverQueue)
+    }
+
+    nonisolated private func receiveNextMessage(on connection: NWConnection, connectionId: UUID) {
+        connection.receiveMessage { [weak self, weak connection] content, context, isComplete, error in
+            guard let self, let connection else { return }
+
+            if error != nil {
+                Task { @MainActor in
+                    self.handleConnectionDisconnection(connectionId: connectionId)
+                }
+                return
+            }
+
+            if let data = content, !data.isEmpty {
+                Task { @MainActor in
+                    self.handleIncomingData(data, connectionId: connectionId, connection: connection)
+                }
+            }
+
+            if connection.state == .ready {
+                self.receiveNextMessage(on: connection, connectionId: connectionId)
+            }
+        }
+    }
+
+    private func handleConnectionDisconnection(connectionId: UUID) {
+        activeConnections.removeValue(forKey: connectionId)
+        connectionDevices.removeValue(forKey: connectionId)
+        connectedClientsCount = connectionDevices.count
+    }
+
+    private func handleDeviceRevoked(_ deviceId: String) {
+        let matching = connectionDevices.filter { $0.value == deviceId }
+        for (connId, _) in matching {
+            if let conn = activeConnections[connId] {
+                send(
+                    CompanionAuthResponse(
+                        status: "denied",
+                        serverName: Host.current().localizedName ?? "ReplayMac",
+                        serverVersion: "1.7.3"
+                    ),
+                    to: conn
+                )
+                conn.cancel()
+            }
+            activeConnections.removeValue(forKey: connId)
+            connectionDevices.removeValue(forKey: connId)
+        }
+        connectedClientsCount = connectionDevices.count
+    }
+
+    // MARK: - Message Handling
+
+    private func handleIncomingData(_ data: Data, connectionId: UUID, connection: NWConnection) {
+        guard let message = try? JSONDecoder().decode(CompanionClientMessage.self, from: data) else {
+            return
+        }
+
+        switch message.type {
+        case CompanionClientMessageType.hello.rawValue:
+            handleHello(message, connectionId: connectionId, connection: connection)
+
+        case CompanionClientMessageType.ping.rawValue:
+            send(CompanionPongMessage(), to: connection)
+
+        case CompanionClientMessageType.action.rawValue:
+            guard connectionDevices[connectionId] != nil else {
+                send(CompanionErrorMessage(message: "Device not authorized"), to: connection)
+                return
+            }
+            if let actionStr = message.action, let action = CompanionClientAction(rawValue: actionStr) {
+                handleAction(action)
+            }
+
+        case CompanionClientMessageType.getThumbnail.rawValue:
+            guard connectionDevices[connectionId] != nil else { return }
+            guard let clipId = message.clipId else { return }
+            Task { @MainActor in
+                let base64 = await self.onGetThumbnail?(clipId)
+                self.send(
+                    CompanionThumbnailResponse(
+                        clipId: clipId,
+                        thumbnailBase64: base64?.base64EncodedString()
+                    ),
+                    to: connection
+                )
+            }
+
+        case CompanionClientMessageType.revealClip.rawValue:
+            guard connectionDevices[connectionId] != nil else { return }
+            if let clipId = message.clipId {
+                onRevealClip?(clipId)
+            }
+
+        case CompanionClientMessageType.deleteClip.rawValue:
+            guard connectionDevices[connectionId] != nil else { return }
+            if let clipId = message.clipId {
+                onDeleteClip?(clipId)
+            }
+
+        default:
+            // Check if action was passed directly as the message type
+            if let directAction = CompanionClientAction(rawValue: message.type) {
+                guard connectionDevices[connectionId] != nil else {
+                    send(CompanionErrorMessage(message: "Device not authorized"), to: connection)
+                    return
+                }
+                handleAction(directAction)
+            }
+        }
+    }
+
+    private func handleHello(_ message: CompanionClientMessage, connectionId: UUID, connection: NWConnection) {
+        let deviceId = message.deviceId ?? connectionId.uuidString
+        let deviceName = (message.deviceName?.isEmpty ?? true) ? "Android Device" : message.deviceName!
+
+        let serverName = Host.current().localizedName ?? "ReplayMac"
+        let serverVersion = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "1.7.3"
+
+        if pairingManager.isDeviceApproved(id: deviceId) {
+            connectionDevices[connectionId] = deviceId
+            connectedClientsCount = connectionDevices.count
+            send(
+                CompanionAuthResponse(status: "approved", serverName: serverName, serverVersion: serverVersion),
+                to: connection
+            )
+            if let snapshot = snapshotProvider?() {
+                send(snapshot, to: connection)
+            }
+        } else {
+            send(
+                CompanionAuthResponse(status: "pending", serverName: serverName, serverVersion: serverVersion),
+                to: connection
+            )
+
+            Task { @MainActor [weak self, weak connection] in
+                guard let self, let connection else { return }
+                let approved = await self.pairingManager.promptApprovalForDevice(id: deviceId, name: deviceName)
+                if approved {
+                    self.connectionDevices[connectionId] = deviceId
+                    self.connectedClientsCount = self.connectionDevices.count
+                    self.send(
+                        CompanionAuthResponse(status: "approved", serverName: serverName, serverVersion: serverVersion),
+                        to: connection
+                    )
+                    if let snapshot = self.snapshotProvider?() {
+                        self.send(snapshot, to: connection)
+                    }
+                } else {
+                    self.send(
+                        CompanionAuthResponse(status: "denied", serverName: serverName, serverVersion: serverVersion),
+                        to: connection
+                    )
+                    connection.cancel()
+                    self.handleConnectionDisconnection(connectionId: connectionId)
+                }
+            }
+        }
+    }
+
+    private func handleAction(_ action: CompanionClientAction) {
+        switch action {
+        case .saveReplay:
+            onSaveReplay?()
+        case .saveExtendedReplay:
+            onSaveExtendedReplay?()
+        case .toggleBuffer:
+            onToggleBuffer?()
+        case .toggleSession:
+            onToggleSession?()
+        case .toggleMicrophone:
+            onToggleMicrophone?()
+        case .toggleSystemAudio:
+            onToggleSystemAudio?()
+        }
+    }
+
+    // MARK: - Sending & Broadcasting
+
+    nonisolated private func send<T: Encodable>(_ message: T, to connection: NWConnection) {
+        guard let data = try? JSONEncoder().encode(message) else { return }
+        let metadata = NWProtocolWebSocket.Metadata(opcode: .text)
+        let context = NWConnection.ContentContext(identifier: "text", metadata: [metadata])
+        connection.send(content: data, contentContext: context, isComplete: true, completion: .contentProcessed { error in
+            if let error {
+                print("CompanionServer: failed to send message: \(error)")
+            }
+        })
+    }
+
+    public func broadcastSnapshot(_ snapshot: CompanionStateSnapshot) {
+        broadcast(snapshot)
+    }
+
+    public func broadcastTelemetryTick(_ tick: CompanionTelemetryTick) {
+        broadcast(tick)
+    }
+
+    public func broadcastStateChanged(_ snapshot: CompanionStateSnapshot) {
+        let changed = CompanionStateSnapshot(
+            type: "state_changed",
+            isRecording: snapshot.isRecording,
+            isSessionRecording: snapshot.isSessionRecording,
+            saveStatus: snapshot.saveStatus,
+            recordingElapsedSeconds: snapshot.recordingElapsedSeconds,
+            extendedBufferElapsedSeconds: snapshot.extendedBufferElapsedSeconds,
+            sessionElapsedSeconds: snapshot.sessionElapsedSeconds,
+            bufferedSeconds: snapshot.bufferedSeconds,
+            bufferDurationSeconds: snapshot.bufferDurationSeconds,
+            bufferMemoryBytes: snapshot.bufferMemoryBytes,
+            bufferMemoryFormatted: snapshot.bufferMemoryFormatted,
+            longBufferEnabled: snapshot.longBufferEnabled,
+            longBufferDurationSeconds: snapshot.longBufferDurationSeconds,
+            capturedDisplayName: snapshot.capturedDisplayName,
+            isMicrophoneEnabled: snapshot.isMicrophoneEnabled,
+            isMicrophoneMuted: snapshot.isMicrophoneMuted,
+            isSystemAudioEnabled: snapshot.isSystemAudioEnabled,
+            isSystemAudioMuted: snapshot.isSystemAudioMuted,
+            recentClips: snapshot.recentClips
+        )
+        broadcast(changed)
+    }
+
+    private func broadcast<T: Encodable>(_ message: T) {
+        guard isRunning, !connectionDevices.isEmpty else { return }
+        guard let data = try? JSONEncoder().encode(message) else { return }
+        let metadata = NWProtocolWebSocket.Metadata(opcode: .text)
+        let context = NWConnection.ContentContext(identifier: "text", metadata: [metadata])
+
+        for (connId, _) in connectionDevices {
+            if let connection = activeConnections[connId], connection.state == .ready {
+                connection.send(
+                    content: data,
+                    contentContext: context,
+                    isComplete: true,
+                    completion: .contentProcessed { _ in }
+                )
+            }
+        }
+    }
+
+    // MARK: - IP Address Resolution
+
+    nonisolated public static func resolveLocalIPAddresses() -> [String] {
+        var addresses: [String] = []
+        var ifaddr: UnsafeMutablePointer<ifaddrs>?
+        guard getifaddrs(&ifaddr) == 0, let firstAddr = ifaddr else {
+            return ["127.0.0.1"]
+        }
+        defer { freeifaddrs(ifaddr) }
+
+        var ptr: UnsafeMutablePointer<ifaddrs>? = firstAddr
+        while let p = ptr {
+            let interface = p.pointee
+            if let addr = interface.ifa_addr, addr.pointee.sa_family == UInt8(AF_INET) {
+                let flags = Int32(interface.ifa_flags)
+                let isLoopback = (flags & IFF_LOOPBACK) != 0
+                let isUp = (flags & IFF_UP) != 0
+                if isUp && !isLoopback {
+                    var hostname = [CChar](repeating: 0, count: Int(NI_MAXHOST))
+                    if getnameinfo(
+                        addr,
+                        socklen_t(addr.pointee.sa_len),
+                        &hostname,
+                        socklen_t(hostname.count),
+                        nil,
+                        0,
+                        NI_NUMERICHOST
+                    ) == 0 {
+                        let ip = hostname.withUnsafeBufferPointer { buf in
+                            buf.baseAddress.map { String(cString: $0) } ?? ""
+                        }
+                        if !ip.isEmpty && !addresses.contains(ip) {
+                            addresses.append(ip)
+                        }
+                    }
+                }
+            }
+            ptr = interface.ifa_next
+        }
+        return addresses.isEmpty ? ["127.0.0.1"] : addresses
+    }
+}

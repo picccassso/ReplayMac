@@ -9,9 +9,11 @@ import UI
 import Hotkeys
 import Feedback
 import Defaults
+import CompanionServer
 
 @MainActor
 class AppDelegate: NSObject, NSApplicationDelegate, @unchecked Sendable {
+    let companionServer = CompanionServer.shared
     let captureManager = CaptureManager()
     let frameCompositor = FrameCompositor()
     let videoEncoder = VideoEncoder()
@@ -48,7 +50,12 @@ class AppDelegate: NSObject, NSApplicationDelegate, @unchecked Sendable {
     /// than by buffer recording, and so should be torn down when it stops.
     var sessionOwnsCapturePipeline = false
     /// True while a start→stop session recording is actively writing to disk.
-    var isSessionRecording = false
+    var isSessionRecording = false {
+        didSet {
+            guard isSessionRecording != oldValue else { return }
+            broadcastCompanionSnapshot()
+        }
+    }
     var isSessionFinalizeInProgress = false
     var isTerminatingAfterSessionSave = false
 
@@ -68,6 +75,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, @unchecked Sendable {
         didSet {
             guard isCaptureRunning != oldValue else { return }
             AudioLevelPreview.shared.setCaptureActive(isCaptureRunning)
+            broadcastCompanionSnapshot()
         }
     }
     var isWorkspaceSessionActive = true
@@ -266,6 +274,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, @unchecked Sendable {
         setupSettingsObservations()
         setupGameAutoRecord()
         syncMemoryCapsToSettings()
+        configureCompanionServer()
 
         DispatchQueue.main.async { [weak self] in
             guard let self else { return }
@@ -277,6 +286,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, @unchecked Sendable {
     }
 
     func applicationWillTerminate(_ notification: Notification) {
+        companionServer.stop()
         monitoringTask?.cancel()
         settingsReconcileTask?.cancel()
         captureRecoveryTask?.cancel()

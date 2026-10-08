@@ -35,6 +35,15 @@ public final class MenuBarState: ObservableObject {
         saveStatus == .saving
     }
 
+    public var saveStatusString: String {
+        switch saveStatus {
+        case .idle: return "idle"
+        case .saving: return "saving"
+        case .saved: return "saved"
+        case .failed: return "failed"
+        }
+    }
+
     public func setRecording(_ isRecording: Bool, at date: Date = Date()) {
         if isRecording && !self.isRecording {
             recordingStartedAt = date

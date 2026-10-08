@@ -8,7 +8,7 @@ public extension Notification.Name {
 }
 
 public enum MainWindowPage: String, CaseIterable, Identifiable {
-    case home, library, general, video, audio, profiles, hotkeys, advanced
+    case home, library, general, video, audio, profiles, hotkeys, companion, advanced
     public var id: String { rawValue }
     public var title: String {
         switch self {
@@ -19,6 +19,7 @@ public enum MainWindowPage: String, CaseIterable, Identifiable {
         case .audio: "Audio"
         case .profiles: "Profiles"
         case .hotkeys: "Hotkeys"
+        case .companion: "Companion"
         case .advanced: "Advanced"
         }
     }
@@ -31,6 +32,7 @@ public enum MainWindowPage: String, CaseIterable, Identifiable {
         case .audio: "speaker.wave.2"
         case .profiles: "rectangle.stack.badge.play"
         case .hotkeys: "keyboard"
+        case .companion: "iphone"
         case .advanced: "slider.horizontal.3"
         }
     }
@@ -77,7 +79,8 @@ public final class MainWindowState: ObservableObject {
     public var controls = ReplayControls()
     /// Clips saved since launch, newest first. Deliberately never persisted,
     /// so Home's session history starts empty on every launch.
-    @Published private(set) var recentClips: [RecentClip] = []
+    @Published public private(set) var recentClips: [RecentClip] = []
+    public var onRecentClipsUpdated: (@MainActor () -> Void)?
     static let recentClipLimit = 20
     let library: ClipLibraryState
     /// Brings a session's editor window forward. Tests leave it nil so no windows are created.
@@ -147,9 +150,23 @@ public final class MainWindowState: ObservableObject {
     public func recordSavedClips(_ urls: [URL], kind: SavedClipKind, at date: Date = Date()) {
         let clips = urls.map { RecentClip(url: $0.standardizedFileURL, kind: kind, savedAt: date) }
         recentClips = Array((clips + recentClips).prefix(Self.recentClipLimit))
+        onRecentClipsUpdated?()
         for clip in clips {
             Task { await loadDetails(for: clip) }
         }
+    }
+
+    public func removeRecentClip(id: UUID) {
+        recentClips.removeAll { $0.id == id }
+        onRecentClipsUpdated?()
+    }
+
+    public func thumbnailData(for id: UUID) async -> Data? {
+        if let clip = recentClips.first(where: { $0.id == id }), let data = clip.thumbnail {
+            return data
+        }
+        guard let clip = recentClips.first(where: { $0.id == id }) else { return nil }
+        return await ClipLibraryViewModel.thumbnailData(for: clip.url)
     }
 
     private func loadDetails(for clip: RecentClip) async {
@@ -162,6 +179,7 @@ public final class MainWindowState: ObservableObject {
         recentClips[index].duration = info.duration > 0 ? info.duration : nil
         recentClips[index].fileSize = size
         recentClips[index].thumbnail = thumbnail
+        onRecentClipsUpdated?()
     }
 
     func isProtected(_ url: URL) -> Bool {

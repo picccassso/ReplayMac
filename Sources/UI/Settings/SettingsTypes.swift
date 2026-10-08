@@ -6,6 +6,7 @@ public enum SettingsTab: String, CaseIterable, Hashable {
     case audio
     case profiles
     case hotkeys
+    case companion
     case advanced
 }
 

@@ -22,10 +22,24 @@ extension AppDelegate {
         let sysMuted = AppSettings.captureSystemAudio && AppSettings.isSystemAudioMuted
         menuBarState.setAudioMuteState(isMicrophoneMuted: micMuted, isSystemAudioMuted: sysMuted)
         statusItemController.refreshPresentation()
+        broadcastCompanionSnapshot()
     }
 
     func setupSettingsObservations() {
         // Group 1: Live mutable settings - apply directly
+        settingsObservations.append(Defaults.observe(.companionServerEnabled) { [weak self] change in
+            guard let self else { return }
+            if change.newValue {
+                try? self.companionServer.start(port: UInt16(AppSettings.companionServerPort))
+            } else {
+                self.companionServer.stop()
+            }
+        })
+        settingsObservations.append(Defaults.observe(.companionServerPort) { [weak self] change in
+            guard let self, self.companionServer.isRunning else { return }
+            self.companionServer.stop()
+            try? self.companionServer.start(port: UInt16(change.newValue))
+        })
         settingsObservations.append(Defaults.observe(.systemAudioVolume) { [weak self] _ in
             self?.applyEffectiveAudioVolumes()
         })

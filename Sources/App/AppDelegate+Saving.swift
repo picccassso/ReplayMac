@@ -74,6 +74,7 @@ extension AppDelegate {
             return
         }
         statusItemController.refreshPresentation()
+        broadcastCompanionSnapshot()
 
         do {
             print("Saving clip to output directory: \(outputDirectory.path(percentEncoded: false))")
@@ -159,6 +160,7 @@ extension AppDelegate {
             return
         }
         statusItemController.refreshPresentation()
+        broadcastCompanionSnapshot()
 
         do {
             let savedURL = try await longBufferRecorder.saveClip(
