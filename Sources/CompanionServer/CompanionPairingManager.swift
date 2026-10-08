@@ -80,14 +80,7 @@ public final class CompanionPairingManager: ObservableObject {
             return true
         }
 
-        if let customHandler = promptHandler {
-            let approved = await customHandler(id, name)
-            if approved {
-                approveDevice(id: id, name: name)
-            }
-            return approved
-        }
-
+        // A phone that retries while the prompt is up must not open a second one.
         if inFlightPrompts[id] != nil {
             return await withCheckedContinuation { continuation in
                 inFlightPrompts[id]?.append(continuation)
@@ -95,9 +88,27 @@ public final class CompanionPairingManager: ObservableObject {
         }
         inFlightPrompts[id] = []
 
+        let displayName = name.isEmpty ? "Android Device" : name
+        let result: Bool
+        if let customHandler = promptHandler {
+            result = await customHandler(id, displayName)
+        } else {
+            result = askUserToApprove(displayName: displayName)
+        }
+        if result {
+            approveDevice(id: id, name: displayName)
+        }
+
+        let pending = inFlightPrompts.removeValue(forKey: id) ?? []
+        for continuation in pending {
+            continuation.resume(returning: result)
+        }
+        return result
+    }
+
+    private func askUserToApprove(displayName: String) -> Bool {
         NSApp.activate(ignoringOtherApps: true)
 
-        let displayName = name.isEmpty ? "Android Device" : name
         let alert = NSAlert()
         alert.messageText = "Allow Android device '\(displayName)' to connect?"
         alert.informativeText = "This device will be able to start/stop recordings, save clips, and access clip previews on your Mac."
@@ -106,19 +117,6 @@ public final class CompanionPairingManager: ObservableObject {
         alert.addButton(withTitle: "Deny")
         alert.window.level = .floating
 
-        let response = alert.runModal()
-        let result: Bool
-        if response == .alertFirstButtonReturn {
-            approveDevice(id: id, name: displayName)
-            result = true
-        } else {
-            result = false
-        }
-
-        let pending = inFlightPrompts.removeValue(forKey: id) ?? []
-        for continuation in pending {
-            continuation.resume(returning: result)
-        }
-        return result
+        return alert.runModal() == .alertFirstButtonReturn
     }
 }

@@ -220,8 +220,10 @@ final class CompanionPairingManagerTests: XCTestCase {
             return true
         }
 
-        async let first = pairingManager.promptApprovalForDevice(id: "concurrent-dev", name: "Phone A")
-        async let second = pairingManager.promptApprovalForDevice(id: "concurrent-dev", name: "Phone A")
+        // A local main-actor manager, so `async let` doesn't capture the test case.
+        let manager: CompanionPairingManager = pairingManager
+        async let first = manager.promptApprovalForDevice(id: "concurrent-dev", name: "Phone A")
+        async let second = manager.promptApprovalForDevice(id: "concurrent-dev", name: "Phone A")
 
         let (res1, res2) = await (first, second)
         XCTAssertTrue(res1)
@@ -332,6 +334,7 @@ final class CompanionServerLifecycleTests: XCTestCase {
         server.onRevealClip = { id in
             revealedId = id
         }
+        server.snapshotProvider = { CompanionStateSnapshot.empty }
 
         try server.start(port: 7389)
         defer { server.stop() }
@@ -369,6 +372,7 @@ final class CompanionServerLifecycleTests: XCTestCase {
         server.onDeleteClip = { id in
             deletedId = id
         }
+        server.snapshotProvider = { CompanionStateSnapshot.empty }
 
         try server.start(port: 7390)
         defer { server.stop() }
@@ -405,6 +409,7 @@ final class CompanionServerLifecycleTests: XCTestCase {
         server.onGetThumbnail = { clipId in
             return "sample-thumb-bytes".data(using: .utf8)
         }
+        server.snapshotProvider = { CompanionStateSnapshot.empty }
 
         try server.start(port: 7391)
         defer { server.stop() }
