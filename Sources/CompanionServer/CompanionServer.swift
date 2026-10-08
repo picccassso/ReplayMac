@@ -165,8 +165,9 @@ public final class CompanionServer: ObservableObject {
                 return
             }
 
-            // Check for EOF (stream completed without content)
-            if content == nil && isComplete {
+            // Check for EOF. Ping and pong frames also arrive complete with no
+            // content, so only a final context means the peer has gone.
+            if content == nil && isComplete && (context?.isFinal ?? true) {
                 Task { @MainActor in
                     self.handleConnectionDisconnection(connectionId: connectionId)
                 }
