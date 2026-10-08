@@ -17,6 +17,9 @@ struct HomeView: View {
     @Default(.captureSystemAudio) private var captureSystemAudio
     /// Read when the page appears; returning from Hotkeys rebuilds this view.
     @State private var shortcuts: [KeyboardShortcuts.Name: String] = [:]
+    /// Natural width of "Stop Buffer", so the button can grow from a circle to a pill.
+    @State private var stopLabelWidth: CGFloat = 72
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     private var controls: ReplayControls { windowState.controls }
     private var longBufferSeconds: Int {
@@ -25,6 +28,12 @@ struct HomeView: View {
     private var isSessionOnlyCapture: Bool {
         ReplayControlLabels.isSessionOnlyCapture(isRecording: menuBar.isRecording,
                                                  isSessionRecording: menuBar.isSessionRecording)
+    }
+
+    /// Only a start/stop toggle animates it (the `value:` below), so values that
+    /// tick every second never pick up the spring.
+    private var stateAnimation: Animation {
+        reduceMotion ? .easeInOut(duration: 0.15) : .smooth(duration: 0.4)
     }
 
     var body: some View {
@@ -40,6 +49,8 @@ struct HomeView: View {
             }
             .padding(24)
             .frame(maxWidth: .infinity, alignment: .leading)
+            .animation(stateAnimation, value: menuBar.isRecording)
+            .animation(stateAnimation, value: menuBar.isSessionRecording)
         }
         .onAppear(perform: reloadShortcuts)
     }
@@ -49,36 +60,72 @@ struct HomeView: View {
     private var statusCard: some View {
         VStack(alignment: .leading, spacing: 16) {
             HStack(spacing: 12) {
-                Circle()
-                    .fill(menuBar.isRecording || menuBar.isSessionRecording ? AppTheme.danger : Color.secondary.opacity(0.5))
-                    .frame(width: 10, height: 10)
+                StatusDot(isLive: menuBar.isRecording || menuBar.isSessionRecording)
                     .accessibilityHidden(true)
                 VStack(alignment: .leading, spacing: 2) {
                     Text(headline)
                         .font(.system(size: 17, weight: .semibold, design: .rounded))
+                        .contentTransition(.opacity)
                     Text(subheadline)
                         .font(.system(size: 12, design: .rounded))
                         .foregroundStyle(.secondary)
+                        .contentTransition(.opacity)
                 }
+                .accessibilityElement(children: .combine)
                 Spacer(minLength: 0)
+                bufferToggleButton
             }
-            .accessibilityElement(children: .combine)
+            .frame(minHeight: 34)
 
             if menuBar.isRecording && !isSessionOnlyCapture {
-                let quickAvailable = ReplayControlLabels.quickReplayAvailable(
-                    bufferedSeconds: menuBar.bufferedSeconds, capSeconds: replaySeconds)
-                meter("Quick replay", available: quickAvailable, capSeconds: replaySeconds,
-                      detail: "\(menuBar.formattedBufferMemory) in memory")
-                if longBufferEnabled {
-                    meter("Extended replay",
-                          available: min(menuBar.extendedBufferElapsedSeconds, TimeInterval(longBufferSeconds)),
-                          capSeconds: longBufferSeconds, detail: "Kept on disk")
+                VStack(alignment: .leading, spacing: 16) {
+                    let quickAvailable = ReplayControlLabels.quickReplayAvailable(
+                        bufferedSeconds: menuBar.bufferedSeconds, capSeconds: replaySeconds)
+                    meter("Quick replay", available: quickAvailable, capSeconds: replaySeconds,
+                          detail: "\(menuBar.formattedBufferMemory) in memory")
+                    if longBufferEnabled {
+                        meter("Extended replay",
+                              available: min(menuBar.extendedBufferElapsedSeconds, TimeInterval(longBufferSeconds)),
+                              capSeconds: longBufferSeconds, detail: "Kept on disk")
+                    }
                 }
+                .transition(reduceMotion ? .opacity : .opacity.combined(with: .scale(scale: 0.96, anchor: .top)))
             }
         }
         .padding(18)
         .frame(maxWidth: .infinity, alignment: .leading)
         .glassPanel()
+    }
+
+    /// The same toggle as the buffer tile below, within reach of the status it describes.
+    /// One capsule morphs between the play circle and the "Stop Buffer" pill.
+    private var bufferToggleButton: some View {
+        let label = ReplayControlLabels.replayBuffer(isRecording: menuBar.isRecording)
+        let isRunning = menuBar.isRecording
+        return Button(action: controls.toggleBuffer) {
+            HStack(spacing: 0) {
+                Image(systemName: isRunning ? "stop.fill" : "play.fill")
+                    .font(.system(size: 11))
+                    .contentTransition(.symbolEffect(.replace))
+                    .frame(width: 12)
+                    .accessibilityHidden(true)
+                Text("Stop Buffer")
+                    .font(.system(size: 12, weight: .semibold, design: .rounded))
+                    .fixedSize()
+                    .onGeometryChange(for: CGFloat.self, of: { $0.size.width }) { stopLabelWidth = $0 }
+                    .opacity(isRunning ? 1 : 0)
+                    .frame(width: isRunning ? stopLabelWidth : 0, alignment: .leading)
+                    .clipped()
+                    .padding(.leading, isRunning ? 6 : 0)
+                    .accessibilityHidden(true)
+            }
+            .padding(.horizontal, isRunning ? 12 : 11)
+            .frame(height: isRunning ? 28 : 34)
+            .background(AppTheme.danger.opacity(0.15), in: Capsule())
+        }
+        .buttonStyle(HomeStatusButtonStyle())
+        .help(label.title)
+        .accessibilityLabel(label.title)
     }
 
     private var headline: String {
@@ -253,11 +300,13 @@ struct HomeView: View {
                 HStack(spacing: 10) {
                     Image(systemName: label.symbol)
                         .font(.system(size: 20))
+                        .contentTransition(.symbolEffect(.replace))
                         .foregroundStyle(prominent ? Color.white : (isActive ? AppTheme.danger : AppTheme.accent))
                         .frame(width: 24)
                         .accessibilityHidden(true)
                     Text(label.title)
                         .font(.system(size: 13, weight: .semibold, design: .rounded))
+                        .contentTransition(.opacity)
                         .lineLimit(2)
                         .multilineTextAlignment(.leading)
                     Spacer(minLength: 0)
@@ -319,6 +368,62 @@ private struct HomeTileButtonStyle: ButtonStyle {
                 .background(prominent ? AppTheme.accent : AppTheme.backgroundSecondary,
                             in: RoundedRectangle(cornerRadius: AppTheme.cornerRadiusMedium, style: .continuous))
                 .opacity(isEnabled ? (configuration.isPressed ? 0.75 : 1) : 0.45)
+                .animation(.easeInOut(duration: 0.2), value: isEnabled)
+        }
+    }
+}
+
+/// Red foreground for the status card's buffer button, whose label draws its own
+/// soft fill. Dims when pressed or disabled like the tiles, and lightens on hover.
+private struct HomeStatusButtonStyle: ButtonStyle {
+    func makeBody(configuration: Configuration) -> some View {
+        StatusBody(configuration: configuration)
+    }
+
+    private struct StatusBody: View {
+        let configuration: ButtonStyleConfiguration
+        @Environment(\.isEnabled) private var isEnabled
+        @State private var isHovering = false
+
+        var body: some View {
+            configuration.label
+                .foregroundStyle(AppTheme.danger)
+                .contentShape(Rectangle())
+                .brightness(isHovering && isEnabled ? 0.06 : 0)
+                .opacity(isEnabled ? (configuration.isPressed ? 0.7 : 1) : 0.45)
+                .onHover { isHovering = $0 }
+        }
+    }
+}
+
+/// The status light: red while capturing, with a soft ring that pulses outward
+/// so a running buffer reads as live. The pulse is skipped under Reduce Motion.
+private struct StatusDot: View {
+    let isLive: Bool
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+    var body: some View {
+        Circle()
+            .fill(isLive ? AppTheme.danger : Color.secondary.opacity(0.5))
+            .frame(width: 10, height: 10)
+            .overlay {
+                if isLive && !reduceMotion {
+                    PulseRing().transition(.opacity)
+                }
+            }
+    }
+
+    private struct PulseRing: View {
+        @State private var expanded = false
+
+        var body: some View {
+            Circle()
+                .stroke(AppTheme.danger.opacity(0.5), lineWidth: 1.5)
+                .scaleEffect(expanded ? 2.4 : 1)
+                .opacity(expanded ? 0 : 1)
+                .onAppear {
+                    withAnimation(.easeOut(duration: 1.8).repeatForever(autoreverses: false)) { expanded = true }
+                }
         }
     }
 }
