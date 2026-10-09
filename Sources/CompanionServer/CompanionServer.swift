@@ -300,7 +300,7 @@ public final class CompanionServer: ObservableObject {
         let rawId = message.deviceId?.trimmingCharacters(in: .whitespacesAndNewlines)
         let deviceId = (rawId?.isEmpty == false) ? rawId! : connectionId.uuidString
         let rawName = message.deviceName?.trimmingCharacters(in: .whitespacesAndNewlines)
-        let deviceName = (rawName?.isEmpty == false) ? rawName! : "Android Device"
+        let deviceName = (rawName?.isEmpty == false) ? rawName! : "Companion Device"
 
         // Cancel previous stale connection for same deviceId
         let staleConnections = connectionDevices.filter { $0.key != connectionId && $0.value == deviceId }

@@ -58,7 +58,7 @@ public final class CompanionPairingManager: ObservableObject {
     }
 
     public func approveDevice(id: String, name: String) {
-        let cleanName = name.isEmpty ? "Android Device" : name
+        let cleanName = name.isEmpty ? "Companion Device" : name
         if let idx = pairedDevices.firstIndex(where: { $0.id == id }) {
             let existing = pairedDevices[idx]
             let resolvedName = (existing.isCustomName == true) ? existing.name : cleanName
@@ -108,7 +108,7 @@ public final class CompanionPairingManager: ObservableObject {
         }
         inFlightPrompts[id] = []
 
-        let displayName = name.isEmpty ? "Android Device" : name
+        let displayName = name.isEmpty ? "Companion Device" : name
         let result: Bool
         if let customHandler = promptHandler {
             result = await customHandler(id, displayName)
@@ -130,7 +130,7 @@ public final class CompanionPairingManager: ObservableObject {
         NSApp.activate(ignoringOtherApps: true)
 
         let alert = NSAlert()
-        alert.messageText = "Allow Android device '\(displayName)' to connect?"
+        alert.messageText = "Allow '\(displayName)' to connect?"
         alert.informativeText = "This device will be able to start/stop recordings, save clips, and access clip previews on your Mac."
         alert.alertStyle = .informational
         alert.addButton(withTitle: "Allow")
