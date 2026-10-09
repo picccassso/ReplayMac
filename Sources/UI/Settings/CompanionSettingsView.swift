@@ -14,6 +14,7 @@ public struct CompanionSettingsView: View {
     @State private var isPortInvalid: Bool = false
     @FocusState private var isPortFocused: Bool
     @State private var showRevokeAllAlert = false
+    @State private var deviceToRevoke: PairedDevice? = nil
     @State private var clickMonitor: Any? = nil
 
     public init() {}
@@ -32,6 +33,21 @@ public struct CompanionSettingsView: View {
             Button("Cancel", role: .cancel) {}
         } message: {
             Text("All paired phones and tablets will be disconnected and will need to request authorization again to reconnect.")
+        }
+        .alert(
+            "Revoke '\(deviceToRevoke?.name ?? "Device")'?",
+            isPresented: Binding(
+                get: { deviceToRevoke != nil },
+                set: { if !$0 { deviceToRevoke = nil } }
+            ),
+            presenting: deviceToRevoke
+        ) { device in
+            Button("Revoke", role: .destructive) {
+                pairingManager.revokeDevice(id: device.id)
+            }
+            Button("Cancel", role: .cancel) {}
+        } message: { _ in
+            Text("This device will be disconnected and will need to request authorization again to reconnect to your Mac.")
         }
         .onAppear {
             portDraft = String(companionServerPort)
@@ -308,7 +324,7 @@ public struct CompanionSettingsView: View {
                         Spacer(minLength: 8)
 
                         Button("Revoke") {
-                            pairingManager.revokeDevice(id: device.id)
+                            deviceToRevoke = device
                         }
                         .buttonStyle(.bordered)
                         .tint(AppTheme.danger)
