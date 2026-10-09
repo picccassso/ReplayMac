@@ -436,6 +436,7 @@ public extension Defaults.Keys {
 
     static let companionServerEnabled = Key<Bool>("companionServerEnabled", default: true)
     static let companionServerPort = Key<Int>("companionServerPort", default: 7375)
+    static let companionHideSensitiveInfo = Key<Bool>("companionHideSensitiveInfo", default: false)
 
     static let hasCompletedOnboarding = Key<Bool>("hasCompletedOnboarding", default: false)
 }

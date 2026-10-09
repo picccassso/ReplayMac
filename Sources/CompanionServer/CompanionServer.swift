@@ -32,7 +32,12 @@ public final class CompanionServer: ObservableObject {
     @Published public private(set) var isRunning: Bool = false
     @Published public private(set) var listeningPort: UInt16 = defaultPort
     @Published public private(set) var connectedClientsCount: Int = 0
+    @Published public private(set) var connectedDeviceIds: Set<String> = []
     @Published public private(set) var localIPAddresses: [String] = []
+
+    public func isDeviceConnected(id: String) -> Bool {
+        connectedDeviceIds.contains(id)
+    }
 
     // Callback hooks for application integration
     public var onSaveReplay: (@MainActor () -> Void)?
@@ -111,6 +116,7 @@ public final class CompanionServer: ObservableObject {
         activeConnections.removeAll()
         connectionDevices.removeAll()
         connectedClientsCount = 0
+        connectedDeviceIds.removeAll()
 
         listener?.cancel()
         listener = nil
@@ -200,7 +206,7 @@ public final class CompanionServer: ObservableObject {
             conn.cancel()
         }
         connectionDevices.removeValue(forKey: connectionId)
-        connectedClientsCount = connectionDevices.count
+        updateConnectedClients()
     }
 
     private func handleDeviceRevoked(_ deviceId: String) {
@@ -213,7 +219,12 @@ public final class CompanionServer: ObservableObject {
             activeConnections.removeValue(forKey: connId)
             connectionDevices.removeValue(forKey: connId)
         }
+        updateConnectedClients()
+    }
+
+    private func updateConnectedClients() {
         connectedClientsCount = connectionDevices.count
+        connectedDeviceIds = Set(connectionDevices.values)
     }
 
     // MARK: - Message Handling
@@ -297,7 +308,7 @@ public final class CompanionServer: ObservableObject {
 
         if pairingManager.isDeviceApproved(id: deviceId) {
             connectionDevices[connectionId] = deviceId
-            connectedClientsCount = connectionDevices.count
+            updateConnectedClients()
             send(
                 authResponse(status: "approved"),
                 to: connection
@@ -318,7 +329,7 @@ public final class CompanionServer: ObservableObject {
 
                 if approved {
                     self.connectionDevices[connectionId] = deviceId
-                    self.connectedClientsCount = self.connectionDevices.count
+                    self.updateConnectedClients()
                     self.send(
                         authResponse(status: "approved"),
                         to: connection

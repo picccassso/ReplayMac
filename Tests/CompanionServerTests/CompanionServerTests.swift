@@ -546,6 +546,52 @@ final class CompanionServerLifecycleTests: XCTestCase {
         XCTAssertEqual(errMsg.message, "Device not authorized")
         XCTAssertFalse(actionRun)
     }
+
+    func testConnectedDeviceIdsTrackedOnHelloAndDisconnect() async throws {
+        let defaults = UserDefaults(suiteName: "CompanionTest-\(UUID().uuidString)")!
+        defer { defaults.removePersistentDomain(forName: defaults.description) }
+        let pairing = CompanionPairingManager(defaults: defaults)
+        pairing.approveDevice(id: "dev-tracking-1", name: "Pixel 8 Pro")
+
+        let server = CompanionServer(pairingManager: pairing)
+        try server.start(port: 7394)
+        defer { server.stop() }
+
+        for _ in 0..<20 {
+            if server.isRunning { break }
+            try await Task.sleep(nanoseconds: 100_000_000)
+        }
+
+        XCTAssertFalse(server.isDeviceConnected(id: "dev-tracking-1"))
+        XCTAssertTrue(server.connectedDeviceIds.isEmpty)
+
+        let session = URLSession(configuration: .default)
+        let wsTask = session.webSocketTask(with: URL(string: "ws://127.0.0.1:7394")!)
+        wsTask.resume()
+
+        let hello = CompanionClientMessage(type: "hello", deviceId: "dev-tracking-1", deviceName: "Pixel 8 Pro")
+        try await wsTask.send(.string(String(data: try JSONEncoder().encode(hello), encoding: .utf8)!))
+
+        _ = try await wsTask.receive()
+
+        for _ in 0..<20 {
+            if server.isDeviceConnected(id: "dev-tracking-1") { break }
+            try await Task.sleep(nanoseconds: 50_000_000)
+        }
+
+        XCTAssertTrue(server.isDeviceConnected(id: "dev-tracking-1"))
+        XCTAssertTrue(server.connectedDeviceIds.contains("dev-tracking-1"))
+
+        wsTask.cancel(with: .normalClosure, reason: nil)
+
+        for _ in 0..<20 {
+            if !server.isDeviceConnected(id: "dev-tracking-1") { break }
+            try await Task.sleep(nanoseconds: 50_000_000)
+        }
+
+        XCTAssertFalse(server.isDeviceConnected(id: "dev-tracking-1"))
+        XCTAssertFalse(server.connectedDeviceIds.contains("dev-tracking-1"))
+    }
 }
 
 
