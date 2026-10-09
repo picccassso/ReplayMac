@@ -7,14 +7,19 @@ public struct CompanionSettingsView: View {
     @Default(.companionServerEnabled) private var companionServerEnabled
     @Default(.companionServerPort) private var companionServerPort
     @Default(.companionHideSensitiveInfo) private var hideSensitiveInfo
+    @Default(.companionCustomServerName) private var customServerName
     @ObservedObject private var server = CompanionServer.shared
     @ObservedObject private var pairingManager = CompanionPairingManager.shared
 
     @State private var portDraft: String = ""
     @State private var isPortInvalid: Bool = false
     @FocusState private var isPortFocused: Bool
+    @State private var serverNameDraft: String = ""
+    @State private var isEditingServerName: Bool = false
     @State private var showRevokeAllAlert = false
     @State private var deviceToRevoke: PairedDevice? = nil
+    @State private var deviceToRename: PairedDevice? = nil
+    @State private var renameDraft: String = ""
     @State private var clickMonitor: Any? = nil
 
     public init() {}
@@ -48,6 +53,28 @@ public struct CompanionSettingsView: View {
             Button("Cancel", role: .cancel) {}
         } message: { _ in
             Text("This device will be disconnected and will need to request authorization again to reconnect to your Mac.")
+        }
+        .alert(
+            "Rename '\(deviceToRename?.name ?? "Device")'",
+            isPresented: Binding(
+                get: { deviceToRename != nil },
+                set: { if !$0 { deviceToRename = nil } }
+            ),
+            presenting: deviceToRename
+        ) { device in
+            TextField("Device Name", text: $renameDraft)
+            Button("Save") {
+                let trimmed = renameDraft.trimmingCharacters(in: .whitespacesAndNewlines)
+                if !trimmed.isEmpty {
+                    pairingManager.renameDevice(id: device.id, newName: trimmed)
+                }
+                deviceToRename = nil
+            }
+            Button("Cancel", role: .cancel) {
+                deviceToRename = nil
+            }
+        } message: { _ in
+            Text("Enter a new display name for this device.")
         }
         .onAppear {
             portDraft = String(companionServerPort)
@@ -123,6 +150,55 @@ public struct CompanionSettingsView: View {
 
     private var networkSection: some View {
         Section {
+            LabeledContent("Server Name") {
+                HStack(spacing: 8) {
+                    if isEditingServerName {
+                        TextField("", text: $serverNameDraft, prompt: Text(defaultServerName))
+                            .labelsHidden()
+                            .textFieldStyle(.roundedBorder)
+                            .frame(maxWidth: 180)
+                            .font(.system(.body, design: .rounded))
+                            .onSubmit {
+                                commitServerNameDraft()
+                            }
+                            .onExitCommand {
+                                cancelServerNameDraft()
+                            }
+
+                        Button("Save") {
+                            commitServerNameDraft()
+                        }
+                        .buttonStyle(.borderedProminent)
+                        .controlSize(.small)
+
+                        Button("Cancel") {
+                            cancelServerNameDraft()
+                        }
+                        .buttonStyle(.bordered)
+                        .controlSize(.small)
+                    } else {
+                        Text(currentServerName)
+                            .font(.system(.body, design: .rounded))
+                            .foregroundStyle(AppTheme.textPrimary)
+
+                        if !customServerName.isEmpty {
+                            Button("Reset") {
+                                resetServerName()
+                            }
+                            .buttonStyle(.bordered)
+                            .controlSize(.small)
+                            .help("Reset to Mac's default network name")
+                        }
+
+                        Button("Edit") {
+                            startEditingServerName()
+                        }
+                        .buttonStyle(.bordered)
+                        .controlSize(.small)
+                    }
+                }
+            }
+
             if server.localIPAddresses.isEmpty {
                 LabeledContent("Local IP Address") {
                     HStack(spacing: 8) {
@@ -323,12 +399,21 @@ public struct CompanionSettingsView: View {
 
                         Spacer(minLength: 8)
 
-                        Button("Revoke") {
-                            deviceToRevoke = device
+                        HStack(spacing: 6) {
+                            Button("Rename") {
+                                deviceToRename = device
+                                renameDraft = device.name
+                            }
+                            .buttonStyle(.bordered)
+                            .controlSize(.small)
+
+                            Button("Revoke") {
+                                deviceToRevoke = device
+                            }
+                            .buttonStyle(.bordered)
+                            .tint(AppTheme.danger)
+                            .controlSize(.small)
                         }
-                        .buttonStyle(.bordered)
-                        .tint(AppTheme.danger)
-                        .controlSize(.small)
                     }
                     .padding(.vertical, 2)
                 }
@@ -382,6 +467,43 @@ public struct CompanionSettingsView: View {
             isPortInvalid = true
             portDraft = String(companionServerPort)
         }
+    }
+
+    private var defaultServerName: String {
+        Host.current().localizedName ?? "ReplayMac"
+    }
+
+    private var currentServerName: String {
+        let trimmed = customServerName.trimmingCharacters(in: .whitespacesAndNewlines)
+        return trimmed.isEmpty ? defaultServerName : trimmed
+    }
+
+    private func startEditingServerName() {
+        serverNameDraft = customServerName.isEmpty ? defaultServerName : customServerName
+        isEditingServerName = true
+    }
+
+    private func commitServerNameDraft() {
+        let trimmed = serverNameDraft.trimmingCharacters(in: .whitespacesAndNewlines)
+        if trimmed.isEmpty || trimmed == defaultServerName {
+            customServerName = ""
+            server.updateServerName("")
+        } else {
+            customServerName = trimmed
+            server.updateServerName(trimmed)
+        }
+        isEditingServerName = false
+    }
+
+    private func cancelServerNameDraft() {
+        serverNameDraft = ""
+        isEditingServerName = false
+    }
+
+    private func resetServerName() {
+        customServerName = ""
+        server.updateServerName("")
+        isEditingServerName = false
     }
 
     private func deviceSymbol(for name: String) -> String {

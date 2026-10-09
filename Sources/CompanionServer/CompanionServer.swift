@@ -56,13 +56,18 @@ public final class CompanionServer: ObservableObject {
     private var activeConnections: [UUID: NWConnection] = [:]
     private var connectionDevices: [UUID: String] = [:]
     private let pairingManager: CompanionPairingManager
+    private let defaults: UserDefaults
 
     public init(pairingManager: CompanionPairingManager = .shared, defaults: UserDefaults = .standard) {
         self.pairingManager = pairingManager
+        self.defaults = defaults
         self.serverId = Self.loadOrCreateServerId(in: defaults)
         self.localIPAddresses = Self.resolveLocalIPAddresses()
         self.pairingManager.onDeviceRevoked = { [weak self] revokedId in
             self?.handleDeviceRevoked(revokedId)
+        }
+        self.pairingManager.onDeviceRenamed = { [weak self] id, newName in
+            self?.handleDeviceRenamed(id: id, newName: newName)
         }
     }
 
@@ -307,10 +312,12 @@ public final class CompanionServer: ObservableObject {
         }
 
         if pairingManager.isDeviceApproved(id: deviceId) {
+            pairingManager.approveDevice(id: deviceId, name: deviceName)
+            let resolvedName = pairingManager.device(for: deviceId)?.name ?? deviceName
             connectionDevices[connectionId] = deviceId
             updateConnectedClients()
             send(
-                authResponse(status: "approved"),
+                authResponse(status: "approved", deviceName: resolvedName),
                 to: connection
             )
             if let snapshot = snapshotProvider?() {
@@ -318,7 +325,7 @@ public final class CompanionServer: ObservableObject {
             }
         } else {
             send(
-                authResponse(status: "pending"),
+                authResponse(status: "pending", deviceName: deviceName),
                 to: connection
             )
 
@@ -328,10 +335,11 @@ public final class CompanionServer: ObservableObject {
                 guard self.activeConnections[connectionId] != nil else { return }
 
                 if approved {
+                    let resolvedName = self.pairingManager.device(for: deviceId)?.name ?? deviceName
                     self.connectionDevices[connectionId] = deviceId
                     self.updateConnectedClients()
                     self.send(
-                        authResponse(status: "approved"),
+                        self.authResponse(status: "approved", deviceName: resolvedName),
                         to: connection
                     )
                     if let snapshot = self.snapshotProvider?() {
@@ -339,7 +347,7 @@ public final class CompanionServer: ObservableObject {
                     }
                 } else {
                     self.send(
-                        authResponse(status: "denied"),
+                        self.authResponse(status: "denied", deviceName: deviceName),
                         to: connection
                     )
                     self.handleConnectionDisconnection(connectionId: connectionId)
@@ -350,16 +358,58 @@ public final class CompanionServer: ObservableObject {
 
     // MARK: - Identity
 
-    private var serverName: String {
-        Host.current().localizedName ?? AppBranding.name
+    public static let serverNameDefaultsKey = "companionCustomServerName"
+
+    public var serverName: String {
+        let custom = defaults.string(forKey: Self.serverNameDefaultsKey)?.trimmingCharacters(in: .whitespacesAndNewlines)
+        if let custom, !custom.isEmpty {
+            return custom
+        }
+        return Host.current().localizedName ?? AppBranding.name
     }
 
-    private func authResponse(status: String) -> CompanionAuthResponse {
+    public func updateServerName(_ newName: String) {
+        let clean = newName.trimmingCharacters(in: .whitespacesAndNewlines)
+        if clean.isEmpty {
+            defaults.removeObject(forKey: Self.serverNameDefaultsKey)
+        } else {
+            defaults.set(clean, forKey: Self.serverNameDefaultsKey)
+        }
+
+        if let listener {
+            listener.service = NWListener.Service(
+                name: serverName,
+                type: Self.bonjourServiceType,
+                domain: nil,
+                txtRecord: NWTXTRecord([Self.serverIdTXTKey: serverId])
+            )
+        }
+
+        for (connId, conn) in activeConnections {
+            let devId = connectionDevices[connId]
+            let devName = devId.flatMap { pairingManager.device(for: $0)?.name }
+            send(authResponse(status: "approved", deviceName: devName), to: conn)
+        }
+    }
+
+    private func handleDeviceRenamed(id: String, newName: String) {
+        for (connId, devId) in connectionDevices where devId == id {
+            if let conn = activeConnections[connId] {
+                send(
+                    authResponse(status: "approved", deviceName: newName),
+                    to: conn
+                )
+            }
+        }
+    }
+
+    private func authResponse(status: String, deviceName: String? = nil) -> CompanionAuthResponse {
         CompanionAuthResponse(
             status: status,
             serverName: serverName,
             serverVersion: Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "1.7.3",
-            serverId: serverId
+            serverId: serverId,
+            deviceName: deviceName
         )
     }
 

@@ -304,6 +304,7 @@ public enum AppSettings {
     }
     public static var companionServerEnabled: Bool { Defaults[.companionServerEnabled] }
     public static var companionServerPort: Int { Defaults[.companionServerPort] }
+    public static var companionCustomServerName: String { Defaults[.companionCustomServerName] }
 
     public static func ringBufferMemoryCaps(
         isDualMode: Bool,
@@ -437,6 +438,7 @@ public extension Defaults.Keys {
     static let companionServerEnabled = Key<Bool>("companionServerEnabled", default: true)
     static let companionServerPort = Key<Int>("companionServerPort", default: 7375)
     static let companionHideSensitiveInfo = Key<Bool>("companionHideSensitiveInfo", default: false)
+    static let companionCustomServerName = Key<String>("companionCustomServerName", default: "")
 
     static let hasCompletedOnboarding = Key<Bool>("hasCompletedOnboarding", default: false)
 }

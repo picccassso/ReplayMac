@@ -5,11 +5,13 @@ public struct PairedDevice: Codable, Identifiable, Equatable, Hashable, Sendable
     public let id: String
     public let name: String
     public let pairedAt: Date
+    public let isCustomName: Bool?
 
-    public init(id: String, name: String, pairedAt: Date = Date()) {
+    public init(id: String, name: String, pairedAt: Date = Date(), isCustomName: Bool? = nil) {
         self.id = id
         self.name = name
         self.pairedAt = pairedAt
+        self.isCustomName = isCustomName
     }
 }
 
@@ -20,6 +22,7 @@ public final class CompanionPairingManager: ObservableObject {
 
     @Published public private(set) var pairedDevices: [PairedDevice] = []
     public var onDeviceRevoked: ((String) -> Void)?
+    public var onDeviceRenamed: ((String, String) -> Void)?
     /// Allows tests to simulate user approval/denial without showing native modal dialogs.
     public var promptHandler: (@MainActor (String, String) async -> Bool)?
 
@@ -50,14 +53,31 @@ public final class CompanionPairingManager: ObservableObject {
         pairedDevices.contains { $0.id == id }
     }
 
+    public func device(for id: String) -> PairedDevice? {
+        pairedDevices.first { $0.id == id }
+    }
+
     public func approveDevice(id: String, name: String) {
         let cleanName = name.isEmpty ? "Android Device" : name
         if let idx = pairedDevices.firstIndex(where: { $0.id == id }) {
-            pairedDevices[idx] = PairedDevice(id: id, name: cleanName, pairedAt: pairedDevices[idx].pairedAt)
+            let existing = pairedDevices[idx]
+            let resolvedName = (existing.isCustomName == true) ? existing.name : cleanName
+            pairedDevices[idx] = PairedDevice(id: id, name: resolvedName, pairedAt: existing.pairedAt, isCustomName: existing.isCustomName)
         } else {
             pairedDevices.append(PairedDevice(id: id, name: cleanName, pairedAt: Date()))
         }
         saveDevices()
+    }
+
+    public func renameDevice(id: String, newName: String) {
+        let cleanName = newName.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !cleanName.isEmpty else { return }
+        if let idx = pairedDevices.firstIndex(where: { $0.id == id }) {
+            let existing = pairedDevices[idx]
+            pairedDevices[idx] = PairedDevice(id: id, name: cleanName, pairedAt: existing.pairedAt, isCustomName: true)
+            saveDevices()
+            onDeviceRenamed?(id, cleanName)
+        }
     }
 
     public func revokeDevice(id: String) {

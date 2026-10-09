@@ -113,4 +113,68 @@ final class CompanionConnectionTests: XCTestCase {
         XCTAssertEqual(auth.status, "approved")
         XCTAssertEqual(auth.serverId, server.serverId)
     }
+
+    func testServerRenameReflectedToConnectedClient() async throws {
+        let pairing = CompanionPairingManager(defaults: defaults)
+        pairing.approveDevice(id: "phone-1", name: "Galaxy S23")
+        let server = CompanionServer(pairingManager: pairing, defaults: defaults)
+        server.snapshotProvider = { CompanionStateSnapshot.empty }
+        try server.start(port: 7397)
+        defer { server.stop() }
+        try await waitUntil { server.isRunning }
+
+        let task = URLSession.shared.webSocketTask(with: URL(string: "ws://127.0.0.1:7397")!)
+        task.resume()
+        defer { task.cancel(with: .normalClosure, reason: nil) }
+        try await task.send(.string(#"{"type":"hello","deviceId":"phone-1","deviceName":"Galaxy S23"}"#))
+
+        guard case .string(let text1) = try await task.receive() else { return XCTFail("Expected text") }
+        let auth1 = try JSONDecoder().decode(CompanionAuthResponse.self, from: Data(text1.utf8))
+        XCTAssertEqual(auth1.status, "approved")
+
+        // Consume snapshot sent after auth
+        _ = try await task.receive()
+
+        // Rename server
+        server.updateServerName("Alex's Studio Mac")
+        XCTAssertEqual(server.serverName, "Alex's Studio Mac")
+
+        // Client receives updated auth response
+        guard case .string(let text2) = try await task.receive() else { return XCTFail("Expected text") }
+        let auth2 = try JSONDecoder().decode(CompanionAuthResponse.self, from: Data(text2.utf8))
+        XCTAssertEqual(auth2.status, "approved")
+        XCTAssertEqual(auth2.serverName, "Alex's Studio Mac")
+    }
+
+    func testDeviceRenameReflectedToConnectedClient() async throws {
+        let pairing = CompanionPairingManager(defaults: defaults)
+        pairing.approveDevice(id: "phone-1", name: "Galaxy S23")
+        let server = CompanionServer(pairingManager: pairing, defaults: defaults)
+        server.snapshotProvider = { CompanionStateSnapshot.empty }
+        try server.start(port: 7398)
+        defer { server.stop() }
+        try await waitUntil { server.isRunning }
+
+        let task = URLSession.shared.webSocketTask(with: URL(string: "ws://127.0.0.1:7398")!)
+        task.resume()
+        defer { task.cancel(with: .normalClosure, reason: nil) }
+        try await task.send(.string(#"{"type":"hello","deviceId":"phone-1","deviceName":"Galaxy S23"}"#))
+
+        guard case .string(let text1) = try await task.receive() else { return XCTFail("Expected text") }
+        let auth1 = try JSONDecoder().decode(CompanionAuthResponse.self, from: Data(text1.utf8))
+        XCTAssertEqual(auth1.status, "approved")
+        XCTAssertEqual(auth1.deviceName, "Galaxy S23")
+
+        // Consume snapshot sent after auth
+        _ = try await task.receive()
+
+        // Rename device on pairing manager
+        pairing.renameDevice(id: "phone-1", newName: "My Custom Android")
+
+        // Client receives updated auth response with new device name
+        guard case .string(let text2) = try await task.receive() else { return XCTFail("Expected text") }
+        let auth2 = try JSONDecoder().decode(CompanionAuthResponse.self, from: Data(text2.utf8))
+        XCTAssertEqual(auth2.status, "approved")
+        XCTAssertEqual(auth2.deviceName, "My Custom Android")
+    }
 }

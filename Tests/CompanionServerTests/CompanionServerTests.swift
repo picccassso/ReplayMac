@@ -164,6 +164,27 @@ final class CompanionPairingManagerTests: XCTestCase {
         XCTAssertEqual(pairingManager.pairedDevices.count, 1)
     }
 
+    func testRenameDeviceAndPreserveCustomName() {
+        pairingManager.approveDevice(id: "dev-1", name: "Hardware Name")
+        XCTAssertEqual(pairingManager.pairedDevices.first?.name, "Hardware Name")
+
+        var renamedId: String?
+        var renamedNewName: String?
+        pairingManager.onDeviceRenamed = { id, name in
+            renamedId = id
+            renamedNewName = name
+        }
+
+        pairingManager.renameDevice(id: "dev-1", newName: "My Custom Phone")
+        XCTAssertEqual(pairingManager.pairedDevices.first?.name, "My Custom Phone")
+        XCTAssertEqual(renamedId, "dev-1")
+        XCTAssertEqual(renamedNewName, "My Custom Phone")
+
+        // Reconnect with hardware name does not overwrite custom name
+        pairingManager.approveDevice(id: "dev-1", name: "Hardware Name")
+        XCTAssertEqual(pairingManager.pairedDevices.first?.name, "My Custom Phone")
+    }
+
     func testRevokeDevice() {
         pairingManager.approveDevice(id: "dev-1", name: "Device 1")
         pairingManager.approveDevice(id: "dev-2", name: "Device 2")
