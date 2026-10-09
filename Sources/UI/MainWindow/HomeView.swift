@@ -1,5 +1,6 @@
 import AppKit
 import Branding
+import CompanionServer
 import Defaults
 import Hotkeys
 import KeyboardShortcuts
@@ -10,6 +11,8 @@ import SwiftUI
 struct HomeView: View {
     @ObservedObject var windowState: MainWindowState
     @ObservedObject var menuBar: MenuBarState
+    @ObservedObject private var companionServer = CompanionServer.shared
+    @ObservedObject private var pairingManager = CompanionPairingManager.shared
     @Default(.bufferDurationSeconds) private var replaySeconds
     @Default(.longBufferEnabled) private var longBufferEnabled
     @Default(.longBufferDurationMinutes) private var longBufferMinutes
@@ -51,6 +54,7 @@ struct HomeView: View {
             .frame(maxWidth: .infinity, alignment: .leading)
             .animation(stateAnimation, value: menuBar.isRecording)
             .animation(stateAnimation, value: menuBar.isSessionRecording)
+            .animation(stateAnimation, value: companionServer.connectedClientsCount)
         }
         .onAppear(perform: reloadShortcuts)
     }
@@ -73,6 +77,9 @@ struct HomeView: View {
                 }
                 .accessibilityElement(children: .combine)
                 Spacer(minLength: 0)
+                if let label = companionConnectionLabel {
+                    companionPillButton(label: label)
+                }
                 bufferToggleButton
             }
             .frame(minHeight: 34)
@@ -126,6 +133,46 @@ struct HomeView: View {
         .buttonStyle(HomeStatusButtonStyle())
         .help(label.title)
         .accessibilityLabel(label.title)
+    }
+
+    private var companionConnectionLabel: String? {
+        guard companionServer.connectedClientsCount > 0 else { return nil }
+        if companionServer.connectedClientsCount == 1,
+           let firstId = companionServer.connectedDeviceIds.first,
+           let device = pairingManager.device(for: firstId),
+           !device.name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            return "\(device.name) Connected"
+        } else if companionServer.connectedClientsCount == 1 {
+            return "Companion Connected"
+        } else {
+            return "\(companionServer.connectedClientsCount) Companions Connected"
+        }
+    }
+
+    private func companionPillButton(label: String) -> some View {
+        Button {
+            windowState.select(.companion)
+        } label: {
+            HStack(spacing: 6) {
+                Circle()
+                    .fill(AppTheme.success)
+                    .frame(width: 7, height: 7)
+                Text(label)
+                    .font(.system(size: 12, weight: .medium, design: .rounded))
+                    .foregroundStyle(AppTheme.textPrimary)
+                Image(systemName: "chevron.right")
+                    .font(.system(size: 10, weight: .semibold))
+                    .foregroundStyle(.secondary)
+            }
+            .padding(.horizontal, 10)
+            .frame(height: 28)
+            .background(AppTheme.success.opacity(0.12), in: Capsule())
+            .overlay(Capsule().stroke(AppTheme.success.opacity(0.25), lineWidth: 0.5))
+        }
+        .buttonStyle(CompanionPillButtonStyle())
+        .help("Companion app connected. Click to open Companion Settings.")
+        .accessibilityLabel("\(label), open Companion Settings")
+        .transition(reduceMotion ? .opacity : .opacity.combined(with: .scale(scale: 0.95)))
     }
 
     private var headline: String {
@@ -424,6 +471,27 @@ private struct StatusDot: View {
                 .onAppear {
                     withAnimation(.easeOut(duration: 1.8).repeatForever(autoreverses: false)) { expanded = true }
                 }
+        }
+    }
+}
+
+/// Subtle hover and active states for the companion status pill on the Home screen.
+private struct CompanionPillButtonStyle: ButtonStyle {
+    func makeBody(configuration: Configuration) -> some View {
+        PillBody(configuration: configuration)
+    }
+
+    private struct PillBody: View {
+        let configuration: ButtonStyleConfiguration
+        @Environment(\.isEnabled) private var isEnabled
+        @State private var isHovering = false
+
+        var body: some View {
+            configuration.label
+                .contentShape(Capsule())
+                .brightness(isHovering && isEnabled ? 0.05 : 0)
+                .opacity(isEnabled ? (configuration.isPressed ? 0.75 : 1) : 0.45)
+                .onHover { isHovering = $0 }
         }
     }
 }

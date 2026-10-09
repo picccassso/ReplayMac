@@ -1,10 +1,12 @@
 import AppKit
 import Branding
+import CompanionServer
 import SwiftUI
 
 public struct MainWindowView: View {
     @ObservedObject private var state: MainWindowState
     @ObservedObject private var exports: ClipExportCoordinator
+    @ObservedObject private var companionServer = CompanionServer.shared
     private let menuBar: MenuBarState
     @Environment(\.accessibilityShowBorders) private var showBorders
     @Environment(\.colorSchemeContrast) private var contrast
@@ -68,7 +70,9 @@ public struct MainWindowView: View {
                 .padding(.bottom, 8)
                 .accessibilityAddTraits(.isHeader)
             ForEach(MainWindowPage.allCases.filter { $0 != .home && $0 != .library }) { page in
+                let isCompanionConnected = page == .companion && companionServer.connectedClientsCount > 0
                 sidebarRow(page.title, icon: page.icon,
+                           isIndicatorActive: isCompanionConnected,
                            isSelected: state.page == page) { state.select(page) }
             }
             Spacer(minLength: 0)
@@ -79,6 +83,7 @@ public struct MainWindowView: View {
     }
 
     private func sidebarRow(_ title: String, detail: String? = nil, icon: String,
+                            isIndicatorActive: Bool = false,
                             isSelected: Bool, action: @escaping () -> Void) -> some View {
         Button(action: action) {
             HStack(spacing: 10) {
@@ -94,6 +99,11 @@ public struct MainWindowView: View {
                 }
                 .lineLimit(1)
                 Spacer(minLength: 0)
+                if isIndicatorActive {
+                    Circle()
+                        .fill(AppTheme.success)
+                        .frame(width: 6, height: 6)
+                }
             }
             .font(.system(size: 13, weight: isSelected ? .semibold : .medium, design: .rounded))
             .foregroundStyle(isSelected ? AppTheme.accent : AppTheme.textPrimary)
@@ -111,7 +121,7 @@ public struct MainWindowView: View {
         }
         .buttonStyle(.plain)
         .padding(.vertical, 2)
-        .accessibilityLabel(detail.map { "\(title), \($0)" } ?? title)
+        .accessibilityLabel(detail.map { "\(title), \($0)" } ?? (isIndicatorActive ? "\(title), connected" : title))
         .accessibilityAddTraits(isSelected ? .isSelected : [])
     }
 
