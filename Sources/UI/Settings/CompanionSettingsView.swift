@@ -14,6 +14,7 @@ public struct CompanionSettingsView: View {
     @State private var isPortInvalid: Bool = false
     @FocusState private var isPortFocused: Bool
     @State private var showRevokeAllAlert = false
+    @State private var clickMonitor: Any? = nil
 
     public init() {}
 
@@ -34,6 +35,9 @@ public struct CompanionSettingsView: View {
         }
         .onAppear {
             portDraft = String(companionServerPort)
+        }
+        .onDisappear {
+            removeClickMonitor()
         }
         .onChange(of: companionServerPort) { _, newPort in
             if !isPortFocused {
@@ -127,14 +131,30 @@ public struct CompanionSettingsView: View {
 
             LabeledContent("Port") {
                 HStack(spacing: 8) {
-                    TextField("Port", text: $portDraft)
+                    TextField("", text: $portDraft, prompt: Text(String(CompanionServer.defaultPort)))
+                        .labelsHidden()
                         .textFieldStyle(.roundedBorder)
                         .frame(width: 76)
                         .font(.system(.body, design: .monospaced))
                         .focused($isPortFocused)
-                        .onSubmit { commitPortDraft() }
+                        .onSubmit {
+                            commitPortDraft()
+                            isPortFocused = false
+                            NSApp.keyWindow?.makeFirstResponder(nil)
+                        }
+                        .onExitCommand {
+                            portDraft = String(companionServerPort)
+                            isPortInvalid = false
+                            isPortFocused = false
+                            NSApp.keyWindow?.makeFirstResponder(nil)
+                        }
                         .onChange(of: isPortFocused) { _, focused in
-                            if !focused { commitPortDraft() }
+                            if focused {
+                                setupClickMonitor()
+                            } else {
+                                removeClickMonitor()
+                                commitPortDraft()
+                            }
                         }
                         .onChange(of: portDraft) { _, newValue in
                             let filtered = newValue.filter { $0.isNumber }
@@ -358,6 +378,34 @@ public struct CompanionSettingsView: View {
             return "macbook"
         } else {
             return "smartphone"
+        }
+    }
+
+    private func setupClickMonitor() {
+        guard clickMonitor == nil else { return }
+        clickMonitor = NSEvent.addLocalMonitorForEvents(matching: [.leftMouseDown, .rightMouseDown]) { event in
+            if let window = event.window,
+               let contentView = window.contentView,
+               let hitView = contentView.hitTest(event.locationInWindow) {
+                if hitView is NSTextView || hitView is NSTextField || hitView.superview is NSTextField {
+                    return event
+                }
+            }
+            Task { @MainActor in
+                if self.isPortFocused {
+                    self.commitPortDraft()
+                    self.isPortFocused = false
+                    NSApp.keyWindow?.makeFirstResponder(nil)
+                }
+            }
+            return event
+        }
+    }
+
+    private func removeClickMonitor() {
+        if let monitor = clickMonitor {
+            NSEvent.removeMonitor(monitor)
+            clickMonitor = nil
         }
     }
 }
