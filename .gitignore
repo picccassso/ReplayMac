@@ -29,3 +29,6 @@ scripts/*
 # Local agent and editor workspaces
 .agents/
 .obsidian/
+
+# App Store screenshots (local only)
+app_photos/app_store/

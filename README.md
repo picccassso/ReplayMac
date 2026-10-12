@@ -87,34 +87,54 @@ ReplayMac exports self-contained MP4 files. When audio track separation is enabl
 <details>
 <summary>Screenshots</summary>
 
-> Screenshots reflect earlier builds and will be updated in an upcoming release.
-
 <table>
   <tr>
-    <th width="50%">General</th>
-    <th width="50%">Audio</th>
+    <th width="50%">Home</th>
+    <th width="50%">Clip library</th>
   </tr>
   <tr>
-    <td width="50%"><img src="app_photos/1_general_settings.png?v=1.6.5" alt="General settings" width="100%"></td>
-    <td width="50%"><img src="app_photos/3_audio_settings.png?v=1.6.5" alt="Audio settings" width="100%"></td>
+    <td width="50%"><img src="app_photos/1.%20ReplayMac_Home.png?v=2.0.0" alt="Home" width="100%"></td>
+    <td width="50%"><img src="app_photos/2.%20ReplayMac_ClipLibrary.png?v=2.0.0" alt="Clip library" width="100%"></td>
+  </tr>
+  <tr>
+    <th width="50%">Clip details</th>
+    <th width="50%">Clip saved</th>
+  </tr>
+  <tr>
+    <td width="50%"><img src="app_photos/3.%20ReplayMac_ClipLibrary_2.png?v=2.0.0" alt="Clip details" width="100%"></td>
+    <td width="50%"><img src="app_photos/11.%20ReplayMac_Saved.png?v=2.0.0" alt="Clip saved" width="100%"></td>
+  </tr>
+  <tr>
+    <th width="50%">General</th>
+    <th width="50%">Video</th>
+  </tr>
+  <tr>
+    <td width="50%"><img src="app_photos/4.%20ReplayMac_General.png?v=2.0.0" alt="General" width="100%"></td>
+    <td width="50%"><img src="app_photos/5.%20ReplayMac_Video.png?v=2.0.0" alt="Video" width="100%"></td>
+  </tr>
+  <tr>
+    <th width="50%">Audio</th>
+    <th width="50%">Profiles</th>
+  </tr>
+  <tr>
+    <td width="50%"><img src="app_photos/6.%20ReplayMac_Audio.png?v=2.0.0" alt="Audio" width="100%"></td>
+    <td width="50%"><img src="app_photos/7.%20ReplayMac_Profiles.png?v=2.0.0" alt="Profiles" width="100%"></td>
+  </tr>
+  <tr>
+    <th width="50%">Hotkeys</th>
+    <th width="50%">Companion</th>
+  </tr>
+  <tr>
+    <td width="50%"><img src="app_photos/8.%20ReplayMac_Hotkeys.png?v=2.0.0" alt="Hotkeys" width="100%"></td>
+    <td width="50%"><img src="app_photos/9.%20ReplayMac_Companion.png?v=2.0.0" alt="Companion" width="100%"></td>
+  </tr>
+  <tr>
+    <th width="50%">Advanced</th>
+  </tr>
+  <tr>
+    <td width="50%"><img src="app_photos/10.%20ReplayMac_Advanced.png?v=2.0.0" alt="Advanced" width="100%"></td>
   </tr>
 </table>
-
-| Video | Video extended replay |
-| --- | --- |
-| ![Video settings](app_photos/2_video_settings_1.png?v=1.6.5) | ![Video settings extended replay](app_photos/2_video_settings_2.png?v=1.6.5) |
-
-| Profiles | Profile details |
-| --- | --- |
-| ![Profile settings](app_photos/4_profile_settings_1.png?v=1.6.5) | ![Profile settings details](app_photos/4_profile_settings_2.png?v=1.6.5) |
-
-| Advanced | Hotkeys |
-| --- | --- |
-| ![Advanced settings](app_photos/6_advanced_settings.png?v=1.6.5) | ![Hotkey settings](app_photos/5_hotkey_settings.png?v=1.6.5) |
-
-| Clip library | Clip details | Storage cleanup | Batch actions |
-| --- | --- | --- | --- |
-| ![Clip library](app_photos/7_library_view_1.png?v=1.6.5) | ![Clip library details](app_photos/7_library_view_2.png?v=1.6.5) | ![Clip library cleanup](app_photos/7_library_view_3.png?v=1.6.5) | ![Clip library batch actions](app_photos/7_library_view_4.png?v=1.6.5) |
 
 </details>
 
