@@ -2,10 +2,10 @@
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "https://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
-    <!-- Companion WebSocket server; incoming connections from local devices -->
+    <!-- Companion server only: accepts connections from paired phones on the
+         local network. No outgoing connections, so no network.client (the
+         GitHub update checker is compiled out of this build). -->
     <key>com.apple.security.network.server</key>
-    <true/>
-    <key>com.apple.security.network.client</key>
     <true/>
     <key>com.apple.security.app-sandbox</key>
     <true/>

@@ -8,12 +8,14 @@ final class CompanionServerProtocolTests: XCTestCase {
             "type": "hello",
             "deviceId": "test-device-123",
             "deviceName": "Pixel 8 Pro",
-            "clientVersion": "1.0.0"
+            "clientVersion": "1.0.0",
+            "protocolVersion": 2
         }
         """.data(using: .utf8)!
 
         let message = try JSONDecoder().decode(CompanionClientMessage.self, from: json)
         XCTAssertEqual(message.type, "hello")
+        XCTAssertEqual(message.protocolVersion, 2)
         XCTAssertEqual(message.deviceId, "test-device-123")
         XCTAssertEqual(message.deviceName, "Pixel 8 Pro")
         XCTAssertEqual(message.clientVersion, "1.0.0")
@@ -213,58 +215,128 @@ final class CompanionPairingManagerTests: XCTestCase {
         XCTAssertEqual(revokedCount, 2)
     }
 
-    func testPromptApprovalHandlerAllowed() async {
-        pairingManager.promptHandler = { id, name in
+    func testApprovingIssuesAFreshSecretEachTime() {
+        XCTAssertNil(pairingManager.secret(for: "dev-1"))
+        let first = pairingManager.approveDevice(id: "dev-1", name: "Phone")
+        XCTAssertEqual(first.count, 32)
+        XCTAssertEqual(pairingManager.secret(for: "dev-1"), first)
+
+        let second = pairingManager.approveDevice(id: "dev-1", name: "Phone")
+        XCTAssertNotEqual(first, second, "Re-pairing must invalidate the old secret")
+        XCTAssertEqual(pairingManager.secret(for: "dev-1"), second)
+    }
+
+    func testSecretsSurviveRelaunchAndRevokeRemovesThem() {
+        let secret = pairingManager.approveDevice(id: "dev-1", name: "Phone")
+        XCTAssertEqual(CompanionPairingManager(defaults: userDefaults).secret(for: "dev-1"), secret)
+
+        pairingManager.revokeDevice(id: "dev-1")
+        XCTAssertNil(pairingManager.secret(for: "dev-1"))
+        XCTAssertNil(CompanionPairingManager(defaults: userDefaults).secret(for: "dev-1"))
+    }
+
+    func testPromptHandlerReceivesCodeAndDecides() async {
+        var seen: (String, String, String)?
+        pairingManager.promptHandler = { id, name, code in
+            seen = (id, name, code)
             return true
         }
 
-        let result = await pairingManager.promptApprovalForDevice(id: "dev-new", name: "Galaxy S24")
-        XCTAssertTrue(result)
-        XCTAssertTrue(pairingManager.isDeviceApproved(id: "dev-new"))
+        let result = await pairingManager.requestApproval(id: "dev-new", name: "Galaxy S24", code: "0420")
+        XCTAssertEqual(result, .approved)
+        XCTAssertEqual(seen?.0, "dev-new")
+        XCTAssertEqual(seen?.1, "Galaxy S24")
+        XCTAssertEqual(seen?.2, "0420")
+        XCTAssertFalse(pairingManager.isDeviceApproved(id: "dev-new"), "Approval alone must not pair")
+        XCTAssertFalse(pairingManager.isPromptActive)
     }
 
-    func testPromptApprovalHandlerDenied() async {
-        pairingManager.promptHandler = { id, name in
-            return false
-        }
-
-        let result = await pairingManager.promptApprovalForDevice(id: "dev-denied", name: "Unknown")
-        XCTAssertFalse(result)
+    func testPromptDenied() async {
+        pairingManager.promptHandler = { _, _, _ in false }
+        let result = await pairingManager.requestApproval(id: "dev-denied", name: "Unknown", code: "1111")
+        XCTAssertEqual(result, .denied)
         XCTAssertFalse(pairingManager.isDeviceApproved(id: "dev-denied"))
     }
 
-    func testConcurrentApprovalPromptsCoalesced() async {
-        var handlerCallCount = 0
-        pairingManager.promptHandler = { id, name in
-            handlerCallCount += 1
-            try? await Task.sleep(nanoseconds: 100_000_000)
+    func testPromptTimesOut() async {
+        pairingManager.promptTimeout = 0.1
+        pairingManager.promptHandler = { _, _, _ in
+            try? await Task.sleep(nanoseconds: 5_000_000_000)
             return true
         }
+        let result = await pairingManager.requestApproval(id: "dev-slow", name: "Phone", code: "1234")
+        XCTAssertEqual(result, .timedOut)
+        XCTAssertFalse(pairingManager.isPromptActive)
+    }
 
-        // A local main-actor manager, so `async let` doesn't capture the test case.
+    func testOnlyOnePromptAtATime() async {
+        pairingManager.promptHandler = { _, _, _ in
+            try? await Task.sleep(nanoseconds: 200_000_000)
+            return true
+        }
         let manager: CompanionPairingManager = pairingManager
-        async let first = manager.promptApprovalForDevice(id: "concurrent-dev", name: "Phone A")
-        async let second = manager.promptApprovalForDevice(id: "concurrent-dev", name: "Phone A")
+        async let first = manager.requestApproval(id: "phone-a", name: "Phone A", code: "1111")
+        try? await Task.sleep(nanoseconds: 20_000_000)
+        let second = await manager.requestApproval(id: "phone-b", name: "Phone B", code: "2222")
 
-        let (res1, res2) = await (first, second)
-        XCTAssertTrue(res1)
-        XCTAssertTrue(res2)
-        XCTAssertEqual(handlerCallCount, 1)
-        XCTAssertTrue(pairingManager.isDeviceApproved(id: "concurrent-dev"))
+        XCTAssertEqual(second, .cancelled)
+        let firstResult = await first
+        XCTAssertEqual(firstResult, .approved)
+    }
+
+    func testCancelPromptDismissesIt() async {
+        pairingManager.promptHandler = { _, _, _ in
+            try? await Task.sleep(nanoseconds: 5_000_000_000)
+            return true
+        }
+        let manager: CompanionPairingManager = pairingManager
+        async let result = manager.requestApproval(id: "phone-a", name: "Phone A", code: "1111")
+        try? await Task.sleep(nanoseconds: 20_000_000)
+        manager.cancelPrompt(for: "someone-else")
+        XCTAssertTrue(manager.isPromptActive)
+        manager.cancelPrompt(for: "phone-a")
+        let outcome = await result
+        XCTAssertEqual(outcome, .cancelled)
     }
 }
 
 @MainActor
 final class CompanionServerLifecycleTests: XCTestCase {
+    private var defaults: UserDefaults!
+    private var pairing: CompanionPairingManager!
+
+    override func setUp() async throws {
+        try await super.setUp()
+        defaults = makeTestDefaults()
+        pairing = CompanionPairingManager(defaults: defaults)
+    }
+
+    override func tearDown() async throws {
+        defaults.removePersistentDomain(forName: defaults.description)
+        try await super.tearDown()
+    }
+
     func testServerStartAndStop() throws {
-        let server = CompanionServer()
+        let server = CompanionServer(pairingManager: pairing, defaults: defaults)
         XCTAssertFalse(server.isRunning)
 
         try server.start(port: 7380)
         XCTAssertEqual(server.listeningPort, 7380)
+        XCTAssertNil(server.lastError)
 
         server.stop()
         XCTAssertFalse(server.isRunning)
+    }
+
+    func testPortInUseIsReported() async throws {
+        let first = try await startTestServer(pairing: pairing, defaults: defaults)
+        defer { first.stop() }
+
+        let second = CompanionServer(pairingManager: CompanionPairingManager(defaults: makeTestDefaults()), defaults: makeTestDefaults())
+        try? second.start(port: first.listeningPort)
+        try await waitUntil { second.lastError != nil }
+        XCTAssertFalse(second.isRunning)
+        XCTAssertTrue(second.lastError?.contains("already in use") == true, second.lastError ?? "")
     }
 
     func testIPResolutionNonEmpty() {
@@ -272,347 +344,145 @@ final class CompanionServerLifecycleTests: XCTestCase {
         XCTAssertFalse(ips.isEmpty)
     }
 
-    func testEndToEndWebSocketHandshakeAndAction() async throws {
-        let defaults = UserDefaults(suiteName: "CompanionTest-\(UUID().uuidString)")!
-        defer { defaults.removePersistentDomain(forName: defaults.description) }
-        let pairing = CompanionPairingManager(defaults: defaults)
-        pairing.approveDevice(id: "test-device-1", name: "Pixel 8")
-
-        let server = CompanionServer(pairingManager: pairing)
-        var actionReceived = false
-        server.onToggleBuffer = {
-            actionReceived = true
-        }
-        server.snapshotProvider = {
-            CompanionStateSnapshot.empty
-        }
-
-        try server.start(port: 7388)
+    func testEndToEndSignInAndAction() async throws {
+        let secret = pairing.approveDevice(id: "test-device-1", name: "Pixel 8")
+        let server = try await startTestServer(pairing: pairing, defaults: defaults)
         defer { server.stop() }
+        var actionReceived = false
+        server.onToggleBuffer = { actionReceived = true }
 
-        for _ in 0..<20 {
-            if server.isRunning { break }
-            try await Task.sleep(nanoseconds: 100_000_000)
-        }
-        XCTAssertTrue(server.isRunning)
-
-        let session = URLSession(configuration: .default)
-        let wsTask = session.webSocketTask(with: URL(string: "ws://127.0.0.1:7388")!)
-        wsTask.resume()
-
-        // Send hello
-        let helloMsg = CompanionClientMessage(type: "hello", deviceId: "test-device-1", deviceName: "Pixel 8")
-        let helloData = try JSONEncoder().encode(helloMsg)
-        let helloStr = String(data: helloData, encoding: .utf8)!
-        try await wsTask.send(.string(helloStr))
-
-        // Receive auth response
-        let msg1 = try await wsTask.receive()
-        let authData: Data
-        switch msg1 {
-        case .string(let str): authData = str.data(using: .utf8)!
-        case .data(let d): authData = d
-        @unknown default: fatalError()
-        }
-        let auth = try JSONDecoder().decode(CompanionAuthResponse.self, from: authData)
+        let client = CompanionTestClient(port: server.listeningPort, deviceId: "test-device-1")
+        let auth = try await client.signIn(secret: secret)
         XCTAssertEqual(auth.status, "approved")
-
-        // Receive initial state snapshot
-        let msg2 = try await wsTask.receive()
-        let snapData: Data
-        switch msg2 {
-        case .string(let str): snapData = str.data(using: .utf8)!
-        case .data(let d): snapData = d
-        @unknown default: fatalError()
-        }
-        let snapshot = try JSONDecoder().decode(CompanionStateSnapshot.self, from: snapData)
+        XCTAssertNil(auth.pairingSecret, "The secret is only sent when pairing")
+        let snapshot = try await client.receive(CompanionStateSnapshot.self)
         XCTAssertEqual(snapshot.type, "state_snapshot")
 
-        // Send action
-        let actionMsg = CompanionClientMessage(type: "action", action: "toggleBuffer")
-        let actionData = try JSONEncoder().encode(actionMsg)
-        let actionStr = String(data: actionData, encoding: .utf8)!
-        try await wsTask.send(.string(actionStr))
-
-        try await Task.sleep(nanoseconds: 200_000_000)
-        XCTAssertTrue(actionReceived)
+        try await client.send(CompanionClientMessage(type: "action", action: "toggleBuffer"))
+        try await waitUntil { actionReceived }
         XCTAssertEqual(server.connectedClientsCount, 1)
 
-        // Disconnect
-        wsTask.cancel(with: .normalClosure, reason: nil)
-        try await Task.sleep(nanoseconds: 300_000_000)
-        XCTAssertEqual(server.connectedClientsCount, 0)
+        client.close()
+        try await waitUntil { server.connectedClientsCount == 0 }
     }
 
-    func testActionWithRevealClip() async throws {
-        let defaults = UserDefaults(suiteName: "CompanionTest-\(UUID().uuidString)")!
-        defer { defaults.removePersistentDomain(forName: defaults.description) }
-        let pairing = CompanionPairingManager(defaults: defaults)
-        pairing.approveDevice(id: "test-device-1", name: "Pixel 8")
-
-        let server = CompanionServer(pairingManager: pairing)
+    func testClipActionsAndThumbnail() async throws {
+        let secret = pairing.approveDevice(id: "test-device-1", name: "Pixel 8")
+        let server = try await startTestServer(pairing: pairing, defaults: defaults)
+        defer { server.stop() }
         var revealedId: String?
-        server.onRevealClip = { id in
-            revealedId = id
-        }
-        server.snapshotProvider = { CompanionStateSnapshot.empty }
-
-        try server.start(port: 7389)
-        defer { server.stop() }
-
-        for _ in 0..<20 {
-            if server.isRunning { break }
-            try await Task.sleep(nanoseconds: 100_000_000)
-        }
-
-        let session = URLSession(configuration: .default)
-        let wsTask = session.webSocketTask(with: URL(string: "ws://127.0.0.1:7389")!)
-        wsTask.resume()
-
-        let helloMsg = CompanionClientMessage(type: "hello", deviceId: "test-device-1", deviceName: "Pixel 8")
-        try await wsTask.send(.string(String(data: try JSONEncoder().encode(helloMsg), encoding: .utf8)!))
-        _ = try await wsTask.receive() // auth
-        _ = try await wsTask.receive() // snapshot
-
-        // Send action format: type = action, action = reveal_clip
-        let msg = CompanionClientMessage(type: "action", action: "reveal_clip", clipId: "clip-123")
-        try await wsTask.send(.string(String(data: try JSONEncoder().encode(msg), encoding: .utf8)!))
-
-        try await Task.sleep(nanoseconds: 200_000_000)
-        XCTAssertEqual(revealedId, "clip-123")
-    }
-
-    func testActionWithDeleteClip() async throws {
-        let defaults = UserDefaults(suiteName: "CompanionTest-\(UUID().uuidString)")!
-        defer { defaults.removePersistentDomain(forName: defaults.description) }
-        let pairing = CompanionPairingManager(defaults: defaults)
-        pairing.approveDevice(id: "test-device-1", name: "Pixel 8")
-
-        let server = CompanionServer(pairingManager: pairing)
         var deletedId: String?
-        server.onDeleteClip = { id in
-            deletedId = id
-        }
-        server.snapshotProvider = { CompanionStateSnapshot.empty }
+        server.onRevealClip = { revealedId = $0 }
+        server.onDeleteClip = { deletedId = $0 }
+        server.onGetThumbnail = { _ in Data("sample-thumb-bytes".utf8) }
 
-        try server.start(port: 7390)
-        defer { server.stop() }
+        let client = CompanionTestClient(port: server.listeningPort, deviceId: "test-device-1")
+        defer { client.close() }
+        _ = try await client.signIn(secret: secret)
+        _ = try await client.receiveData() // snapshot
 
-        for _ in 0..<20 {
-            if server.isRunning { break }
-            try await Task.sleep(nanoseconds: 100_000_000)
-        }
-
-        let session = URLSession(configuration: .default)
-        let wsTask = session.webSocketTask(with: URL(string: "ws://127.0.0.1:7390")!)
-        wsTask.resume()
-
-        let helloMsg = CompanionClientMessage(type: "hello", deviceId: "test-device-1", deviceName: "Pixel 8")
-        try await wsTask.send(.string(String(data: try JSONEncoder().encode(helloMsg), encoding: .utf8)!))
-        _ = try await wsTask.receive() // auth
-        _ = try await wsTask.receive() // snapshot
-
-        // Send direct format: type = delete_clip
-        let msg = CompanionClientMessage(type: "delete_clip", clipId: "clip-del-999")
-        try await wsTask.send(.string(String(data: try JSONEncoder().encode(msg), encoding: .utf8)!))
-
-        try await Task.sleep(nanoseconds: 200_000_000)
+        try await client.send(CompanionClientMessage(type: "action", action: "reveal_clip", clipId: "clip-123"))
+        try await client.send(CompanionClientMessage(type: "delete_clip", clipId: "clip-del-999"))
+        try await waitUntil { revealedId != nil && deletedId != nil }
+        XCTAssertEqual(revealedId, "clip-123")
         XCTAssertEqual(deletedId, "clip-del-999")
+
+        try await client.send(CompanionClientMessage(type: "get_thumbnail", clipId: "clip-thumb-1"))
+        let thumb = try await client.receive(CompanionThumbnailResponse.self)
+        XCTAssertEqual(thumb.clipId, "clip-thumb-1")
+        XCTAssertEqual(thumb.thumbnailBase64, Data("sample-thumb-bytes".utf8).base64EncodedString())
     }
 
-    func testGetThumbnailRequest() async throws {
-        let defaults = UserDefaults(suiteName: "CompanionTest-\(UUID().uuidString)")!
-        defer { defaults.removePersistentDomain(forName: defaults.description) }
-        let pairing = CompanionPairingManager(defaults: defaults)
-        pairing.approveDevice(id: "test-device-1", name: "Pixel 8")
-
-        let server = CompanionServer(pairingManager: pairing)
-        server.onGetThumbnail = { clipId in
-            return "sample-thumb-bytes".data(using: .utf8)
-        }
-        server.snapshotProvider = { CompanionStateSnapshot.empty }
-
-        try server.start(port: 7391)
-        defer { server.stop() }
-
-        for _ in 0..<20 {
-            if server.isRunning { break }
-            try await Task.sleep(nanoseconds: 100_000_000)
-        }
-
-        let session = URLSession(configuration: .default)
-        let wsTask = session.webSocketTask(with: URL(string: "ws://127.0.0.1:7391")!)
-        wsTask.resume()
-
-        let helloMsg = CompanionClientMessage(type: "hello", deviceId: "test-device-1", deviceName: "Pixel 8")
-        try await wsTask.send(.string(String(data: try JSONEncoder().encode(helloMsg), encoding: .utf8)!))
-        _ = try await wsTask.receive() // auth
-        _ = try await wsTask.receive() // snapshot
-
-        let thumbReq = CompanionClientMessage(type: "get_thumbnail", clipId: "clip-thumb-1")
-        try await wsTask.send(.string(String(data: try JSONEncoder().encode(thumbReq), encoding: .utf8)!))
-
-        let respMsg = try await wsTask.receive()
-        let respData: Data
-        switch respMsg {
-        case .string(let s): respData = s.data(using: .utf8)!
-        case .data(let d): respData = d
-        @unknown default: fatalError()
-        }
-
-        let thumbResp = try JSONDecoder().decode(CompanionThumbnailResponse.self, from: respData)
-        XCTAssertEqual(thumbResp.clipId, "clip-thumb-1")
-        let expectedBase64 = "sample-thumb-bytes".data(using: .utf8)!.base64EncodedString()
-        XCTAssertEqual(thumbResp.thumbnailBase64, expectedBase64)
-    }
-
-    func testUnapprovedDevicePendingThenApproved() async throws {
-        let defaults = UserDefaults(suiteName: "CompanionTest-\(UUID().uuidString)")!
-        defer { defaults.removePersistentDomain(forName: defaults.description) }
-        let pairing = CompanionPairingManager(defaults: defaults)
-        pairing.promptHandler = { id, name in
+    func testNewDevicePairsWithCodeAndReceivesSecret() async throws {
+        var promptedCode: String?
+        pairing.promptHandler = { _, _, code in
+            promptedCode = code
             return true
         }
-
-        let server = CompanionServer(pairingManager: pairing)
-        server.snapshotProvider = {
-            CompanionStateSnapshot.empty
-        }
-
-        try server.start(port: 7392)
+        let server = try await startTestServer(pairing: pairing, defaults: defaults)
         defer { server.stop() }
 
-        for _ in 0..<20 {
-            if server.isRunning { break }
-            try await Task.sleep(nanoseconds: 100_000_000)
+        let client = CompanionTestClient(port: server.listeningPort, deviceId: "unapproved-dev", deviceName: "Galaxy")
+        defer { client.close() }
+        try await client.sendHello()
+
+        let pending = try await client.receive(CompanionAuthResponse.self)
+        XCTAssertEqual(pending.status, "pending")
+        XCTAssertEqual(pending.pairingCode?.count, 4)
+
+        let approved = try await client.receive(CompanionAuthResponse.self)
+        XCTAssertEqual(approved.status, "approved")
+        XCTAssertEqual(promptedCode, pending.pairingCode, "Phone and Mac must show the same code")
+        let secret = try XCTUnwrap(approved.pairingSecret.flatMap { Data(base64Encoded: $0) })
+        XCTAssertEqual(secret, pairing.secret(for: "unapproved-dev"))
+        do {
+            let received = try await client.receiveType()
+            XCTAssertEqual(received, "state_snapshot")
         }
 
-        let session = URLSession(configuration: .default)
-        let wsTask = session.webSocketTask(with: URL(string: "ws://127.0.0.1:7392")!)
-        wsTask.resume()
-
-        let helloMsg = CompanionClientMessage(type: "hello", deviceId: "unapproved-dev", deviceName: "Galaxy")
-        try await wsTask.send(.string(String(data: try JSONEncoder().encode(helloMsg), encoding: .utf8)!))
-
-        // First response is pending
-        let resp1 = try await wsTask.receive()
-        let resp1Data: Data
-        switch resp1 {
-        case .string(let s): resp1Data = s.data(using: .utf8)!
-        case .data(let d): resp1Data = d
-        @unknown default: fatalError()
+        // The secret works for the next connection, with no prompt.
+        pairing.promptHandler = { _, _, _ in
+            XCTFail("A paired phone must not prompt again")
+            return false
         }
-        let authPending = try JSONDecoder().decode(CompanionAuthResponse.self, from: resp1Data)
-        XCTAssertEqual(authPending.status, "pending")
+        let again = CompanionTestClient(port: server.listeningPort, deviceId: "unapproved-dev", deviceName: "Galaxy")
+        defer { again.close() }
+        let auth = try await again.signIn(secret: secret)
+        XCTAssertEqual(auth.status, "approved")
+    }
 
-        // Second response is approved
-        let resp2 = try await wsTask.receive()
-        let resp2Data: Data
-        switch resp2 {
-        case .string(let s): resp2Data = s.data(using: .utf8)!
-        case .data(let d): resp2Data = d
-        @unknown default: fatalError()
-        }
-        let authApproved = try JSONDecoder().decode(CompanionAuthResponse.self, from: resp2Data)
-        XCTAssertEqual(authApproved.status, "approved")
+    func testWrongProofIsDeniedAndDoesNotKickTheRealPhone() async throws {
+        let secret = pairing.approveDevice(id: "phone-1", name: "Real Phone")
+        let server = try await startTestServer(pairing: pairing, defaults: defaults)
+        defer { server.stop() }
 
-        // Initial snapshot follows
-        let resp3 = try await wsTask.receive()
-        let resp3Data: Data
-        switch resp3 {
-        case .string(let s): resp3Data = s.data(using: .utf8)!
-        case .data(let d): resp3Data = d
-        @unknown default: fatalError()
+        let realPhone = CompanionTestClient(port: server.listeningPort, deviceId: "phone-1")
+        defer { realPhone.close() }
+        do {
+            let received = try await realPhone.signIn(secret: secret).status
+            XCTAssertEqual(received, "approved")
         }
-        let snapshot = try JSONDecoder().decode(CompanionStateSnapshot.self, from: resp3Data)
-        XCTAssertEqual(snapshot.type, "state_snapshot")
+        try await waitUntil { server.connectedClientsCount == 1 }
+
+        // Someone who sniffed the device id but has no secret.
+        let impostor = CompanionTestClient(port: server.listeningPort, deviceId: "phone-1")
+        let verdict = try await impostor.signIn(secret: Data(repeating: 7, count: 32))
+        XCTAssertEqual(verdict.status, "denied")
+        XCTAssertEqual(verdict.reason, "invalid_proof")
+        let closed = await impostor.isClosedByServer()
+        XCTAssertTrue(closed)
+
+        XCTAssertEqual(server.connectedClientsCount, 1, "The real phone must stay connected")
+        XCTAssertTrue(pairing.isDeviceApproved(id: "phone-1"), "A failed attempt must not unpair the real phone")
     }
 
     func testUnauthorizedActionRejected() async throws {
-        let defaults = UserDefaults(suiteName: "CompanionTest-\(UUID().uuidString)")!
-        defer { defaults.removePersistentDomain(forName: defaults.description) }
-        let pairing = CompanionPairingManager(defaults: defaults)
-
-        let server = CompanionServer(pairingManager: pairing)
-        var actionRun = false
-        server.onToggleBuffer = {
-            actionRun = true
-        }
-
-        try server.start(port: 7393)
+        let server = try await startTestServer(pairing: pairing, defaults: defaults)
         defer { server.stop() }
+        var actionRun = false
+        server.onToggleBuffer = { actionRun = true }
 
-        for _ in 0..<20 {
-            if server.isRunning { break }
-            try await Task.sleep(nanoseconds: 100_000_000)
-        }
+        let client = CompanionTestClient(port: server.listeningPort, deviceId: "nobody")
+        defer { client.close() }
+        try await client.send(CompanionClientMessage(type: "action", action: "toggleBuffer"))
 
-        let session = URLSession(configuration: .default)
-        let wsTask = session.webSocketTask(with: URL(string: "ws://127.0.0.1:7393")!)
-        wsTask.resume()
-
-        // Send action WITHOUT hello
-        let actionMsg = CompanionClientMessage(type: "action", action: "toggleBuffer")
-        try await wsTask.send(.string(String(data: try JSONEncoder().encode(actionMsg), encoding: .utf8)!))
-
-        let resp = try await wsTask.receive()
-        let respData: Data
-        switch resp {
-        case .string(let s): respData = s.data(using: .utf8)!
-        case .data(let d): respData = d
-        @unknown default: fatalError()
-        }
-        let errMsg = try JSONDecoder().decode(CompanionErrorMessage.self, from: respData)
-        XCTAssertEqual(errMsg.type, "error")
-        XCTAssertEqual(errMsg.message, "Device not authorized")
+        let error = try await client.receive(CompanionErrorMessage.self)
+        XCTAssertEqual(error.message, "Device not authorized")
+        XCTAssertEqual(error.code, "not_authorized")
         XCTAssertFalse(actionRun)
     }
 
-    func testConnectedDeviceIdsTrackedOnHelloAndDisconnect() async throws {
-        let defaults = UserDefaults(suiteName: "CompanionTest-\(UUID().uuidString)")!
-        defer { defaults.removePersistentDomain(forName: defaults.description) }
-        let pairing = CompanionPairingManager(defaults: defaults)
-        pairing.approveDevice(id: "dev-tracking-1", name: "Pixel 8 Pro")
-
-        let server = CompanionServer(pairingManager: pairing)
-        try server.start(port: 7394)
+    func testConnectedDeviceIdsTrackedOnSignInAndDisconnect() async throws {
+        let secret = pairing.approveDevice(id: "dev-tracking-1", name: "Pixel 8 Pro")
+        let server = try await startTestServer(pairing: pairing, defaults: defaults)
         defer { server.stop() }
-
-        for _ in 0..<20 {
-            if server.isRunning { break }
-            try await Task.sleep(nanoseconds: 100_000_000)
-        }
-
         XCTAssertFalse(server.isDeviceConnected(id: "dev-tracking-1"))
-        XCTAssertTrue(server.connectedDeviceIds.isEmpty)
 
-        let session = URLSession(configuration: .default)
-        let wsTask = session.webSocketTask(with: URL(string: "ws://127.0.0.1:7394")!)
-        wsTask.resume()
+        let client = CompanionTestClient(port: server.listeningPort, deviceId: "dev-tracking-1")
+        _ = try await client.signIn(secret: secret)
+        try await waitUntil { server.isDeviceConnected(id: "dev-tracking-1") }
 
-        let hello = CompanionClientMessage(type: "hello", deviceId: "dev-tracking-1", deviceName: "Pixel 8 Pro")
-        try await wsTask.send(.string(String(data: try JSONEncoder().encode(hello), encoding: .utf8)!))
-
-        _ = try await wsTask.receive()
-
-        for _ in 0..<20 {
-            if server.isDeviceConnected(id: "dev-tracking-1") { break }
-            try await Task.sleep(nanoseconds: 50_000_000)
-        }
-
-        XCTAssertTrue(server.isDeviceConnected(id: "dev-tracking-1"))
-        XCTAssertTrue(server.connectedDeviceIds.contains("dev-tracking-1"))
-
-        wsTask.cancel(with: .normalClosure, reason: nil)
-
-        for _ in 0..<20 {
-            if !server.isDeviceConnected(id: "dev-tracking-1") { break }
-            try await Task.sleep(nanoseconds: 50_000_000)
-        }
-
-        XCTAssertFalse(server.isDeviceConnected(id: "dev-tracking-1"))
-        XCTAssertFalse(server.connectedDeviceIds.contains("dev-tracking-1"))
+        client.close()
+        try await waitUntil { !server.isDeviceConnected(id: "dev-tracking-1") }
     }
 }
-
-

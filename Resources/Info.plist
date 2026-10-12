@@ -39,6 +39,6 @@
 		<string>_replaymac._tcp</string>
 	</array>
 	<key>NSLocalNetworkUsageDescription</key>
-	<string>ReplayCap needs local network access to communicate with the ReplayMac Companion app.</string>
+	<string>ReplayCap uses your local network so the ReplayCap Companion app on your phone or tablet can find this Mac and control recording.</string>
 </dict>
 </plist>

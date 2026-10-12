@@ -8,6 +8,7 @@ public enum CompanionClientMessageType: String, Codable, Sendable {
     case getThumbnail = "get_thumbnail"
     case revealClip = "reveal_clip"
     case deleteClip = "delete_clip"
+    case authProof = "auth_proof"
     case ping
 }
 
@@ -18,6 +19,10 @@ public struct CompanionClientMessage: Codable, Sendable {
     public let clientVersion: String?
     public let action: String?
     public let clipId: String?
+    /// Sent in `hello`; see ``CompanionAuth/protocolVersion``.
+    public let protocolVersion: Int?
+    /// Base64 HMAC answering an `auth_challenge`; absent when the phone has no secret for this Mac.
+    public let proof: String?
 
     public init(
         type: String,
@@ -25,7 +30,9 @@ public struct CompanionClientMessage: Codable, Sendable {
         deviceName: String? = nil,
         clientVersion: String? = nil,
         action: String? = nil,
-        clipId: String? = nil
+        clipId: String? = nil,
+        protocolVersion: Int? = nil,
+        proof: String? = nil
     ) {
         self.type = type
         self.deviceId = deviceId
@@ -33,6 +40,8 @@ public struct CompanionClientMessage: Codable, Sendable {
         self.clientVersion = clientVersion
         self.action = action
         self.clipId = clipId
+        self.protocolVersion = protocolVersion
+        self.proof = proof
     }
 }
 
@@ -51,6 +60,7 @@ public enum CompanionClientAction: String, Sendable, CaseIterable {
 
 public enum CompanionServerMessageType: String, Codable, Sendable {
     case authResponse = "auth_response"
+    case authChallenge = "auth_challenge"
     case stateSnapshot = "state_snapshot"
     case stateChanged = "state_changed"
     case telemetryTick = "telemetry_tick"
@@ -217,6 +227,13 @@ public struct CompanionAuthResponse: Codable, Sendable, Equatable {
     public let serverId: String?
     /// The friendly name of the paired device assigned or confirmed by the Mac.
     public let deviceName: String?
+    /// With `pending`: the code the Mac's Allow prompt shows, for the phone to display too.
+    public let pairingCode: String?
+    /// With `approved`, only right after the user clicks Allow: the secret the
+    /// phone must keep to answer future challenges.
+    public let pairingSecret: String?
+    /// With `denied`: one of ``CompanionDenialReason``.
+    public let reason: String?
 
     public init(
         type: String = "auth_response",
@@ -224,7 +241,10 @@ public struct CompanionAuthResponse: Codable, Sendable, Equatable {
         serverName: String,
         serverVersion: String,
         serverId: String? = nil,
-        deviceName: String? = nil
+        deviceName: String? = nil,
+        pairingCode: String? = nil,
+        pairingSecret: String? = nil,
+        reason: String? = nil
     ) {
         self.type = type
         self.status = status
@@ -232,6 +252,32 @@ public struct CompanionAuthResponse: Codable, Sendable, Equatable {
         self.serverVersion = serverVersion
         self.serverId = serverId
         self.deviceName = deviceName
+        self.pairingCode = pairingCode
+        self.pairingSecret = pairingSecret
+        self.reason = reason
+    }
+}
+
+public enum CompanionDenialReason: String, Sendable {
+    case userDenied = "user_denied"
+    case revoked
+    case invalidProof = "invalid_proof"
+}
+
+/// Sent after `hello` from a paired device; the phone answers with `auth_proof`.
+public struct CompanionAuthChallenge: Codable, Sendable, Equatable {
+    public let type: String
+    public let nonce: String
+    public let serverId: String
+    public let serverName: String
+    public let serverVersion: String
+
+    public init(type: String = "auth_challenge", nonce: String, serverId: String, serverName: String, serverVersion: String) {
+        self.type = type
+        self.nonce = nonce
+        self.serverId = serverId
+        self.serverName = serverName
+        self.serverVersion = serverVersion
     }
 }
 
@@ -262,9 +308,26 @@ public struct CompanionPongMessage: Codable, Sendable, Equatable {
 public struct CompanionErrorMessage: Codable, Sendable, Equatable {
     public let type: String
     public let message: String
+    /// One of ``CompanionErrorCode``. Every code except `not_authorized` is
+    /// followed by the Mac closing the connection.
+    public let code: String?
 
-    public init(type: String = "error", message: String) {
+    public init(type: String = "error", message: String, code: String? = nil) {
         self.type = type
         self.message = message
+        self.code = code
     }
+
+    init(_ code: CompanionErrorCode, message: String) {
+        self.init(message: message, code: code.rawValue)
+    }
+}
+
+public enum CompanionErrorCode: String, Sendable {
+    case busy
+    case cooldown
+    case timeout
+    case unsupportedClient = "unsupported_client"
+    case tooManyConnections = "too_many_connections"
+    case notAuthorized = "not_authorized"
 }

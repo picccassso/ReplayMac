@@ -15,18 +15,34 @@ public struct PairedDevice: Codable, Identifiable, Equatable, Hashable, Sendable
     }
 }
 
+public enum PairingPromptResult: Sendable, Equatable {
+    case approved
+    case denied
+    /// Nobody answered the prompt in time.
+    case timedOut
+    /// The phone went away, the server stopped, or another prompt was already up.
+    case cancelled
+}
+
 @MainActor
 public final class CompanionPairingManager: ObservableObject {
     public static let shared = CompanionPairingManager()
     public static let userDefaultsKey = "pairedCompanionDevices"
+    static let secretsDefaultsKey = "pairedCompanionDeviceSecrets"
+    public static let defaultPromptTimeout: TimeInterval = 60
 
     @Published public private(set) var pairedDevices: [PairedDevice] = []
     public var onDeviceRevoked: ((String) -> Void)?
     public var onDeviceRenamed: ((String, String) -> Void)?
-    /// Allows tests to simulate user approval/denial without showing native modal dialogs.
-    public var promptHandler: (@MainActor (String, String) async -> Bool)?
+    /// Allows tests to simulate user approval/denial without showing native dialogs.
+    /// Receives the device id, display name and pairing code.
+    public var promptHandler: (@MainActor (String, String, String) async -> Bool)?
+    public var promptTimeout: TimeInterval = defaultPromptTimeout
 
-    private var inFlightPrompts: [String: [CheckedContinuation<Bool, Never>]] = [:]
+    /// Base64 pairing secrets by device id, kept apart from `pairedDevices` so
+    /// they never reach the UI.
+    private var secrets: [String: String] = [:]
+    private var activePrompt: ActivePrompt?
     private let defaults: UserDefaults
 
     public init(defaults: UserDefaults = .standard) {
@@ -35,6 +51,7 @@ public final class CompanionPairingManager: ObservableObject {
     }
 
     public func loadDevices() {
+        secrets = defaults.dictionary(forKey: Self.secretsDefaultsKey) as? [String: String] ?? [:]
         guard let data = defaults.data(forKey: Self.userDefaultsKey),
               let list = try? JSONDecoder().decode([PairedDevice].self, from: data) else {
             pairedDevices = []
@@ -47,6 +64,7 @@ public final class CompanionPairingManager: ObservableObject {
         if let data = try? JSONEncoder().encode(pairedDevices) {
             defaults.set(data, forKey: Self.userDefaultsKey)
         }
+        defaults.set(secrets, forKey: Self.secretsDefaultsKey)
     }
 
     public func isDeviceApproved(id: String) -> Bool {
@@ -57,11 +75,31 @@ public final class CompanionPairingManager: ObservableObject {
         pairedDevices.first { $0.id == id }
     }
 
-    public func approveDevice(id: String, name: String) {
+    /// The secret a paired device proves it holds. Devices paired before
+    /// secrets existed have none and must be approved again.
+    public func secret(for id: String) -> Data? {
+        guard isDeviceApproved(id: id) else { return nil }
+        return secrets[id].flatMap { Data(base64Encoded: $0) }
+    }
+
+    /// Pairs the device, or re-pairs it, and returns a fresh secret for it.
+    /// Any secret it held before stops working.
+    @discardableResult
+    public func approveDevice(id: String, name: String) -> Data {
+        refreshReportedName(id: id, name: name)
+        let secret = CompanionAuth.makeSecret()
+        secrets[id] = secret.base64EncodedString()
+        saveDevices()
+        return secret
+    }
+
+    /// Records the name a phone reports, unless the user has renamed it on the Mac.
+    public func refreshReportedName(id: String, name: String) {
         let cleanName = name.isEmpty ? "Companion Device" : name
         if let idx = pairedDevices.firstIndex(where: { $0.id == id }) {
             let existing = pairedDevices[idx]
             let resolvedName = (existing.isCustomName == true) ? existing.name : cleanName
+            guard resolvedName != existing.name else { return }
             pairedDevices[idx] = PairedDevice(id: id, name: resolvedName, pairedAt: existing.pairedAt, isCustomName: existing.isCustomName)
         } else {
             pairedDevices.append(PairedDevice(id: id, name: cleanName, pairedAt: Date()))
@@ -82,6 +120,7 @@ public final class CompanionPairingManager: ObservableObject {
 
     public func revokeDevice(id: String) {
         pairedDevices.removeAll { $0.id == id }
+        secrets.removeValue(forKey: id)
         saveDevices()
         onDeviceRevoked?(id)
     }
@@ -89,54 +128,134 @@ public final class CompanionPairingManager: ObservableObject {
     public func revokeAllDevices() {
         let allIDs = pairedDevices.map { $0.id }
         pairedDevices.removeAll()
+        secrets.removeAll()
         saveDevices()
         for id in allIDs {
             onDeviceRevoked?(id)
         }
     }
 
-    public func promptApprovalForDevice(id: String, name: String) async -> Bool {
-        if isDeviceApproved(id: id) {
-            return true
-        }
+    // MARK: - Approval Prompt
 
-        // A phone that retries while the prompt is up must not open a second one.
-        if inFlightPrompts[id] != nil {
-            return await withCheckedContinuation { continuation in
-                inFlightPrompts[id]?.append(continuation)
+    public var isPromptActive: Bool { activePrompt != nil }
+
+    /// Asks the user whether `id` may pair. Only one prompt is ever on screen;
+    /// a second request while one is up returns `.cancelled` straight away.
+    /// Approving does not pair the device: call ``approveDevice(id:name:)``.
+    public func requestApproval(id: String, name: String, code: String) async -> PairingPromptResult {
+        guard activePrompt == nil else { return .cancelled }
+        let displayName = name.isEmpty ? "Companion Device" : name
+
+        return await withCheckedContinuation { continuation in
+            let prompt = ActivePrompt(deviceId: id, continuation: continuation)
+            activePrompt = prompt
+
+            let timeout = promptTimeout
+            prompt.timeoutTask = Task { [weak self, weak prompt] in
+                try? await Task.sleep(nanoseconds: UInt64(timeout * 1_000_000_000))
+                guard !Task.isCancelled, let prompt else { return }
+                self?.finish(prompt, with: .timedOut)
+            }
+
+            if let handler = promptHandler {
+                prompt.handlerTask = Task { [weak self, weak prompt] in
+                    let allowed = await handler(id, displayName, code)
+                    guard let prompt else { return }
+                    self?.finish(prompt, with: allowed ? .approved : .denied)
+                }
+            } else {
+                let alert = PairingAlert(displayName: displayName, code: code) { [weak self, weak prompt] allowed in
+                    guard let prompt else { return }
+                    self?.finish(prompt, with: allowed ? .approved : .denied)
+                }
+                prompt.alert = alert
+                alert.show()
             }
         }
-        inFlightPrompts[id] = []
-
-        let displayName = name.isEmpty ? "Companion Device" : name
-        let result: Bool
-        if let customHandler = promptHandler {
-            result = await customHandler(id, displayName)
-        } else {
-            result = askUserToApprove(displayName: displayName)
-        }
-        if result {
-            approveDevice(id: id, name: displayName)
-        }
-
-        let pending = inFlightPrompts.removeValue(forKey: id) ?? []
-        for continuation in pending {
-            continuation.resume(returning: result)
-        }
-        return result
     }
 
-    private func askUserToApprove(displayName: String) -> Bool {
-        NSApp.activate(ignoringOtherApps: true)
+    /// Dismisses the prompt for `id`, if it's the one on screen.
+    public func cancelPrompt(for id: String) {
+        guard let prompt = activePrompt, prompt.deviceId == id else { return }
+        finish(prompt, with: .cancelled)
+    }
 
-        let alert = NSAlert()
-        alert.messageText = "Allow '\(displayName)' to connect?"
-        alert.informativeText = "This device will be able to start/stop recordings, save clips, and access clip previews on your Mac."
+    private func finish(_ prompt: ActivePrompt, with result: PairingPromptResult) {
+        guard activePrompt === prompt else { return }
+        activePrompt = nil
+        prompt.timeoutTask?.cancel()
+        prompt.handlerTask?.cancel()
+        prompt.alert?.close()
+        prompt.continuation.resume(returning: result)
+    }
+}
+
+@MainActor
+private final class ActivePrompt {
+    let deviceId: String
+    let continuation: CheckedContinuation<PairingPromptResult, Never>
+    var timeoutTask: Task<Void, Never>?
+    var handlerTask: Task<Void, Never>?
+    var alert: PairingAlert?
+
+    init(deviceId: String, continuation: CheckedContinuation<PairingPromptResult, Never>) {
+        self.deviceId = deviceId
+        self.continuation = continuation
+    }
+}
+
+/// The Allow/Deny prompt, shown as a floating window rather than a modal
+/// session so it can be dismissed when the phone gives up or the request
+/// times out, and so it never blocks the main thread.
+@MainActor
+private final class PairingAlert: NSObject {
+    private let alert = NSAlert()
+    private let onDecision: (Bool) -> Void
+
+    init(displayName: String, code: String, onDecision: @escaping (Bool) -> Void) {
+        self.onDecision = onDecision
+        super.init()
+
+        alert.messageText = "Allow “\(displayName)” to connect?"
+        alert.informativeText = "Only allow it if the device shows this code. It will be able to start and stop recording, save and delete clips, and see clip previews on this Mac."
         alert.alertStyle = .informational
-        alert.addButton(withTitle: "Allow")
-        alert.addButton(withTitle: "Deny")
-        alert.window.level = .floating
+        alert.accessoryView = Self.codeLabel(code)
 
-        return alert.runModal() == .alertFirstButtonReturn
+        let allow = alert.addButton(withTitle: "Allow")
+        let deny = alert.addButton(withTitle: "Deny")
+        // Allow has to be clicked: a stray Return mid-game must not pair a device.
+        allow.keyEquivalent = ""
+        deny.keyEquivalent = "\u{1b}"
+        allow.target = self
+        allow.action = #selector(allowClicked)
+        deny.target = self
+        deny.action = #selector(denyClicked)
+    }
+
+    func show() {
+        alert.layout()
+        let window = alert.window
+        window.level = .floating
+        window.collectionBehavior.insert([.canJoinAllSpaces, .fullScreenAuxiliary])
+        window.center()
+        NSApp.activate()
+        window.makeKeyAndOrderFront(nil)
+    }
+
+    func close() {
+        alert.window.orderOut(nil)
+    }
+
+    @objc private func allowClicked() { onDecision(true) }
+    @objc private func denyClicked() { onDecision(false) }
+
+    private static func codeLabel(_ code: String) -> NSView {
+        let spaced = code.map(String.init).joined(separator: " ")
+        let label = NSTextField(labelWithString: spaced)
+        label.font = .monospacedDigitSystemFont(ofSize: 28, weight: .semibold)
+        label.alignment = .center
+        label.setAccessibilityLabel("Pairing code \(spaced)")
+        label.frame = NSRect(x: 0, y: 0, width: 220, height: 36)
+        return label
     }
 }

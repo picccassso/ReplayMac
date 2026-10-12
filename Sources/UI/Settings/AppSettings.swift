@@ -435,7 +435,9 @@ public extension Defaults.Keys {
     static let isSystemAudioMuted = Key<Bool>("isSystemAudioMuted", default: false)
     static let isMicrophoneMuted = Key<Bool>("isMicrophoneMuted", default: false)
 
-    static let companionServerEnabled = Key<Bool>("companionServerEnabled", default: true)
+    // Off until the user opts in: no open port or Local Network prompt for
+    // people who never use the companion app.
+    static let companionServerEnabled = Key<Bool>("companionServerEnabled", default: false)
     static let companionServerPort = Key<Int>("companionServerPort", default: 7375)
     static let companionHideSensitiveInfo = Key<Bool>("companionHideSensitiveInfo", default: false)
     static let companionCustomServerName = Key<String>("companionCustomServerName", default: "")

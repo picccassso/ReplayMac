@@ -25,6 +25,10 @@ public final class CompanionServer: ObservableObject {
     /// Bonjour TXT key that carries ``serverId``.
     public static let serverIdTXTKey = "id"
     static let serverIdDefaultsKey = "companionServerId"
+    /// Phones, tablets and anything else on the network, signed in or not.
+    static let maxConnections = 16
+    /// Phones only ever send small JSON commands.
+    static let maxMessageSize = 64 * 1024
 
     /// Stays the same across launches and networks; paired phones use it to find this Mac again.
     public let serverId: String
@@ -34,9 +38,16 @@ public final class CompanionServer: ObservableObject {
     @Published public private(set) var connectedClientsCount: Int = 0
     @Published public private(set) var connectedDeviceIds: Set<String> = []
     @Published public private(set) var localIPAddresses: [String] = []
+    /// Why the server isn't running, in words for the settings screen.
+    @Published public private(set) var lastError: String?
 
     public func isDeviceConnected(id: String) -> Bool {
         connectedDeviceIds.contains(id)
+    }
+
+    /// The Mac's addresses change with the network; call before showing them.
+    public func refreshLocalIPAddresses() {
+        localIPAddresses = Self.resolveLocalIPAddresses()
     }
 
     // Callback hooks for application integration
@@ -51,12 +62,36 @@ public final class CompanionServer: ObservableObject {
     public var onGetThumbnail: (@MainActor (String) async -> Data?)?
     public var snapshotProvider: (@MainActor () -> CompanionStateSnapshot)?
 
+    /// How long a connection may take to send `hello` and answer the challenge.
+    var authDeadline: TimeInterval = 10
+    /// How long a phone must wait to ask again after the user denies it or ignores the prompt.
+    var pairingCooldown: TimeInterval = 30
+
     private var listener: NWListener?
     private let serverQueue = DispatchQueue(label: "com.replaymac.companion-server", qos: .userInitiated)
     private var activeConnections: [UUID: NWConnection] = [:]
+    /// Connections that have signed in, and the device each belongs to.
     private var connectionDevices: [UUID: String] = [:]
+    /// Connections still signing in.
+    private var pendingAuth: [UUID: PendingAuth] = [:]
+    /// The one pairing request the Mac is currently prompting for.
+    private var pairingRequest: PairingRequest?
+    private var pairingCooldowns: [String: Date] = [:]
     private let pairingManager: CompanionPairingManager
     private let defaults: UserDefaults
+
+    private enum PendingAuth {
+        case awaitingHello
+        case awaitingProof(deviceId: String, deviceName: String, nonce: String)
+        case awaitingApproval(deviceId: String)
+    }
+
+    private struct PairingRequest {
+        let deviceId: String
+        let deviceName: String
+        let code: String
+        var connectionId: UUID
+    }
 
     public init(pairingManager: CompanionPairingManager = .shared, defaults: UserDefaults = .standard) {
         self.pairingManager = pairingManager
@@ -77,16 +112,24 @@ public final class CompanionServer: ObservableObject {
         let tcpOptions = NWProtocolTCP.Options()
         let wsOptions = NWProtocolWebSocket.Options()
         wsOptions.autoReplyPing = true
+        wsOptions.maximumMessageSize = Self.maxMessageSize
 
         let parameters = NWParameters(tls: nil, tcp: tcpOptions)
         parameters.defaultProtocolStack.applicationProtocols.insert(wsOptions, at: 0)
         parameters.allowLocalEndpointReuse = true
 
         guard let endpointPort = NWEndpoint.Port(rawValue: port) else {
+            lastError = CompanionServerError.invalidPort.errorDescription
             throw CompanionServerError.invalidPort
         }
 
-        let newListener = try NWListener(using: parameters, on: endpointPort)
+        let newListener: NWListener
+        do {
+            newListener = try NWListener(using: parameters, on: endpointPort)
+        } catch {
+            lastError = Self.describe(error, port: port)
+            throw error
+        }
         newListener.service = NWListener.Service(
             name: serverName,
             type: Self.bonjourServiceType,
@@ -109,17 +152,23 @@ public final class CompanionServer: ObservableObject {
         newListener.start(queue: serverQueue)
         self.listener = newListener
         self.listeningPort = port
+        self.lastError = nil
         self.localIPAddresses = Self.resolveLocalIPAddresses()
     }
 
     public func stop() {
         guard isRunning || listener != nil else { return }
 
+        if let request = pairingRequest {
+            pairingRequest = nil
+            pairingManager.cancelPrompt(for: request.deviceId)
+        }
         for (_, connection) in activeConnections {
             connection.cancel()
         }
         activeConnections.removeAll()
         connectionDevices.removeAll()
+        pendingAuth.removeAll()
         connectedClientsCount = 0
         connectedDeviceIds.removeAll()
 
@@ -134,9 +183,15 @@ public final class CompanionServer: ObservableObject {
         switch state {
         case .ready:
             isRunning = true
+            lastError = nil
+            // Port 0 asks the system for any free port; report the real one.
+            if let actualPort = listener?.port?.rawValue {
+                listeningPort = actualPort
+            }
         case .failed(let error):
             print("CompanionServer failed: \(error)")
             stop()
+            lastError = Self.describe(error, port: listeningPort)
         case .cancelled:
             isRunning = false
         default:
@@ -144,9 +199,29 @@ public final class CompanionServer: ObservableObject {
         }
     }
 
+    static func describe(_ error: Error, port: UInt16) -> String {
+        if let nwError = error as? NWError, case .posix(let code) = nwError {
+            switch code {
+            case .EADDRINUSE:
+                return "Port \(port) is already in use by another app. Choose a different port."
+            case .EACCES, .EPERM:
+                return "macOS didn't allow ReplayCap to listen on port \(port)."
+            default:
+                break
+            }
+        }
+        return "The companion server couldn't start: \(error.localizedDescription)"
+    }
+
     private func handleNewConnection(_ connection: NWConnection) {
+        guard activeConnections.count < Self.maxConnections else {
+            connection.cancel()
+            return
+        }
+
         let connectionId = UUID()
         activeConnections[connectionId] = connection
+        pendingAuth[connectionId] = .awaitingHello
 
         connection.stateUpdateHandler = { [weak self, weak connection] state in
             guard let self, let connection else { return }
@@ -163,6 +238,24 @@ public final class CompanionServer: ObservableObject {
         }
 
         connection.start(queue: serverQueue)
+        enforceAuthDeadline(for: connectionId)
+    }
+
+    /// Drops connections that open a socket and never finish signing in. A
+    /// connection waiting on the user's Allow prompt is covered by the prompt's
+    /// own timeout instead.
+    private func enforceAuthDeadline(for connectionId: UUID) {
+        let deadline = authDeadline
+        Task { @MainActor [weak self] in
+            try? await Task.sleep(nanoseconds: UInt64(deadline * 1_000_000_000))
+            guard let self, let state = self.pendingAuth[connectionId] else { return }
+            switch state {
+            case .awaitingHello, .awaitingProof:
+                self.reject(connectionId, .timeout, "The connection took too long to sign in. Try again.")
+            case .awaitingApproval:
+                break
+            }
+        }
     }
 
     nonisolated private func receiveNextMessage(on connection: NWConnection, connectionId: UUID) {
@@ -207,24 +300,53 @@ public final class CompanionServer: ObservableObject {
     }
 
     private func handleConnectionDisconnection(connectionId: UUID) {
-        if let conn = activeConnections.removeValue(forKey: connectionId) {
+        if let conn = activeConnections[connectionId] {
             conn.cancel()
         }
-        connectionDevices.removeValue(forKey: connectionId)
-        updateConnectedClients()
+        forget(connectionId)
+    }
+
+    /// Removes every trace of a connection without touching the socket.
+    private func forget(_ connectionId: UUID) {
+        activeConnections.removeValue(forKey: connectionId)
+        pendingAuth.removeValue(forKey: connectionId)
+        let wasSignedIn = connectionDevices.removeValue(forKey: connectionId) != nil
+        if let request = pairingRequest, request.connectionId == connectionId {
+            // The phone gave up, so the prompt has no one to answer to.
+            pairingRequest = nil
+            pairingManager.cancelPrompt(for: request.deviceId)
+        }
+        if wasSignedIn {
+            updateConnectedClients()
+        }
+    }
+
+    /// Sends a last message, then closes the connection once it's on the wire.
+    private func sendThenClose<T: Encodable>(_ message: T, connectionId: UUID) {
+        guard let connection = activeConnections[connectionId] else { return }
+        forget(connectionId)
+        send(message, to: connection) {
+            connection.cancel()
+        }
+    }
+
+    private func reject(_ connectionId: UUID, _ code: CompanionErrorCode, _ message: String) {
+        sendThenClose(CompanionErrorMessage(code, message: message), connectionId: connectionId)
+    }
+
+    private func deny(_ connectionId: UUID, reason: CompanionDenialReason, deviceName: String? = nil) {
+        sendThenClose(authResponse(status: "denied", deviceName: deviceName, reason: reason), connectionId: connectionId)
     }
 
     private func handleDeviceRevoked(_ deviceId: String) {
-        let matching = connectionDevices.filter { $0.value == deviceId }
-        for (connId, _) in matching {
-            if let conn = activeConnections[connId] {
-                send(authResponse(status: "denied"), to: conn)
-                conn.cancel()
-            }
-            activeConnections.removeValue(forKey: connId)
-            connectionDevices.removeValue(forKey: connId)
+        let signedIn = connectionDevices.filter { $0.value == deviceId }.map(\.key)
+        let signingIn = pendingAuth.compactMap { id, state -> UUID? in
+            if case .awaitingProof(let pendingId, _, _) = state, pendingId == deviceId { return id }
+            return nil
         }
-        updateConnectedClients()
+        for connId in signedIn + signingIn {
+            deny(connId, reason: .revoked)
+        }
     }
 
     private func updateConnectedClients() {
@@ -235,7 +357,8 @@ public final class CompanionServer: ObservableObject {
     // MARK: - Message Handling
 
     private func handleIncomingData(_ data: Data, connectionId: UUID, connection: NWConnection) {
-        guard let message = try? JSONDecoder().decode(CompanionClientMessage.self, from: data) else {
+        guard activeConnections[connectionId] != nil,
+              let message = try? JSONDecoder().decode(CompanionClientMessage.self, from: data) else {
             return
         }
 
@@ -243,12 +366,15 @@ public final class CompanionServer: ObservableObject {
         case CompanionClientMessageType.hello.rawValue:
             handleHello(message, connectionId: connectionId, connection: connection)
 
+        case CompanionClientMessageType.authProof.rawValue:
+            handleProof(message, connectionId: connectionId)
+
         case CompanionClientMessageType.ping.rawValue:
             send(CompanionPongMessage(), to: connection)
 
         default:
             guard connectionDevices[connectionId] != nil else {
-                send(CompanionErrorMessage(message: "Device not authorized"), to: connection)
+                send(CompanionErrorMessage(.notAuthorized, message: "Device not authorized"), to: connection)
                 return
             }
 
@@ -295,64 +421,153 @@ public final class CompanionServer: ObservableObject {
     }
 
     private func handleHello(_ message: CompanionClientMessage, connectionId: UUID, connection: NWConnection) {
-        guard activeConnections[connectionId] != nil else { return }
+        guard (message.protocolVersion ?? 1) >= CompanionAuth.protocolVersion else {
+            reject(connectionId, .unsupportedClient, "Update ReplayCap Companion on this device to connect.")
+            return
+        }
+        guard let deviceId = CompanionAuth.sanitizedDeviceId(message.deviceId) else {
+            reject(connectionId, .unsupportedClient, "This device didn't send a valid ID.")
+            return
+        }
+        let deviceName = CompanionAuth.sanitizedDeviceName(message.deviceName) ?? "Companion Device"
 
-        let rawId = message.deviceId?.trimmingCharacters(in: .whitespacesAndNewlines)
-        let deviceId = (rawId?.isEmpty == false) ? rawId! : connectionId.uuidString
-        let rawName = message.deviceName?.trimmingCharacters(in: .whitespacesAndNewlines)
-        let deviceName = (rawName?.isEmpty == false) ? rawName! : "Companion Device"
-
-        // Cancel previous stale connection for same deviceId
-        let staleConnections = connectionDevices.filter { $0.key != connectionId && $0.value == deviceId }
-        for (staleId, _) in staleConnections {
-            if let staleConn = activeConnections.removeValue(forKey: staleId) {
-                staleConn.cancel()
+        // Already signed in: the phone came back to the foreground and wants fresh state.
+        if let signedInDevice = connectionDevices[connectionId] {
+            guard signedInDevice == deviceId else {
+                reject(connectionId, .unsupportedClient, "This connection belongs to another device.")
+                return
             }
-            connectionDevices.removeValue(forKey: staleId)
+            sendApproval(to: connection, deviceId: deviceId, deviceName: deviceName, newSecret: nil)
+            return
         }
 
-        if pairingManager.isDeviceApproved(id: deviceId) {
-            pairingManager.approveDevice(id: deviceId, name: deviceName)
-            let resolvedName = pairingManager.device(for: deviceId)?.name ?? deviceName
-            connectionDevices[connectionId] = deviceId
-            updateConnectedClients()
+        // Don't let an extra hello reset a prompt already on screen.
+        if case .awaitingApproval(let pendingId) = pendingAuth[connectionId], pendingId == deviceId {
+            return
+        }
+
+        if pairingManager.secret(for: deviceId) != nil {
+            let nonce = CompanionAuth.makeNonce()
+            pendingAuth[connectionId] = .awaitingProof(deviceId: deviceId, deviceName: deviceName, nonce: nonce)
             send(
-                authResponse(status: "approved", deviceName: resolvedName),
+                CompanionAuthChallenge(nonce: nonce, serverId: serverId, serverName: serverName, serverVersion: serverVersion),
                 to: connection
             )
-            if let snapshot = snapshotProvider?() {
-                send(snapshot, to: connection)
-            }
         } else {
-            send(
-                authResponse(status: "pending", deviceName: deviceName),
-                to: connection
-            )
+            beginPairing(connectionId: connectionId, deviceId: deviceId, deviceName: deviceName)
+        }
+    }
 
-            Task { @MainActor [weak self, weak connection] in
-                guard let self, let connection else { return }
-                let approved = await self.pairingManager.promptApprovalForDevice(id: deviceId, name: deviceName)
-                guard self.activeConnections[connectionId] != nil else { return }
+    private func handleProof(_ message: CompanionClientMessage, connectionId: UUID) {
+        guard case .awaitingProof(let deviceId, let deviceName, let nonce) = pendingAuth[connectionId] else {
+            return
+        }
 
-                if approved {
-                    let resolvedName = self.pairingManager.device(for: deviceId)?.name ?? deviceName
-                    self.connectionDevices[connectionId] = deviceId
-                    self.updateConnectedClients()
-                    self.send(
-                        self.authResponse(status: "approved", deviceName: resolvedName),
-                        to: connection
-                    )
-                    if let snapshot = self.snapshotProvider?() {
-                        self.send(snapshot, to: connection)
-                    }
-                } else {
-                    self.send(
-                        self.authResponse(status: "denied", deviceName: deviceName),
-                        to: connection
-                    )
-                    self.handleConnectionDisconnection(connectionId: connectionId)
-                }
+        // The phone has lost its secret (reinstalled, restored, or reset), so
+        // the user decides again, exactly as for a new phone.
+        guard message.proof != nil else {
+            beginPairing(connectionId: connectionId, deviceId: deviceId, deviceName: deviceName)
+            return
+        }
+
+        guard let secret = pairingManager.secret(for: deviceId),
+              CompanionAuth.isValidProof(message.proof, secret: secret, serverId: serverId, deviceId: deviceId, nonce: nonce) else {
+            deny(connectionId, reason: .invalidProof, deviceName: deviceName)
+            return
+        }
+
+        pairingManager.refreshReportedName(id: deviceId, name: deviceName)
+        authorize(connectionId: connectionId, deviceId: deviceId, deviceName: deviceName, newSecret: nil)
+    }
+
+    // MARK: - Pairing
+
+    private func beginPairing(connectionId: UUID, deviceId: String, deviceName: String) {
+        let now = Date()
+        pairingCooldowns = pairingCooldowns.filter { $0.value > now }
+        if pairingCooldowns[deviceId] != nil {
+            reject(connectionId, .cooldown, "Pairing was declined on the Mac. Try again in a moment.")
+            return
+        }
+
+        if var request = pairingRequest {
+            guard request.deviceId == deviceId else {
+                reject(connectionId, .busy, "Another device is waiting for approval on the Mac. Try again in a moment.")
+                return
             }
+            // The same phone reconnected while its prompt is up: keep the
+            // prompt and code, and answer on the newest connection.
+            let previousConnection = request.connectionId
+            request.connectionId = connectionId
+            pairingRequest = request
+            pendingAuth[connectionId] = .awaitingApproval(deviceId: deviceId)
+            if previousConnection != connectionId {
+                handleConnectionDisconnection(connectionId: previousConnection)
+            }
+            if let connection = activeConnections[connectionId] {
+                send(authResponse(status: "pending", deviceName: deviceName, pairingCode: request.code), to: connection)
+            }
+            return
+        }
+
+        let code = CompanionAuth.makePairingCode()
+        pairingRequest = PairingRequest(deviceId: deviceId, deviceName: deviceName, code: code, connectionId: connectionId)
+        pendingAuth[connectionId] = .awaitingApproval(deviceId: deviceId)
+        if let connection = activeConnections[connectionId] {
+            send(authResponse(status: "pending", deviceName: deviceName, pairingCode: code), to: connection)
+        }
+
+        Task { @MainActor [weak self] in
+            guard let self else { return }
+            let result = await self.pairingManager.requestApproval(id: deviceId, name: deviceName, code: code)
+            self.finishPairing(deviceId: deviceId, code: code, result: result)
+        }
+    }
+
+    private func finishPairing(deviceId: String, code: String, result: PairingPromptResult) {
+        guard let request = pairingRequest, request.deviceId == deviceId, request.code == code else { return }
+        pairingRequest = nil
+        let connectionId = request.connectionId
+
+        switch result {
+        case .approved:
+            let secret = pairingManager.approveDevice(id: deviceId, name: request.deviceName)
+            authorize(connectionId: connectionId, deviceId: deviceId, deviceName: request.deviceName, newSecret: secret)
+        case .denied:
+            pairingCooldowns[deviceId] = Date().addingTimeInterval(pairingCooldown)
+            deny(connectionId, reason: .userDenied, deviceName: request.deviceName)
+        case .timedOut:
+            pairingCooldowns[deviceId] = Date().addingTimeInterval(pairingCooldown)
+            reject(connectionId, .timeout, "Nobody answered on the Mac. Try again when you're next to it.")
+        case .cancelled:
+            reject(connectionId, .busy, "The Mac couldn't show the approval prompt. Try again.")
+        }
+    }
+
+    private func authorize(connectionId: UUID, deviceId: String, deviceName: String, newSecret: Data?) {
+        guard let connection = activeConnections[connectionId] else { return }
+        pendingAuth.removeValue(forKey: connectionId)
+
+        // Only now that this connection has proved itself may it replace the
+        // phone's older ones; otherwise anyone who knew a device id could kick
+        // that phone offline.
+        for (staleId, staleDevice) in connectionDevices where staleDevice == deviceId && staleId != connectionId {
+            handleConnectionDisconnection(connectionId: staleId)
+        }
+
+        connectionDevices[connectionId] = deviceId
+        updateConnectedClients()
+        sendApproval(to: connection, deviceId: deviceId, deviceName: deviceName, newSecret: newSecret)
+    }
+
+    private func sendApproval(to connection: NWConnection, deviceId: String, deviceName: String, newSecret: Data?) {
+        let resolvedName = pairingManager.device(for: deviceId)?.name ?? deviceName
+        send(
+            authResponse(status: "approved", deviceName: resolvedName, pairingSecret: newSecret?.base64EncodedString()),
+            to: connection
+        )
+        if let snapshot = snapshotProvider?() {
+            send(snapshot, to: connection)
         }
     }
 
@@ -385,9 +600,11 @@ public final class CompanionServer: ObservableObject {
             )
         }
 
-        for (connId, conn) in activeConnections {
-            let devId = connectionDevices[connId]
-            let devName = devId.flatMap { pairingManager.device(for: $0)?.name }
+        // Signed-in phones only: a phone still waiting on the Allow prompt
+        // must never see "approved" before the user has answered.
+        for (connId, devId) in connectionDevices {
+            guard let conn = activeConnections[connId] else { continue }
+            let devName = pairingManager.device(for: devId)?.name
             send(authResponse(status: "approved", deviceName: devName), to: conn)
         }
     }
@@ -403,13 +620,26 @@ public final class CompanionServer: ObservableObject {
         }
     }
 
-    private func authResponse(status: String, deviceName: String? = nil) -> CompanionAuthResponse {
+    private var serverVersion: String {
+        Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "unknown"
+    }
+
+    private func authResponse(
+        status: String,
+        deviceName: String? = nil,
+        pairingCode: String? = nil,
+        pairingSecret: String? = nil,
+        reason: CompanionDenialReason? = nil
+    ) -> CompanionAuthResponse {
         CompanionAuthResponse(
             status: status,
             serverName: serverName,
-            serverVersion: Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "1.7.3",
+            serverVersion: serverVersion,
             serverId: serverId,
-            deviceName: deviceName
+            deviceName: deviceName,
+            pairingCode: pairingCode,
+            pairingSecret: pairingSecret,
+            reason: reason?.rawValue
         )
     }
 
@@ -424,14 +654,22 @@ public final class CompanionServer: ObservableObject {
 
     // MARK: - Sending & Broadcasting
 
-    nonisolated private func send<T: Encodable>(_ message: T, to connection: NWConnection) {
-        guard let data = try? JSONEncoder().encode(message) else { return }
+    nonisolated private func send<T: Encodable>(
+        _ message: T,
+        to connection: NWConnection,
+        then completion: (@Sendable () -> Void)? = nil
+    ) {
+        guard let data = try? JSONEncoder().encode(message) else {
+            completion?()
+            return
+        }
         let metadata = NWProtocolWebSocket.Metadata(opcode: .text)
         let context = NWConnection.ContentContext(identifier: "text", metadata: [metadata])
         connection.send(content: data, contentContext: context, isComplete: true, completion: .contentProcessed { error in
             if let error {
                 print("CompanionServer: failed to send message: \(error)")
             }
+            completion?()
         })
     }
 

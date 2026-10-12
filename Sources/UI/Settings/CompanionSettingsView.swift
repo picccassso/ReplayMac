@@ -1,5 +1,6 @@
 import SwiftUI
 import AppKit
+import Branding
 import Defaults
 import CompanionServer
 
@@ -78,6 +79,7 @@ public struct CompanionSettingsView: View {
         }
         .onAppear {
             portDraft = String(companionServerPort)
+            server.refreshLocalIPAddresses()
         }
         .onDisappear {
             removeClickMonitor()
@@ -127,11 +129,18 @@ public struct CompanionSettingsView: View {
                         }
                     }
 
-                    Text(server.isRunning
-                        ? "Listening for connections on port \(String(companionServerPort))"
-                        : "Enable the companion server to connect phones and tablets")
-                        .font(.system(size: 12, design: .rounded))
-                        .foregroundStyle(AppTheme.textSecondary)
+                    if companionServerEnabled, !server.isRunning, let error = server.lastError {
+                        Label(error, systemImage: "exclamationmark.triangle.fill")
+                            .font(.system(size: 12, design: .rounded))
+                            .foregroundStyle(.orange)
+                            .fixedSize(horizontal: false, vertical: true)
+                    } else {
+                        Text(server.isRunning
+                            ? "Listening for connections on port \(String(companionServerPort))"
+                            : "Turn on to control \(AppBranding.name) from the ReplayCap Companion app on your phone or tablet")
+                            .font(.system(size: 12, design: .rounded))
+                            .foregroundStyle(AppTheme.textSecondary)
+                    }
                 }
 
                 Spacer(minLength: 12)
@@ -286,11 +295,11 @@ public struct CompanionSettingsView: View {
             }
 
             VStack(alignment: .leading, spacing: 8) {
-                Label("USB Tethering Setup", systemImage: "cable.connector")
+                Label("Android over USB", systemImage: "cable.connector")
                     .font(.system(size: 13, weight: .semibold, design: .rounded))
                     .foregroundStyle(AppTheme.textPrimary)
 
-                Text("For low-latency USB connections without Wi-Fi, run this command in Terminal:")
+                Text("To connect an Android device by USB cable without Wi-Fi, run this command in Terminal (requires Android platform tools):")
                     .font(.caption)
                     .foregroundStyle(AppTheme.textSecondary)
 
@@ -309,7 +318,7 @@ public struct CompanionSettingsView: View {
                     CopyButton(text: adbCmd, label: "Copy Command", tooltip: "Copy adb reverse command")
                 }
 
-                Text("Then connect to 127.0.0.1 in the ReplayMac Companion app.")
+                Text("Then tap USB Cable in the ReplayCap Companion app. iPhone and iPad connect over Wi-Fi, or over USB with Personal Hotspot.")
                     .font(.caption2)
                     .foregroundStyle(AppTheme.textSecondary)
             }
@@ -333,7 +342,7 @@ public struct CompanionSettingsView: View {
                 .help(hideSensitiveInfo ? "Reveal IP addresses" : "Hide IP addresses from view")
             }
         } footer: {
-            Text("Connect phones and tablets running the ReplayMac Companion app on the same local Wi-Fi or via USB tethering.")
+            Text("Phones and tablets running the ReplayCap Companion app connect over your local network. New devices must be approved on this Mac, and the code on the prompt must match the one on the device.")
                 .font(.caption)
                 .foregroundStyle(AppTheme.textSecondary)
         }
@@ -350,7 +359,7 @@ public struct CompanionSettingsView: View {
                         .foregroundStyle(.secondary.opacity(0.7))
                     Text("No Paired Devices")
                         .font(.system(size: 14, weight: .semibold, design: .rounded))
-                    Text("Open the ReplayMac Companion app on your phone or tablet on the same network to connect. New devices will prompt for authorization on your Mac.")
+                    Text("Open the ReplayCap Companion app on your phone or tablet on the same network. This Mac will ask you to approve each new device.")
                         .font(.caption)
                         .foregroundStyle(AppTheme.textSecondary)
                         .multilineTextAlignment(.center)
@@ -470,7 +479,7 @@ public struct CompanionSettingsView: View {
     }
 
     private var defaultServerName: String {
-        Host.current().localizedName ?? "ReplayMac"
+        Host.current().localizedName ?? AppBranding.name
     }
 
     private var currentServerName: String {
