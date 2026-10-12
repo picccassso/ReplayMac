@@ -318,7 +318,7 @@ public struct CompanionSettingsView: View {
                     CopyButton(text: adbCmd, label: "Copy Command", tooltip: "Copy adb reverse command")
                 }
 
-                Text("Then tap USB Cable in the ReplayCap Companion app. iPhone and iPad connect over Wi-Fi, or over USB with Personal Hotspot.")
+                Text("Then tap USB Cable in the ReplayCap Companion app. iPhone and iPad connect over Wi-Fi.")
                     .font(.caption2)
                     .foregroundStyle(AppTheme.textSecondary)
             }
