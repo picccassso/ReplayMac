@@ -14,6 +14,7 @@
 		70F1C5157C4605E0F4524886 /* AppDelegate+CapturePipeline.swift in Sources */ = {isa = PBXBuildFile; fileRef = FD15E173F82D19D367B3941E /* AppDelegate+CapturePipeline.swift */; };
 		8009A0BFB4ED8C95A6C8510A /* AppDelegate.swift in Sources */ = {isa = PBXBuildFile; fileRef = 362278FEFEF0BE440B232470 /* AppDelegate.swift */; };
 		8529A3D24FB29A10DB4EC5D1 /* AppDelegate+GameAutoRecord.swift in Sources */ = {isa = PBXBuildFile; fileRef = 184D4E754EE320C9D54925C6 /* AppDelegate+GameAutoRecord.swift */; };
+		868A7FCCE9AD0380C2B512FD /* AppDelegate+CompanionServer.swift in Sources */ = {isa = PBXBuildFile; fileRef = 20F70EC837459F5362BA5A56 /* AppDelegate+CompanionServer.swift */; };
 		98E0B453DB518A83A2E9E018 /* AppDelegate+RuntimeSettings.swift in Sources */ = {isa = PBXBuildFile; fileRef = B955C46510EBB27E8FF1F310 /* AppDelegate+RuntimeSettings.swift */; };
 		9DFFE2F8FEB019DF3EE2B968 /* AppDelegate+PipelineHandlers.swift in Sources */ = {isa = PBXBuildFile; fileRef = F5702EA1CBB05618D37A878B /* AppDelegate+PipelineHandlers.swift */; };
 		B5C10F40B0CC1CDECD6428BF /* Defaults in Frameworks */ = {isa = PBXBuildFile; productRef = 54941E8632529ACB7E9560AE /* Defaults */; };
@@ -29,6 +30,7 @@
 /* Begin PBXFileReference section */
 		0D85B597549C4A75BE9F1757 /* AppDelegate+Hotkeys.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "AppDelegate+Hotkeys.swift"; sourceTree = "<group>"; };
 		184D4E754EE320C9D54925C6 /* AppDelegate+GameAutoRecord.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "AppDelegate+GameAutoRecord.swift"; sourceTree = "<group>"; };
+		20F70EC837459F5362BA5A56 /* AppDelegate+CompanionServer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "AppDelegate+CompanionServer.swift"; sourceTree = "<group>"; };
 		2757777606E302889B063A23 /* AppDelegate+Updates.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "AppDelegate+Updates.swift"; sourceTree = "<group>"; };
 		362278FEFEF0BE440B232470 /* AppDelegate.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppDelegate.swift; sourceTree = "<group>"; };
 		3C981F42E9347975C0A654CB /* AppDelegate+Saving.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "AppDelegate+Saving.swift"; sourceTree = "<group>"; };
@@ -65,6 +67,7 @@
 				362278FEFEF0BE440B232470 /* AppDelegate.swift */,
 				C188C46C55CF686576AD3FA7 /* AppDelegate+BufferMonitoring.swift */,
 				FD15E173F82D19D367B3941E /* AppDelegate+CapturePipeline.swift */,
+				20F70EC837459F5362BA5A56 /* AppDelegate+CompanionServer.swift */,
 				184D4E754EE320C9D54925C6 /* AppDelegate+GameAutoRecord.swift */,
 				0D85B597549C4A75BE9F1757 /* AppDelegate+Hotkeys.swift */,
 				F5702EA1CBB05618D37A878B /* AppDelegate+PipelineHandlers.swift */,
@@ -221,6 +224,7 @@
 			files = (
 				F81DEDB146EDA9B5E1273923 /* AppDelegate+BufferMonitoring.swift in Sources */,
 				70F1C5157C4605E0F4524886 /* AppDelegate+CapturePipeline.swift in Sources */,
+				868A7FCCE9AD0380C2B512FD /* AppDelegate+CompanionServer.swift in Sources */,
 				8529A3D24FB29A10DB4EC5D1 /* AppDelegate+GameAutoRecord.swift in Sources */,
 				B5CBA568240ACC36ADB3CEA3 /* AppDelegate+Hotkeys.swift in Sources */,
 				9DFFE2F8FEB019DF3EE2B968 /* AppDelegate+PipelineHandlers.swift in Sources */,

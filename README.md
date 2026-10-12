@@ -24,7 +24,7 @@ ReplayMac is a macOS menu bar instant-replay clipper. It continuously buffers re
 
 ### Clip Library & Export
 
-Click ReplayMac in the Dock to open **Home** (or the page you choose under Settings > General > Open window to), a control centre with the same actions as the menu bar (save a replay, start or stop the replay buffer or a session, mute the microphone or system audio), live buffer status, each action's hotkey, and the clips you've saved since ReplayMac opened, each with a Trim button. It works well on a second screen. Choose **Clip Library** from the menu bar to browse your clips, or **Settings…** to configure ReplayMac; all three open the same window. The sidebar puts Home and Clip Library above General, Video, Audio, Profiles, Hotkeys and Advanced. Trim & Export opens each clip in its own window, so you can have several edits open at once. Exports run one at a time and keep going if you close the editor, with progress and completion shown in the library.
+Click ReplayMac in the Dock to open **Home** (or the page you choose under Settings > General > Open window to), a control centre with the same actions as the menu bar (save a replay, start or stop the replay buffer or a session, mute the microphone or system audio), live buffer status, each action's hotkey, and the clips you've saved since ReplayMac opened, each with a Trim button. It works well on a second screen. Choose **Clip Library** from the menu bar to browse your clips, or **Settings…** to configure ReplayMac; all three open the same window. The sidebar puts Home and Clip Library above General, Video, Audio, Profiles, Hotkeys, Companion and Advanced. Trim & Export opens each clip in its own window, so you can have several edits open at once. Exports run one at a time and keep going if you close the editor, with progress and completion shown in the library.
 
 - **Native appearance**: Liquid Glass navigation and controls on macOS 26+, following your system glass appearance, accent colour, and Light/Dark mode. Earlier macOS versions use native controls.
 - **Built-in library and editor**: Preview, trim, and search clips, with support for favorites, tags, notes, and batch actions.
@@ -32,9 +32,17 @@ Click ReplayMac in the Dock to open **Home** (or the page you choose under Setti
 - **Custom exports**: Export with fast passthrough or re-encode to 1080p or 720p with quality presets, HDR metadata preservation, and a live file size estimator.
 - **Sharing and disk cleanup**: Share via the macOS share sheet, copy files directly to your clipboard, and clean up older clips by age or library size.
 
+### Companion App
+
+Control ReplayMac from your phone with the ReplayCap Companion app for iPhone and Android. Save replays, start and stop the buffer or a session, mute audio and browse this session's clips from across the room or on a second screen.
+
+- **Off until you want it**: Turn on the Companion server in the Companion page. Nothing listens on your network otherwise.
+- **You approve every phone**: New devices show an Allow prompt on your Mac with a 4-digit code that matches the phone. Approved phones get a pairing key, and you can rename or revoke them at any time.
+- **Local only**: The phone talks straight to your Mac over your own network (or a USB cable on Android). Nothing goes to the internet.
+
 ### Workflow & Menu Bar
 - **Menu bar controls**: View live recording state, buffer progress, and your latest clip directly from the menu bar.
-- **Custom hotkeys**: Trigger instant replays, session recordings, time-specific buffers (15s, 60s), and the clip library with configurable shortcuts.
+- **Custom hotkeys**: Trigger instant replays, session recordings, time-specific buffers (15s, 60s), microphone and system audio mute (including push-to-mute), copying the last clip, and the clip library with configurable shortcuts.
 - **Profiles and templates**: Switch between named capture profiles, tune quality presets, and customize file names using `{app}`, `{date}`, and `{time}` tokens.
 - **Live settings and background operation**: Apply capture settings during active recording, launch at login, receive save notifications, and check for GitHub updates.
 

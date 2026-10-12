@@ -1,7 +1,20 @@
 # Changelog
 
-## Unreleased
+## 2.0.0
 
+### Companion app
+
+- Add a Companion server so the ReplayCap Companion app on iPhone and Android can control ReplayMac over your local network. From your phone you can save a replay or an extended replay, start and stop the replay buffer or a session recording, mute the microphone or system audio, and see live buffer status, timers, memory use, the recorded display and the clips saved this session with thumbnails. Clips can be shown in Finder or moved to the Trash from the phone
+- Add a Companion page to the main window's sidebar to turn the server on, rename this Mac as phones see it, change the port, see this Mac's local IP addresses (with a button to hide them while streaming), copy the `adb reverse` command for Android over USB, and manage paired devices: rename them, see which are connected, and revoke one or all. Home shows a pill while a phone is connected that opens these settings
+- New phones must be approved on the Mac. The Allow prompt shows a 4-digit code that also appears on the phone, so you can tell your phone's request apart from anyone else's. Allow has to be clicked (pressing Return does nothing, so a stray key press mid-game can't approve a device), only one prompt shows at a time, and it closes by itself after a minute or when the phone gives up. A phone that was denied has to wait 30 seconds before asking again
+- Approved phones receive a pairing key and prove they hold it every time they reconnect, so knowing a phone's ID isn't enough to control your Mac. Revoking a phone deletes its key straight away
+- The Companion server is off until you turn it on, so nothing listens on your network and macOS doesn't ask for Local Network access unless you use it. It never connects to the internet; traffic only goes between your Mac and your own phones. If the server can't start, for example because another app already uses the port, the Companion page says why
+- The Mac App Store version gains the network server permission for this feature, and still makes no outgoing connections. The privacy policy has been updated to describe what the Companion server shares with your phone
+
+### Main window, Trim & Export and Home
+
+- Bring library, settings and editing together in one window with a sidebar, using native window chrome and Liquid Glass surfaces. Library search, sort, favourites, Clean Up and Refresh (Command-R) live in the toolbar, selection details float over the clip list on a glass panel, and the toolbar keeps a steady single-line height when you switch pages. Glass follows your Liquid Glass setting, Reduce Transparency and Increase Contrast, and macOS 15 uses standard materials
+- Redesign Trim & Export as an editor with a settings sidebar, editable start and end times, an adaptive crop preview, accessible help and independent GIF controls. GIF size estimates update as you change settings, and a hang when cancelling an HEVC export is fixed
 - Bring back the Clip Library item in the menu bar. It was renamed to "Open ReplayMac" when the library and settings moved into one window, which made the library hard to find. It now always opens straight to your clips, has its own icon, and sits in its own section with the last clip actions
 - Open Trim & Export in its own window instead of the library sidebar. Each clip gets its own editor window, so you can work on several clips at once without the "Replace Current Edit?" prompt. Closing an editor window ends that edit; an export already running keeps going and shows its progress in the library
 - Fix the Trim & Export settings panel spilling past the window edge and cutting off its help buttons, most visibly after expanding or collapsing Export a GIF. The Quality picker was wider than the panel; the panel is now wide enough for it and falls back to a pop-up menu if it still doesn't fit. The GIF icon now uses the accent colour while the section is expanded and is greyed out when collapsed
@@ -12,10 +25,23 @@
 - Add an "Open window to" setting in Settings > General > Startup: choose whether the main window opens on Home (the default), Clip Library or the last page you viewed when you launch ReplayMac or reopen it after closing the window. Minimising keeps your page, and the menu bar's Clip Library and Settings items still go straight to their pages
 - Move the sidebar's ReplayMac header up in full screen, where the traffic lights it made room for are hidden
 - Give the Trim & Export window the same translucent, desktop-tinted background as the main window's sidebar, staying translucent while another app is in front, and put the trim range controls on a Liquid Glass panel that follows your glass appearance setting. Both become opaque with Reduce Transparency. The selected duration is now shown in the primary text colour so it stays readable on the glass, and the window title names the clip being edited
+- Add a start/stop button to Home's status card. It turns into a "Stop Buffer" pill while the buffer runs, and starting or stopping animates smoothly (a short fade with Reduce Motion)
+- Fix the main window sometimes ignoring the page chosen in "Open window to" when reopened after closing, and keep ReplayMac quiet in the menu bar when it launches at login
+
+### Replay buffer and hotkeys
+
 - Show how much memory the replay buffer uses. Settings > General and the setup assistant now show an estimate under the buffer length that updates as you change it, and long buffers point you to extended replay, which keeps footage on disk instead of in RAM
 - Suggest extended replay when the replay buffer reaches 5 minutes. The pop-up can turn extended replay on and set the replay buffer back to 60 seconds in one click, and has a "Don't show this again" option
 - Warn when the memory cap is too small for the replay buffer. At high bitrates, or when recording two displays, the cap could quietly cut a 5 minute buffer down to around 3 and a half minutes. Settings > General and Settings > Advanced now say how much the cap actually holds and offer to raise it to the size that fits
+- Add hotkeys to mute or unmute the microphone, push-to-mute the microphone while held, mute or unmute system audio, and copy the last saved clip to the clipboard
+- Rename "Start/stop recording" to "Start/stop replay buffer" in the hotkeys, onboarding and menu bar. It turns the instant-replay buffer on or off and never writes a file, so the old name led people to stop the buffer when they meant to start recording. The settings now explain that stopping discards unsaved footage and point to session recording for start-to-stop capture
+- Explain extended replay under its hotkey and in Settings > Video: it saves a separate 5, 10 or 30 minute buffer kept on disk, and does nothing until that buffer is turned on
 - Add short notes in Settings > Video when 120 fps, a resolution above 4K or dual-display capture is selected, since these add GPU and encoder load
+
+### Fixes
+
+- Fix ReplayMac quitting unexpectedly when audio devices change while the microphone is recording, for example when headphones or a USB headset connect, a call starts, or a virtual audio device appears. macOS can refuse the microphone tap at that moment, and that refusal used to crash the app instead of being retried. ReplayMac now treats it like any other failed restart and tries again once the device settles. The live level meters get the same protection
+
 
 ## 1.7.3
 

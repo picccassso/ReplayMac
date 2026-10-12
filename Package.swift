@@ -71,6 +71,7 @@ let package = Package(
         ),
         .target(
             name: "Audio",
+            dependencies: ["ObjCExceptionCatcher"],
             path: "Sources/Audio",
             linkerSettings: [
                 .linkedFramework("AVFoundation"),
@@ -112,6 +113,10 @@ let package = Package(
             ]
         ),
         .target(
+            name: "ObjCExceptionCatcher",
+            path: "Sources/ObjCExceptionCatcher"
+        ),
+        .target(
             name: "CompanionServer",
             dependencies: [
                 "Branding",
@@ -126,7 +131,7 @@ let package = Package(
         .testTarget(name: "EncoderTests", dependencies: ["Encode"], path: "Tests/EncoderTests"),
         .testTarget(name: "SavePipelineTests", dependencies: ["Save", "RingBuffer", "Encode", "UI"], path: "Tests/SavePipelineTests"),
         .testTarget(name: "CaptureTests", dependencies: ["Capture"], path: "Tests/CaptureTests"),
-        .testTarget(name: "AudioTests", dependencies: ["Audio"], path: "Tests/AudioTests"),
+        .testTarget(name: "AudioTests", dependencies: ["Audio", "ObjCExceptionCatcher"], path: "Tests/AudioTests"),
         .testTarget(name: "UITests", dependencies: ["UI"], path: "Tests/UITests"),
         .testTarget(name: "CompanionServerTests", dependencies: ["CompanionServer"], path: "Tests/CompanionServerTests")
     ]

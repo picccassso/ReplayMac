@@ -1,5 +1,6 @@
 import Foundation
 @preconcurrency import AVFoundation
+import ObjCExceptionCatcher
 @preconcurrency import CoreMedia
 import CoreAudio
 import os.log
@@ -12,6 +13,9 @@ public enum MicCaptureError: Error {
     case cannotSetInputDevice(OSStatus)
     case invalidInputFormat
     case cannotCreateConverter
+    /// AVAudioEngine refused the tap, typically because the input device
+    /// changed format between reading it and installing the tap.
+    case tapInstallFailed(String)
 }
 
 /// Captures microphone audio via AVAudioEngine and emits CMSampleBuffers
@@ -310,7 +314,11 @@ public final class MicCapture: @unchecked Sendable {
             "Microphone \(isRestart ? "restarted" : "started", privacy: .public) input=\(inputFormat.channelCount, privacy: .public)ch@\(Int(inputFormat.sampleRate), privacy: .public) output=\(target.channelCount, privacy: .public)ch@48000"
         )
 
-        input.installTap(onBus: 0, bufferSize: 1024, format: inputFormat) { [weak self] buffer, time in
+        // installTap raises an Objective-C exception, which would abort the
+        // app, when the device's format moves under it mid-change (a headset
+        // connecting, a call starting, a virtual device appearing). As an
+        // error it goes through the same retry-with-backoff as any restart.
+        try Self.installTapCatchingExceptions(on: input, bufferSize: 1024, format: inputFormat) { [weak self] buffer, time in
             guard let self, let copiedBuffer = Self.copyPCMBuffer(buffer) else { return }
             self.processingQueue.async { [weak self] in
                 guard let self, self.shouldProcessTapBuffer(generation: generation) else { return }
@@ -324,6 +332,21 @@ public final class MicCapture: @unchecked Sendable {
         } catch {
             input.removeTap(onBus: 0)
             throw MicCaptureError.engineStartFailed(error)
+        }
+    }
+
+    static func installTapCatchingExceptions(
+        on node: AVAudioNode,
+        bufferSize: AVAudioFrameCount,
+        format: AVAudioFormat,
+        block: @escaping AVAudioNodeTapBlock
+    ) throws {
+        do {
+            try RCObjCException.performCatching {
+                node.installTap(onBus: 0, bufferSize: bufferSize, format: format, block: block)
+            }
+        } catch {
+            throw MicCaptureError.tapInstallFailed(error.localizedDescription)
         }
     }
 

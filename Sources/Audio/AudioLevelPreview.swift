@@ -247,7 +247,7 @@ private final class MicrophoneLevelTap: @unchecked Sendable {
             throw MicCaptureError.cannotCreateTargetFormat
         }
 
-        input.installTap(onBus: 0, bufferSize: 2048, format: format) { [weak self] buffer, _ in
+        try MicCapture.installTapCatchingExceptions(on: input, bufferSize: 2048, format: format) { [weak self] buffer, _ in
             guard let self else { return }
             self.lock.lock()
             let volume = self.volume
