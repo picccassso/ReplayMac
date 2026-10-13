@@ -22,14 +22,12 @@ APPSTORE_FLAG=""
 # Mac needs a real x86_64 slice. Multi-arch builds land in
 # .build/apple/Products/Release rather than the per-arch directory.
 ARCH_FLAGS="--arch arm64 --arch x86_64"
-# SwiftPM can stamp the deployment target as the linked SDK version. Explicit
-# platform metadata opts into native Liquid Glass while retaining macOS 15.
+# SDK_VERSION is used by vtool to stamp linked platform metadata onto the binary
 SDK_VERSION="$(xcrun --sdk macosx --show-sdk-version)"
 if [ "${SDK_VERSION%%.*}" -lt 26 ]; then
   printf 'Xcode 26 or later with a macOS 26+ SDK is required.\n' >&2
   exit 1
 fi
-SDK_LINK_FLAGS="-Xlinker -platform_version -Xlinker macos -Xlinker 15.0 -Xlinker $SDK_VERSION -Xlinker -rpath -Xlinker @executable_path/../Frameworks"
 if [ "${1:-}" = "--appstore" ]; then
   APP_NAME="ReplayCap"
   APPSTORE_FLAG="-Xswiftc -DAPPSTORE"
@@ -71,7 +69,7 @@ fi
 
 # Build once so SPM generates resource bundle accessors
 # shellcheck disable=SC2086  # Build flag lists are intentionally word-split
-swift build -c release --package-path "$ROOT_DIR" $ARCH_FLAGS $APPSTORE_FLAG $SDK_LINK_FLAGS
+swift build -c release --package-path "$ROOT_DIR" $ARCH_FLAGS $APPSTORE_FLAG
 
 # Patch generated accessors to load bundles from Contents/Resources
 # instead of the app root, which avoids breaking code signing.
@@ -91,7 +89,7 @@ done
 
 # Rebuild so the patched accessors are compiled in
 # shellcheck disable=SC2086
-swift build -c release --package-path "$ROOT_DIR" $ARCH_FLAGS $APPSTORE_FLAG $SDK_LINK_FLAGS
+swift build -c release --package-path "$ROOT_DIR" $ARCH_FLAGS $APPSTORE_FLAG
 
 # ARCH_FLAGS must be repeated here: without them SwiftPM reports the per-arch
 # path and we would ship a thin binary out of a universal build.
@@ -111,6 +109,9 @@ if [ "$APP_NAME" != "ReplayCap" ]; then
 fi
 cp "$BIN_PATH" "$APP_DIR/Contents/MacOS/$APP_NAME"
 chmod +x "$APP_DIR/Contents/MacOS/$APP_NAME"
+
+# Explicit platform metadata opts into native Liquid Glass while retaining macOS 15
+vtool -set-build-version macos 15.0 "$SDK_VERSION" -replace -output "$APP_DIR/Contents/MacOS/$APP_NAME" "$APP_DIR/Contents/MacOS/$APP_NAME"
 
 if [ -f "$ICON_PATH" ]; then
   cp "$ICON_PATH" "$APP_DIR/Contents/Resources/${APP_NAME}.icns"
