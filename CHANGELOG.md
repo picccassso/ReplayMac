@@ -1,5 +1,11 @@
 # Changelog
 
+## 2.0.1
+
+### Fixes
+
+- Fix ReplayMac crashing immediately on launch on macOS 15 Sequoia with a "cannot be opened because of a problem" prompt. Standalone release builds now bundle the required Swift runtime compatibility library (`libswiftCompatibilitySpan.dylib`) into `Contents/Frameworks` and verify that all dynamic library paths resolve correctly.
+
 ## 2.0.0
 
 ### Companion app

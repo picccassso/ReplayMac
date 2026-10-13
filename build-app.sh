@@ -46,6 +46,18 @@ resolve_signing_identity() {
   local line
   while IFS= read -r line; do
     case "$line" in
+      *"Developer ID Application:"*)
+        local identity
+        identity="${line#*\"}"
+        identity="${identity%\"*}"
+        printf '%s\n' "$identity"
+        return
+        ;;
+    esac
+  done < <(security find-identity -v -p codesigning 2>/dev/null || true)
+
+  while IFS= read -r line; do
+    case "$line" in
       *"Apple Development:"*)
         local identity
         identity="${line#*\"}"
