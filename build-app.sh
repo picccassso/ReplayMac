@@ -125,12 +125,25 @@ fi
 while IFS= read -r rpath_to_delete; do
   if [ -n "$rpath_to_delete" ]; then
     printf 'Removing build toolchain rpath: %s\n' "$rpath_to_delete"
-    install_name_tool -delete_rpath "$rpath_to_delete" "$APP_DIR/Contents/MacOS/$APP_NAME" 2>/dev/null || true
+    install_name_tool -delete_rpath "$rpath_to_delete" "$APP_DIR/Contents/MacOS/$APP_NAME"
   fi
 done < <(otool -l "$APP_DIR/Contents/MacOS/$APP_NAME" | awk '/cmd LC_RPATH/{getline; getline; print $2}' | grep -E '/Applications/Xcode|/Developer|/Toolchains' | sort -u)
 
-# Embed required Swift compatibility libraries from the toolchain
-TOOLCHAIN_DIR="$(xcode-select -p)/Toolchains/XcodeDefault.xctoolchain"
+# Verify all toolchain rpaths were successfully removed
+remaining_toolchain_rpaths="$(otool -l "$APP_DIR/Contents/MacOS/$APP_NAME" | awk '/cmd LC_RPATH/{getline; getline; print $2}' | grep -E '/Applications/Xcode|/Developer|/Toolchains' || true)"
+if [ -n "$remaining_toolchain_rpaths" ]; then
+  printf 'Error: Failed to strip toolchain rpath(s) from binary:\n%s\n' "$remaining_toolchain_rpaths" >&2
+  exit 1
+fi
+
+# Embed required Swift compatibility libraries from the toolchain (respecting DEVELOPER_DIR)
+SWIFT_BIN="$(xcrun --find swift 2>/dev/null || true)"
+if [ -n "$SWIFT_BIN" ]; then
+  TOOLCHAIN_DIR="$(cd "$(dirname "$SWIFT_BIN")/../.." && pwd)"
+else
+  DEVELOPER_DIR_RESOLVED="${DEVELOPER_DIR:-$(xcode-select -p)}"
+  TOOLCHAIN_DIR="$DEVELOPER_DIR_RESOLVED/Toolchains/XcodeDefault.xctoolchain"
+fi
 while IFS= read -r rpath_lib; do
   if [ -n "$rpath_lib" ]; then
     lib_name="$(basename "$rpath_lib")"

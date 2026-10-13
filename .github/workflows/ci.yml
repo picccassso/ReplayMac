@@ -46,3 +46,6 @@ jobs:
 
       - name: Test
         run: swift test
+
+      - name: Build App Bundle
+        run: ./build-app.sh
