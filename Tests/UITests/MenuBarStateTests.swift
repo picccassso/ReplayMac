@@ -171,4 +171,16 @@ final class MenuBarStateTests: XCTestCase {
         let pastedURLs = NSPasteboard.general.readObjects(forClasses: [NSURL.self]) as? [URL]
         XCTAssertEqual(pastedURLs?.first?.standardizedFileURL, olderClip.standardizedFileURL)
     }
+
+    func testShowBufferNotRunningBrieflySetsStatusAndClearsOnStartRecording() {
+        let state = MenuBarState()
+        XCTAssertEqual(state.saveStatus, .idle)
+
+        state.showBufferNotRunningBriefly()
+        XCTAssertEqual(state.saveStatus, .bufferNotRunning)
+        XCTAssertEqual(state.saveStatusString, "failed")
+
+        state.setRecording(true)
+        XCTAssertEqual(state.saveStatus, .idle)
+    }
 }

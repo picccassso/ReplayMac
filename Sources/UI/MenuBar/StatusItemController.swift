@@ -490,6 +490,11 @@ private struct StatusBadgeView: View {
                     .foregroundStyle(AppTheme.success)
                 Text("Saved")
                     .foregroundStyle(AppTheme.success)
+            case .bufferNotRunning:
+                Image(systemName: "exclamationmark.circle.fill")
+                    .foregroundStyle(AppTheme.danger)
+                Text("Buffer Not Running")
+                    .foregroundStyle(AppTheme.danger)
             case .failed:
                 Image(systemName: "exclamationmark.circle.fill")
                     .foregroundStyle(AppTheme.danger)
@@ -554,7 +559,7 @@ private struct StatusBadgeView: View {
         switch state.saveStatus {
         case .saved:
             return AppTheme.success.opacity(0.12)
-        case .failed:
+        case .bufferNotRunning, .failed:
             return AppTheme.danger.opacity(0.12)
         case .saving:
             return AppTheme.accent.opacity(0.12)

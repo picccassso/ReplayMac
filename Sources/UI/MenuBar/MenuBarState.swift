@@ -5,6 +5,7 @@ public enum SaveStatus: Equatable {
     case idle
     case saving
     case saved
+    case bufferNotRunning
     case failed
 }
 
@@ -43,7 +44,7 @@ public final class MenuBarState: ObservableObject {
         case .idle: return "idle"
         case .saving: return "saving"
         case .saved: return "saved"
-        case .failed: return "failed"
+        case .bufferNotRunning, .failed: return "failed"
         }
     }
 
@@ -54,6 +55,11 @@ public final class MenuBarState: ObservableObject {
         } else if !isRecording {
             recordingStartedAt = nil
             recordingElapsedSeconds = 0
+        }
+        if isRecording && saveStatus == .bufferNotRunning {
+            saveStatusResetTask?.cancel()
+            saveStatus = .idle
+            onSaveStatusChanged?()
         }
         guard self.isRecording != isRecording else { return }
         self.isRecording = isRecording
@@ -136,6 +142,19 @@ public final class MenuBarState: ObservableObject {
     public func finishSaving(success: Bool) {
         saveStatusResetTask?.cancel()
         saveStatus = success ? .saved : .failed
+        onSaveStatusChanged?()
+
+        saveStatusResetTask = Task { @MainActor [weak self] in
+            try? await Task.sleep(for: .seconds(2))
+            guard !Task.isCancelled else { return }
+            self?.saveStatus = .idle
+            self?.onSaveStatusChanged?()
+        }
+    }
+
+    public func showBufferNotRunningBriefly() {
+        saveStatusResetTask?.cancel()
+        saveStatus = .bufferNotRunning
         onSaveStatusChanged?()
 
         saveStatusResetTask = Task { @MainActor [weak self] in

@@ -41,11 +41,6 @@ extension AppDelegate {
     }
 
     func saveConfiguredClip(lastSeconds: TimeInterval) async {
-        guard let outputDirectory = selectedOutputDirectoryOrNotify() else {
-            menuBarState.showSaveFailedBriefly()
-            return
-        }
-
         if let failure = SavePreflight.failure(
             isRecording: isCaptureRunning,
             bufferedSeconds: currentBufferedVideoSeconds(),
@@ -55,8 +50,17 @@ extension AppDelegate {
             if failure != .saveInProgress {
                 let message = SavePreflight.notificationMessage(for: failure)
                 NotificationManager.shared.showOperationalNotification(title: message.title, body: message.body)
-                menuBarState.showSaveFailedBriefly()
+                if failure == .notRecording || failure == .replayBufferUnavailable {
+                    menuBarState.showBufferNotRunningBriefly()
+                } else {
+                    menuBarState.showSaveFailedBriefly()
+                }
             }
+            return
+        }
+
+        guard let outputDirectory = selectedOutputDirectoryOrNotify() else {
+            menuBarState.showSaveFailedBriefly()
             return
         }
 
@@ -120,11 +124,6 @@ extension AppDelegate {
     }
 
     func saveConfiguredLongBufferClip(lastSeconds: TimeInterval) async {
-        guard let outputDirectory = selectedOutputDirectoryOrNotify() else {
-            menuBarState.showSaveFailedBriefly()
-            return
-        }
-
         guard AppSettings.longBufferEnabled else {
             NotificationManager.shared.showOperationalNotification(
                 title: "Long Buffer Disabled",
@@ -136,13 +135,18 @@ extension AppDelegate {
         guard isCaptureRunning else {
             let message = SavePreflight.notificationMessage(for: .notRecording)
             NotificationManager.shared.showOperationalNotification(title: message.title, body: message.body)
-            menuBarState.showSaveFailedBriefly()
+            menuBarState.showBufferNotRunningBriefly()
             return
         }
 
         guard replayBufferGate.isEnabled else {
             let message = SavePreflight.notificationMessage(for: .replayBufferUnavailable)
             NotificationManager.shared.showOperationalNotification(title: message.title, body: message.body)
+            menuBarState.showBufferNotRunningBriefly()
+            return
+        }
+
+        guard let outputDirectory = selectedOutputDirectoryOrNotify() else {
             menuBarState.showSaveFailedBriefly()
             return
         }
