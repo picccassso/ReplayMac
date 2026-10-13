@@ -29,7 +29,7 @@ if [ "${SDK_VERSION%%.*}" -lt 26 ]; then
   printf 'Xcode 26 or later with a macOS 26+ SDK is required.\n' >&2
   exit 1
 fi
-SDK_LINK_FLAGS="-Xlinker -platform_version -Xlinker macos -Xlinker 15.0 -Xlinker $SDK_VERSION"
+SDK_LINK_FLAGS="-Xlinker -platform_version -Xlinker macos -Xlinker 15.0 -Xlinker $SDK_VERSION -Xlinker -rpath -Xlinker @executable_path/../Frameworks"
 if [ "${1:-}" = "--appstore" ]; then
   APP_NAME="ReplayCap"
   APPSTORE_FLAG="-Xswiftc -DAPPSTORE"
@@ -100,7 +100,7 @@ BIN_DIR="$(swift build -c release --show-bin-path --package-path "$ROOT_DIR" $AR
 BIN_PATH="$BIN_DIR/$BIN_NAME"
 
 rm -rf "$APP_DIR"
-mkdir -p "$APP_DIR/Contents/MacOS" "$APP_DIR/Contents/Resources"
+mkdir -p "$APP_DIR/Contents/MacOS" "$APP_DIR/Contents/Resources" "$APP_DIR/Contents/Frameworks"
 
 cp "$INFO_PLIST" "$APP_DIR/Contents/Info.plist"
 # Rebrand the canonical (ReplayCap) plist for the direct build: bundle name,
@@ -116,6 +116,55 @@ if [ -f "$ICON_PATH" ]; then
   cp "$ICON_PATH" "$APP_DIR/Contents/Resources/${APP_NAME}.icns"
 fi
 
+# Ensure @executable_path/../Frameworks is in the binary rpath
+if ! otool -l "$APP_DIR/Contents/MacOS/$APP_NAME" | awk '/cmd LC_RPATH/{getline; getline; print $2}' | grep -F '@executable_path/../Frameworks' >/dev/null; then
+  install_name_tool -add_rpath "@executable_path/../Frameworks" "$APP_DIR/Contents/MacOS/$APP_NAME"
+fi
+
+# Strip baked-in Xcode toolchain rpaths so the binary never relies on a local Xcode install
+while IFS= read -r rpath_to_delete; do
+  if [ -n "$rpath_to_delete" ]; then
+    printf 'Removing build toolchain rpath: %s\n' "$rpath_to_delete"
+    install_name_tool -delete_rpath "$rpath_to_delete" "$APP_DIR/Contents/MacOS/$APP_NAME" 2>/dev/null || true
+  fi
+done < <(otool -l "$APP_DIR/Contents/MacOS/$APP_NAME" | awk '/cmd LC_RPATH/{getline; getline; print $2}' | grep -E '/Applications/Xcode|/Developer|/Toolchains' | sort -u)
+
+# Embed required Swift compatibility libraries from the toolchain
+TOOLCHAIN_DIR="$(xcode-select -p)/Toolchains/XcodeDefault.xctoolchain"
+while IFS= read -r rpath_lib; do
+  if [ -n "$rpath_lib" ]; then
+    lib_name="$(basename "$rpath_lib")"
+    compat_path="$(find "$TOOLCHAIN_DIR" -path "*/macosx/$lib_name" -print -quit)"
+    if [ -n "$compat_path" ] && [ -f "$compat_path" ]; then
+      printf 'Embedding Swift compatibility library: %s\n' "$lib_name"
+      cp "$compat_path" "$APP_DIR/Contents/Frameworks/$lib_name"
+      chmod 644 "$APP_DIR/Contents/Frameworks/$lib_name"
+    fi
+  fi
+done < <(otool -l "$APP_DIR/Contents/MacOS/$APP_NAME" | awk '/cmd LC_LOAD_DYLIB/{getline; getline; print $2}' | grep '^@rpath/' | sort -u)
+
+# Verify all required non-weak @rpath dependencies exist inside the bundle
+missing_dylibs=0
+while IFS= read -r required_rpath_lib; do
+  if [ -n "$required_rpath_lib" ]; then
+    lib_name="$(basename "$required_rpath_lib")"
+    if [ ! -f "$APP_DIR/Contents/Frameworks/$lib_name" ]; then
+      printf 'Error: Required dylib %s is missing from %s/Contents/Frameworks!\n' "$lib_name" "$APP_DIR" >&2
+      missing_dylibs=$((missing_dylibs + 1))
+    fi
+  fi
+done < <(otool -l "$APP_DIR/Contents/MacOS/$APP_NAME" | awk '/cmd LC_LOAD_DYLIB/{getline; getline; print $2}' | grep '^@rpath/' | sort -u)
+
+if [ "$missing_dylibs" -gt 0 ]; then
+  printf 'Build failed: %d required @rpath dylib(s) are missing from the app bundle.\n' "$missing_dylibs" >&2
+  exit 1
+fi
+
+# Clean up empty Frameworks directory if no libraries were needed
+if [ -d "$APP_DIR/Contents/Frameworks" ] && [ -z "$(ls -A "$APP_DIR/Contents/Frameworks")" ]; then
+  rmdir "$APP_DIR/Contents/Frameworks"
+fi
+
 # Copy SPM resource bundles into Contents/Resources so they are sealed by codesign
 for bundle in "$BIN_DIR"/*.bundle; do
   if [ -d "$bundle" ]; then
@@ -128,6 +177,16 @@ done
 HARDENING_FLAGS=""
 if [ "$SIGN_IDENTITY" != "-" ]; then
   HARDENING_FLAGS="--options runtime --timestamp"
+fi
+
+# Sign embedded frameworks first, from the inside out
+if [ -d "$APP_DIR/Contents/Frameworks" ]; then
+  for dylib in "$APP_DIR/Contents/Frameworks"/*.dylib; do
+    if [ -f "$dylib" ]; then
+      # shellcheck disable=SC2086
+      codesign --force $HARDENING_FLAGS --sign "$SIGN_IDENTITY" "$dylib"
+    fi
+  done
 fi
 
 # shellcheck disable=SC2086  # HARDENING_FLAGS intentionally word-splits
