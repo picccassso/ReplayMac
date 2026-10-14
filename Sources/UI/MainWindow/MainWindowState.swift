@@ -38,10 +38,28 @@ public enum MainWindowPage: String, CaseIterable, Identifiable {
     }
 }
 
-/// How the main window behaves at launch and when reopened without a specific
-/// destination, such as from the Dock. Set in Settings > General.
+/// Whether launching the app automatically opens the main window or keeps
+/// the app running quietly in the menu bar. Set in Settings > General.
+public enum MainWindowLaunchBehavior: String, CaseIterable, Identifiable {
+    case mainWindow, hidden
+    public var id: String { rawValue }
+    public var title: String {
+        switch self {
+        case .mainWindow: "Open Main Window"
+        case .hidden: "Hidden (Menu Bar Only)"
+        }
+    }
+    /// False when the app should launch quietly in the menu bar without opening the main window.
+    public var opensWindowOnLaunch: Bool {
+        self == .mainWindow
+    }
+}
+
+/// The page the main window shows when it opens without a specific
+/// destination, such as at launch, from the Dock, or via Open in the menu bar.
+/// Set in Settings > General.
 public enum MainWindowStartPage: String, CaseIterable, Identifiable {
-    case home, library, settings, lastViewed, hidden
+    case home, library, settings, lastViewed
     public var id: String { rawValue }
     public var title: String {
         switch self {
@@ -49,27 +67,23 @@ public enum MainWindowStartPage: String, CaseIterable, Identifiable {
         case .library: "Clip Library"
         case .settings: "Settings"
         case .lastViewed: "Last Viewed Page"
-        case .hidden: "Hidden (Menu Bar Only)"
         }
     }
     /// Nil restores whichever page was open last.
     var page: MainWindowPage? {
         switch self {
-        case .home, .hidden: .home
+        case .home: .home
         case .library: .library
         case .settings: .general
         case .lastViewed: nil
         }
-    }
-    /// False when the app should launch quietly in the menu bar without opening the main window.
-    public var opensWindowOnLaunch: Bool {
-        self != .hidden
     }
 }
 
 @MainActor
 public final class MainWindowState: ObservableObject {
     nonisolated public static let startPageKey = "mainWindowStartPage"
+    nonisolated public static let launchBehaviorKey = "mainWindowLaunchBehavior"
     @Published public private(set) var page: MainWindowPage
     /// Open Trim & Export sessions, one per clip, each shown in its own window.
     @Published private(set) var editors: [URL: ClipEditorSession] = [:]
@@ -97,6 +111,12 @@ public final class MainWindowState: ObservableObject {
 
     public init(defaults: UserDefaults = .standard) {
         self.defaults = defaults
+        if defaults.string(forKey: Self.startPageKey) == MainWindowLaunchBehavior.hidden.rawValue {
+            if defaults.string(forKey: Self.launchBehaviorKey) == nil {
+                defaults.set(MainWindowLaunchBehavior.hidden.rawValue, forKey: Self.launchBehaviorKey)
+            }
+            defaults.set(MainWindowStartPage.home.rawValue, forKey: Self.startPageKey)
+        }
         let startPage = MainWindowStartPage(rawValue: defaults.string(forKey: Self.startPageKey) ?? "") ?? .home
         let restoredPage = startPage.page
             ?? MainWindowPage(rawValue: defaults.string(forKey: "mainWindowPage") ?? "")
@@ -123,7 +143,7 @@ public final class MainWindowState: ObservableObject {
 
     /// Whether launching the app should automatically open the main window.
     public var opensWindowOnLaunch: Bool {
-        (MainWindowStartPage(rawValue: defaults.string(forKey: Self.startPageKey) ?? "") ?? .home).opensWindowOnLaunch
+        (MainWindowLaunchBehavior(rawValue: defaults.string(forKey: Self.launchBehaviorKey) ?? "") ?? .mainWindow).opensWindowOnLaunch
     }
     var isSettingsPage: Bool { SettingsTab(rawValue: page.rawValue) != nil }
 

@@ -64,10 +64,6 @@ final class MainWindowStateTests: XCTestCase {
             XCTAssertTrue(settingsState.hasVisitedSettings)
             XCTAssertEqual(state.startPageDestination, .general)
             XCTAssertTrue(state.opensWindowOnLaunch)
-            defaults.set(MainWindowStartPage.hidden.rawValue, forKey: MainWindowState.startPageKey)
-            XCTAssertEqual(MainWindowState(defaults: defaults).page, .home)
-            XCTAssertEqual(state.startPageDestination, .home)
-            XCTAssertFalse(state.opensWindowOnLaunch)
             defaults.set(MainWindowStartPage.lastViewed.rawValue, forKey: MainWindowState.startPageKey)
             state.select(.audio)
             XCTAssertEqual(MainWindowState(defaults: defaults).page, .audio)
@@ -76,6 +72,32 @@ final class MainWindowStateTests: XCTestCase {
             defaults.set("removed-choice", forKey: MainWindowState.startPageKey)
             XCTAssertEqual(state.startPageDestination, .home)
             XCTAssertTrue(state.opensWindowOnLaunch)
+        }
+    }
+
+    @MainActor
+    func testLaunchBehaviorIsIndependentOfStartPageAndMigratesLegacyHiddenStartPage() {
+        withState { state, defaults in
+            defaults.set(MainWindowLaunchBehavior.hidden.rawValue, forKey: MainWindowState.launchBehaviorKey)
+            defaults.set(MainWindowStartPage.library.rawValue, forKey: MainWindowState.startPageKey)
+            let hiddenLibraryState = MainWindowState(defaults: defaults)
+            XCTAssertFalse(hiddenLibraryState.opensWindowOnLaunch)
+            XCTAssertEqual(hiddenLibraryState.page, .library)
+            XCTAssertEqual(hiddenLibraryState.startPageDestination, .library)
+
+            defaults.set(MainWindowLaunchBehavior.mainWindow.rawValue, forKey: MainWindowState.launchBehaviorKey)
+            XCTAssertTrue(state.opensWindowOnLaunch)
+            defaults.set("removed-behavior", forKey: MainWindowState.launchBehaviorKey)
+            XCTAssertTrue(state.opensWindowOnLaunch)
+
+            // Legacy "hidden" in mainWindowStartPage migrates to mainWindowLaunchBehavior.
+            defaults.removeObject(forKey: MainWindowState.launchBehaviorKey)
+            defaults.set("hidden", forKey: MainWindowState.startPageKey)
+            let migratedState = MainWindowState(defaults: defaults)
+            XCTAssertFalse(migratedState.opensWindowOnLaunch)
+            XCTAssertEqual(migratedState.page, .home)
+            XCTAssertEqual(defaults.string(forKey: MainWindowState.launchBehaviorKey), MainWindowLaunchBehavior.hidden.rawValue)
+            XCTAssertEqual(defaults.string(forKey: MainWindowState.startPageKey), MainWindowStartPage.home.rawValue)
         }
     }
 

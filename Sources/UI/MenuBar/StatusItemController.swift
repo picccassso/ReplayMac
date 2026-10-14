@@ -189,6 +189,11 @@ public final class StatusItemController: NSObject, NSMenuDelegate, @unchecked Se
 
         menu.addItem(NSMenuItem.separator())
 
+        let openMainWindowItem = NSMenuItem(title: "Open \(AppBranding.name)", action: #selector(openMainWindow), keyEquivalent: "")
+        openMainWindowItem.target = self
+        openMainWindowItem.image = NSImage(systemSymbolName: "macwindow", accessibilityDescription: "Open \(AppBranding.name)")
+        menu.addItem(openMainWindowItem)
+
         let libraryItem = NSMenuItem(title: "Clip Library", action: #selector(openClipLibrary), keyEquivalent: "")
         libraryItem.target = self
         libraryItem.image = NSImage(systemSymbolName: "film.stack", accessibilityDescription: "Clip Library")
@@ -544,6 +549,10 @@ public final class StatusItemController: NSObject, NSMenuDelegate, @unchecked Se
 
             self.onOpenMainWindow?()
         }
+    }
+
+    @objc private func openMainWindow() {
+        onOpenMainWindow?()
     }
 
     @objc private func openClipLibrary() {
