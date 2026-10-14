@@ -85,7 +85,9 @@ public struct ClipLibraryView: View {
         }
         .sheet(isPresented: previewSheetBinding) {
             if let previewURL = state.previewURL {
-                ClipPreviewView(url: previewURL)
+                ClipPreviewView(url: previewURL) {
+                    state.previewURL = nil
+                }
             }
         }
         .sheet(isPresented: $state.cleanupSheetPresented) {
@@ -1299,6 +1301,7 @@ private struct AudioTrackPickerView: View {
 
 private struct ClipPreviewView: View {
     let url: URL
+    var onClose: () -> Void = {}
     @State private var player: AVPlayer?
     @State private var audioTrackChoices: [AudioTrackChoice] = []
     @State private var selectedAudioTrackID = AudioTrackChoice.allTracksID
@@ -1329,6 +1332,14 @@ private struct ClipPreviewView: View {
                 .lineLimit(1)
         }
         .padding(16)
+        .background(
+            SheetOutsideClickMonitor {
+                onClose()
+            }
+        )
+        .onExitCommand {
+            onClose()
+        }
         .task {
             await loadPlayer()
         }
@@ -1349,6 +1360,73 @@ private struct ClipPreviewView: View {
         ClipAudioTracks.apply(selection: selectedAudioTrackID, choices: audioTrackChoices, to: newPlayer.currentItem)
         newPlayer.play()
         player = newPlayer
+    }
+}
+
+private struct SheetOutsideClickMonitor: NSViewRepresentable {
+    var onOutsideClick: () -> Void
+
+    func makeNSView(context: Context) -> OutsideClickMonitorView {
+        let view = OutsideClickMonitorView()
+        view.onOutsideClick = onOutsideClick
+        return view
+    }
+
+    func updateNSView(_ nsView: OutsideClickMonitorView, context: Context) {
+        nsView.onOutsideClick = onOutsideClick
+    }
+}
+
+private final class OutsideClickMonitorView: NSView {
+    var onOutsideClick: (() -> Void)?
+    nonisolated(unsafe) private var monitor: Any?
+
+    override func viewDidMoveToWindow() {
+        super.viewDidMoveToWindow()
+        if window != nil {
+            installMonitorIfNeeded()
+        } else {
+            removeMonitor()
+        }
+    }
+
+    private func installMonitorIfNeeded() {
+        guard monitor == nil else { return }
+        monitor = NSEvent.addLocalMonitorForEvents(matching: [.leftMouseDown, .rightMouseDown, .otherMouseDown]) { [weak self] event in
+            guard let self,
+                  let sheetWindow = self.window,
+                  let parentWindow = sheetWindow.sheetParent else {
+                return event
+            }
+            if let eventWindow = event.window,
+               eventWindow !== sheetWindow,
+               eventWindow !== parentWindow {
+                return event
+            }
+            let screenPoint = NSEvent.mouseLocation
+            if !sheetWindow.frame.contains(screenPoint),
+               parentWindow.frame.contains(screenPoint) {
+                self.removeMonitor()
+                DispatchQueue.main.async { [weak self] in
+                    self?.onOutsideClick?()
+                }
+                return nil
+            }
+            return event
+        }
+    }
+
+    private func removeMonitor() {
+        if let monitor {
+            NSEvent.removeMonitor(monitor)
+            self.monitor = nil
+        }
+    }
+
+    deinit {
+        if let monitor {
+            NSEvent.removeMonitor(monitor)
+        }
     }
 }
 
