@@ -38,9 +38,14 @@ fi
 APP_DIR="${REPLAYMAC_BUILD_OUTPUT_DIR:-$ROOT_DIR/dist}/${APP_NAME}.app"
 SCRATCH_DIR="${REPLAYMAC_SCRATCH_PATH:-$ROOT_DIR/.build}"
 if [ -z "${REPLAYMAC_SCRATCH_PATH:-}" ] && [ -d "$SCRATCH_DIR" ] && [ -n "$(find "$SCRATCH_DIR" ! -user "$(id -u)" -print -quit 2>/dev/null)" ]; then
-  SCRATCH_DIR="$ROOT_DIR/.build-user"
+  SCRATCH_DIR="$ROOT_DIR/.build-uid-$(id -u)"
 fi
 SCRATCH_FLAGS="--scratch-path $SCRATCH_DIR"
+
+# If run under sudo, restore user ownership on exit so future non-sudo builds never hit permission errors.
+if [ "$(id -u)" -eq 0 ] && [ -n "${SUDO_UID:-}" ]; then
+  trap 'chown -R "${SUDO_UID}:${SUDO_GID:-20}" "$ROOT_DIR/.build"* "$ROOT_DIR/dist" 2>/dev/null || true' EXIT
+fi
 
 resolve_signing_identity() {
   if [ -n "${SIGNING_IDENTITY:-}" ]; then

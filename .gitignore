@@ -4,6 +4,7 @@
 # Swift Package Manager build artifacts
 .build/
 .build-user/
+.build-uid-*/
 .swiftpm/
 
 # Xcode user/build files
