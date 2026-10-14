@@ -35,6 +35,7 @@ public struct SettingsView: View {
     @Default(.excludeOwnAppAudio) var excludeOwnAppAudio
     @Default(.perAppAudioEnabled) var perAppAudioEnabled
     @Default(.perAppAudioBundleID) var perAppAudioBundleID
+    @Default(.mutedAudioAppBundleIDs) var mutedAudioAppBundleIDs
     @Default(.systemAudioVolume) var systemAudioVolume
     @Default(.microphoneVolume) var microphoneVolume
     @Default(.isSystemAudioMuted) var isSystemAudioMuted

@@ -1,3 +1,4 @@
+import AppKit
 import Capture
 import Foundation
 import Branding
@@ -297,6 +298,105 @@ public enum AppSettings {
     public static var microphoneID: String { Defaults[.microphoneID] }
     public static var perAppAudioEnabled: Bool { Defaults[.perAppAudioEnabled] }
     public static var perAppAudioBundleID: String { Defaults[.perAppAudioBundleID] }
+    public static var mutedAudioAppBundleIDs: [String] { Defaults[.mutedAudioAppBundleIDs] }
+
+    public static func isAppAudioMuted(_ bundleID: String) -> Bool {
+        let trimmed = bundleID.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return false }
+        return Defaults[.mutedAudioAppBundleIDs].contains {
+            $0.caseInsensitiveCompare(trimmed) == .orderedSame
+        }
+    }
+
+    public static func muteAudioApp(_ bundleID: String) {
+        let trimmed = bundleID.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty, !isAppAudioMuted(trimmed) else { return }
+        Defaults[.mutedAudioAppBundleIDs].append(trimmed)
+    }
+
+    public static func unmuteAudioApp(_ bundleID: String) {
+        let trimmed = bundleID.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return }
+        Defaults[.mutedAudioAppBundleIDs].removeAll {
+            $0.caseInsensitiveCompare(trimmed) == .orderedSame
+        }
+    }
+
+    public static func toggleAudioAppMute(_ bundleID: String) {
+        if isAppAudioMuted(bundleID) {
+            unmuteAudioApp(bundleID)
+        } else {
+            muteAudioApp(bundleID)
+        }
+    }
+
+    public static func unmuteAllAudioApps() {
+        guard !Defaults[.mutedAudioAppBundleIDs].isEmpty else { return }
+        Defaults[.mutedAudioAppBundleIDs] = []
+    }
+
+    /// Running user applications (excluding this app itself), sorted alphabetically.
+    public static func capturableRunningApplications(excluding excludedBundleIDs: [String] = []) -> [AudioApplicationOption] {
+        let excludedLowercased = Set(excludedBundleIDs.map { $0.lowercased() })
+        let ownID = Bundle.main.bundleIdentifier?.lowercased()
+        var seen = Set<String>()
+        return NSWorkspace.shared.runningApplications
+            .filter { $0.activationPolicy == .regular }
+            .compactMap { app -> AudioApplicationOption? in
+                guard let bundleID = app.bundleIdentifier, !bundleID.isEmpty else { return nil }
+                let lower = bundleID.lowercased()
+                guard lower != ownID,
+                      !excludedLowercased.contains(lower),
+                      seen.insert(lower).inserted else {
+                    return nil
+                }
+                return AudioApplicationOption(bundleID: bundleID, name: app.localizedName ?? bundleID)
+            }
+            .sorted { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending }
+    }
+
+    public static func isApplicationRunning(_ bundleID: String) -> Bool {
+        let trimmed = bundleID.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return false }
+        return NSWorkspace.shared.runningApplications.contains {
+            $0.bundleIdentifier?.caseInsensitiveCompare(trimmed) == .orderedSame
+        }
+    }
+
+    public static func appDisplayName(for bundleID: String) -> String {
+        if let running = NSWorkspace.shared.runningApplications.first(where: {
+            $0.bundleIdentifier?.caseInsensitiveCompare(bundleID) == .orderedSame
+        }), let name = running.localizedName, !name.isEmpty {
+            return name
+        }
+        if let url = NSWorkspace.shared.urlForApplication(withBundleIdentifier: bundleID),
+           let bundle = Bundle(url: url) {
+            if let name = bundle.object(forInfoDictionaryKey: "CFBundleDisplayName") as? String, !name.isEmpty {
+                return name
+            }
+            if let name = bundle.object(forInfoDictionaryKey: "CFBundleName") as? String, !name.isEmpty {
+                return name
+            }
+            return url.deletingPathExtension().lastPathComponent
+        }
+        if let preset = GameAutoRecordPresets.defaultExclusionPresets.first(where: { $0.bundleIDs.contains(bundleID) }) {
+            return preset.name
+        }
+        return bundleID
+    }
+
+    public static func appIcon(for bundleID: String) -> NSImage? {
+        if let running = NSWorkspace.shared.runningApplications.first(where: {
+            $0.bundleIdentifier?.caseInsensitiveCompare(bundleID) == .orderedSame
+        }), let icon = running.icon {
+            return icon
+        }
+        if let url = NSWorkspace.shared.urlForApplication(withBundleIdentifier: bundleID) {
+            return NSWorkspace.shared.icon(forFile: url.path)
+        }
+        return nil
+    }
+
     public static var longBufferEnabled: Bool { Defaults[.longBufferEnabled] }
     public static var longBufferDurationMinutes: Int { Defaults[.longBufferDurationMinutes] }
     public static var longBufferDurationSeconds: Int {
@@ -416,6 +516,7 @@ public extension Defaults.Keys {
     static let excludeOwnAppAudio = Key<Bool>("excludeOwnAppAudio", default: true)
     static let perAppAudioEnabled = Key<Bool>("perAppAudioEnabled", default: false)
     static let perAppAudioBundleID = Key<String>("perAppAudioBundleID", default: "")
+    static let mutedAudioAppBundleIDs = Key<[String]>("mutedAudioAppBundleIDs", default: [])
 
     static let memoryCapMB = Key<Double>("memoryCapMB", default: 1536)
     static let queueDepth = Key<Int>("queueDepth", default: 5)

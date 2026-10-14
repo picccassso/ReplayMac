@@ -87,6 +87,7 @@ extension AppDelegate {
             dualDisplay2VideoRingBuffer.clear()
             systemAudioRingBuffer.clear()
             micAudioRingBuffer.clear()
+            systemAudioCapture.reset()
             AudioLevelMonitor.shared.reset()
             applyEffectiveAudioVolumes()
             syncAudioMuteStateToUI()
@@ -107,14 +108,19 @@ extension AppDelegate {
                 let queueDepth = AppSettings.queueDepth
                 let excludeOwn = AppSettings.excludeOwnAppAudio
                 var captureSystemAudioForSession = AppSettings.captureSystemAudio
-                var usePerAppAudio = captureSystemAudioForSession
+                let useSelectedAppAudio = captureSystemAudioForSession
                     && AppSettings.perAppAudioEnabled
                     && !AppSettings.perAppAudioBundleID.isEmpty
+                let mutedBundleIDs = AppSettings.mutedAudioAppBundleIDs
+                let useExcludedAppsAudio = captureSystemAudioForSession
+                    && !AppSettings.perAppAudioEnabled
+                    && !mutedBundleIDs.isEmpty
+                var useFilteredSystemAudio = useSelectedAppAudio || useExcludedAppsAudio
 
-                if usePerAppAudio {
+                if useSelectedAppAudio {
                     do {
                         try await perAppAudioCapture.start(
-                            bundleID: AppSettings.perAppAudioBundleID,
+                            mode: .includeOnly(bundleID: AppSettings.perAppAudioBundleID),
                             excludeOwnAppAudio: excludeOwn
                         )
                     } catch {
@@ -122,11 +128,21 @@ extension AppDelegate {
                             title: "Per-App Audio Unavailable",
                             body: "No system audio will be captured for this session. \(error.localizedDescription)"
                         )
-                        usePerAppAudio = false
+                        useFilteredSystemAudio = false
                         captureSystemAudioForSession = false
                     }
+                } else if useExcludedAppsAudio {
+                    do {
+                        try await perAppAudioCapture.start(
+                            mode: .exclude(bundleIDs: mutedBundleIDs),
+                            excludeOwnAppAudio: excludeOwn
+                        )
+                    } catch {
+                        // Fall back to main stream system audio if the filtered stream fails to start.
+                        useFilteredSystemAudio = false
+                    }
                 }
-                let captureMainSystemAudio = captureSystemAudioForSession && !usePerAppAudio
+                let captureMainSystemAudio = captureSystemAudioForSession && !useFilteredSystemAudio
                 isCapturingMainSystemAudio = captureMainSystemAudio
 
             if isDual {
@@ -305,6 +321,8 @@ extension AppDelegate {
 
     func cleanupAfterFailedCaptureStart() async {
         isCapturingMainSystemAudio = false
+        workspaceAudioFilterRefreshTask?.cancel()
+        workspaceAudioFilterRefreshTask = nil
         menuBarState.setCapturedDisplay(name: nil, isFallback: false)
         await captureManager.stop()
         await perAppAudioCapture.stop()
@@ -316,6 +334,7 @@ extension AppDelegate {
         dualDisplay2VideoEncoder.stop()
         systemAudioEncoder.stop()
         micAudioEncoder.stop()
+        systemAudioCapture.reset()
         frameCompositor.reset()
         AudioLevelMonitor.shared.reset()
         AudioLevelPreview.shared.setCaptureActive(false)
@@ -405,6 +424,8 @@ extension AppDelegate {
 
         monitoringTask?.cancel()
         monitoringTask = nil
+        workspaceAudioFilterRefreshTask?.cancel()
+        workspaceAudioFilterRefreshTask = nil
 
         // Finalize session to a real file before tearing capture down. On a
         // recoverable interruption we discard instead so resume starts clean.
@@ -438,6 +459,7 @@ extension AppDelegate {
         dualDisplay2VideoEncoder.stop()
         systemAudioEncoder.stop()
         micAudioEncoder.stop()
+        systemAudioCapture.reset()
         frameCompositor.reset()
         AudioLevelMonitor.shared.reset()
 

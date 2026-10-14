@@ -60,6 +60,42 @@ extension AppDelegate {
             name: NSWorkspace.sessionDidBecomeActiveNotification,
             object: nil
         )
+        workspaceCenter.addObserver(
+            self,
+            selector: #selector(workspaceApplicationLifecycleDidChange(_:)),
+            name: NSWorkspace.didLaunchApplicationNotification,
+            object: nil
+        )
+        workspaceCenter.addObserver(
+            self,
+            selector: #selector(workspaceApplicationLifecycleDidChange(_:)),
+            name: NSWorkspace.didTerminateApplicationNotification,
+            object: nil
+        )
+    }
+
+    @objc private func workspaceApplicationLifecycleDidChange(_ notification: Notification) {
+        statusItemController.refreshPresentation()
+        guard isCaptureRunning else { return }
+        guard perAppAudioCapture.isRunning
+            || (AppSettings.captureSystemAudio && (AppSettings.perAppAudioEnabled || !AppSettings.mutedAudioAppBundleIDs.isEmpty)) else {
+            return
+        }
+
+        workspaceAudioFilterRefreshTask?.cancel()
+        workspaceAudioFilterRefreshTask = Task { @MainActor [weak self] in
+            guard let self else { return }
+            if self.perAppAudioCapture.isRunning {
+                await self.perAppAudioCapture.refreshFilterIfNeeded()
+                try? await Task.sleep(for: .milliseconds(700))
+                guard !Task.isCancelled, self.isCaptureRunning else { return }
+                await self.perAppAudioCapture.refreshFilterIfNeeded()
+            } else {
+                try? await Task.sleep(for: .milliseconds(700))
+                guard !Task.isCancelled, self.isCaptureRunning else { return }
+                await self.applySystemAudioSettingIfNeeded()
+            }
+        }
     }
 
     func setupDisplayObservers() {

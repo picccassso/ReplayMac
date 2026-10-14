@@ -79,6 +79,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, @unchecked Sendable {
     var captureRecoveryAttempts = 0
     var captureRecoveryTask: Task<Void, Never>?
     var displayReconfigurationTask: Task<Void, Never>?
+    var workspaceAudioFilterRefreshTask: Task<Void, Never>?
     var monitoringTask: Task<Void, Never>?
     let mainWindowState = MainWindowState()
     weak var mainWindow: NSWindow?
@@ -213,6 +214,9 @@ class AppDelegate: NSObject, NSApplicationDelegate, @unchecked Sendable {
         statusItemController.onOpenSettings = { [weak self] in
             self?.openSettingsWindow()
         }
+        statusItemController.onOpenAudioSettings = { [weak self] in
+            self?.openMainWindow(page: .audio)
+        }
         mainWindowState.controls = ReplayControls(
             saveReplay: { [weak self] in self?.saveClipFromUI() },
             saveExtendedReplay: { [weak self] in self?.saveLongBufferFromUI() },
@@ -285,6 +289,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, @unchecked Sendable {
         settingsReconcileTask?.cancel()
         captureRecoveryTask?.cancel()
         displayReconfigurationTask?.cancel()
+        workspaceAudioFilterRefreshTask?.cancel()
         if !isTerminatingAfterSessionSave {
             stopCapturePipeline()
         }

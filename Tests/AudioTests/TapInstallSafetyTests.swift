@@ -39,4 +39,30 @@ final class TapInstallSafetyTests: XCTestCase {
             }
         }
     }
+
+    func testMatchesBundleIDExactAndChildHelperProcesses() {
+        XCTAssertTrue(PerAppAudioCapture.matchesBundleID("com.spotify.client", target: "com.spotify.client"))
+        XCTAssertTrue(PerAppAudioCapture.matchesBundleID("COM.SPOTIFY.CLIENT", target: "com.spotify.client"))
+        XCTAssertTrue(PerAppAudioCapture.matchesBundleID("com.hnc.Discord.helper", target: "com.hnc.Discord"))
+        XCTAssertTrue(PerAppAudioCapture.matchesBundleID("com.hnc.Discord.helper.Renderer", target: "com.hnc.Discord"))
+
+        // Sibling bundle IDs without a dot boundary must not match.
+        XCTAssertFalse(PerAppAudioCapture.matchesBundleID("com.apple.FinalCutTrial", target: "com.apple.FinalCut"))
+        XCTAssertFalse(PerAppAudioCapture.matchesBundleID("com.apple.Safari", target: "com.spotify.client"))
+        XCTAssertFalse(PerAppAudioCapture.matchesBundleID("", target: "com.spotify.client"))
+        XCTAssertFalse(PerAppAudioCapture.matchesBundleID("com.spotify.client", target: ""))
+
+        XCTAssertTrue(
+            PerAppAudioCapture.matchesAnyBundleID(
+                "com.google.Chrome.helper",
+                in: ["com.spotify.client", "com.google.Chrome"]
+            )
+        )
+        XCTAssertFalse(
+            PerAppAudioCapture.matchesAnyBundleID(
+                "com.apple.Music",
+                in: ["com.spotify.client", "com.google.Chrome"]
+            )
+        )
+    }
 }

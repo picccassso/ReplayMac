@@ -56,6 +56,8 @@ extension SettingsView {
                     Label(selectedAppAudioHelpText, systemImage: "info.circle")
                         .foregroundStyle(AppTheme.textSecondary)
                         .font(.system(size: 12, design: .rounded))
+                } else if systemAudioModeBinding.wrappedValue == .allApps {
+                    mutedApplicationsSubSection
                 }
 
                 Toggle("Capture microphone", isOn: $captureMicrophone)
@@ -167,12 +169,110 @@ extension SettingsView {
         .onChange(of: captureMicrophone) { _, _ in refreshAudioLevelPreview() }
         .onChange(of: perAppAudioEnabled) { _, _ in refreshAudioLevelPreview() }
         .onChange(of: perAppAudioBundleID) { _, _ in refreshAudioLevelPreview() }
+        .onChange(of: mutedAudioAppBundleIDs) { _, _ in refreshAudioLevelPreview() }
         .onChange(of: excludeOwnAppAudio) { _, _ in refreshAudioLevelPreview() }
         .onChange(of: microphoneID) { _, _ in refreshAudioLevelPreview() }
         .onChange(of: systemAudioVolume) { _, _ in refreshAudioLevelPreview() }
         .onChange(of: microphoneVolume) { _, _ in refreshAudioLevelPreview() }
         .onChange(of: isSystemAudioMuted) { _, _ in refreshAudioLevelPreview() }
         .onChange(of: isMicrophoneMuted) { _, _ in refreshAudioLevelPreview() }
+    }
+
+    private var mutedApplicationsSubSection: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(spacing: 10) {
+                Text("Muted Applications")
+                    .font(.subheadline.weight(.medium))
+                Spacer()
+                if !mutedAudioAppBundleIDs.isEmpty {
+                    Button("Unmute All") {
+                        AppSettings.unmuteAllAudioApps()
+                    }
+                    .buttonStyle(.link)
+                    .font(.caption)
+                }
+                Menu {
+                    let running = addableMutedAudioApps()
+                    if !running.isEmpty {
+                        Section("Running Applications") {
+                            ForEach(running) { app in
+                                Button(app.name) {
+                                    AppSettings.muteAudioApp(app.bundleID)
+                                }
+                            }
+                        }
+                    }
+                    Section {
+                        Button("Choose Application from Disk…") {
+                            promptToChooseApp { bundleID in
+                                AppSettings.muteAudioApp(bundleID)
+                            }
+                        }
+                    }
+                } label: {
+                    Label("Mute App…", systemImage: "plus")
+                }
+            }
+
+            if mutedAudioAppBundleIDs.isEmpty {
+                Text("No applications muted. Muted apps stay visible on screen, but their audio is left out of replays and session recordings.")
+                    .font(.caption)
+                    .foregroundStyle(AppTheme.textSecondary)
+            } else {
+                ForEach(mutedAudioAppBundleIDs, id: \.self) { bundleID in
+                    HStack(spacing: 8) {
+                        if let icon = AppSettings.appIcon(for: bundleID) {
+                            Image(nsImage: icon)
+                                .resizable()
+                                .aspectRatio(contentMode: .fit)
+                                .frame(width: 16, height: 16)
+                        }
+                        Image(systemName: "speaker.slash.fill")
+                            .font(.system(size: 11, weight: .semibold))
+                            .foregroundStyle(AppTheme.danger)
+                        Text(AppSettings.appDisplayName(for: bundleID))
+                            .lineLimit(1)
+                            .truncationMode(.middle)
+                        if !AppSettings.isApplicationRunning(bundleID) {
+                            Text("Not running")
+                                .font(.caption2)
+                                .foregroundStyle(AppTheme.textSecondary)
+                                .padding(.horizontal, 6)
+                                .padding(.vertical, 2)
+                                .background(
+                                    Capsule()
+                                        .fill(AppTheme.textSecondary.opacity(0.14))
+                                )
+                        }
+                        Spacer()
+                        Button {
+                            AppSettings.unmuteAudioApp(bundleID)
+                        } label: {
+                            Image(systemName: "minus.circle.fill")
+                                .foregroundStyle(AppTheme.textSecondary)
+                        }
+                        .buttonStyle(.plain)
+                        .help("Unmute \(AppSettings.appDisplayName(for: bundleID))")
+                    }
+                }
+            }
+        }
+        .padding(.vertical, 4)
+    }
+
+    private func addableMutedAudioApps() -> [AudioApplicationOption] {
+        var combined = AppSettings.capturableRunningApplications(excluding: mutedAudioAppBundleIDs)
+        var seen = Set(combined.map { $0.bundleID.lowercased() })
+        let mutedSet = Set(mutedAudioAppBundleIDs.map { $0.lowercased() })
+        let ownID = Bundle.main.bundleIdentifier?.lowercased()
+
+        for app in audioApplications {
+            let lower = app.bundleID.lowercased()
+            if lower != ownID, !mutedSet.contains(lower), seen.insert(lower).inserted {
+                combined.append(app)
+            }
+        }
+        return combined.sorted { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending }
     }
 
     func refreshAudioLevelPreview() {
@@ -187,6 +287,7 @@ extension SettingsView {
                 monitorMicrophone: captureMicrophone,
                 microphoneDeviceID: microphoneID,
                 perAppAudioBundleID: perAppAudioEnabled && !perAppAudioBundleID.isEmpty ? perAppAudioBundleID : nil,
+                excludedAudioBundleIDs: !perAppAudioEnabled ? mutedAudioAppBundleIDs : [],
                 excludeOwnAppAudio: excludeOwnAppAudio,
                 systemAudioVolume: AppSettings.effectiveSystemAudioVolume(
                     volume: systemAudioVolume,

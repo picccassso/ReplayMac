@@ -172,7 +172,7 @@ extension SettingsView {
 
     func loadAudioApplications() async {
         do {
-            let shareableContent = try await SCShareableContent.excludingDesktopWindows(false, onScreenWindowsOnly: true)
+            let shareableContent = try await SCShareableContent.excludingDesktopWindows(false, onScreenWindowsOnly: false)
             await MainActor.run {
                 updateAudioApplications(from: shareableContent.applications)
             }
@@ -185,10 +185,15 @@ extension SettingsView {
 
     func updateAudioApplications(from applications: [SCRunningApplication]) {
         let currentSelection = perAppAudioBundleID
+        let ownBundleID = Bundle.main.bundleIdentifier?.lowercased()
+        var seen = Set<String>()
         audioApplications = applications
             .compactMap { app in
                 let bundleID = app.bundleIdentifier
-                guard !bundleID.isEmpty else {
+                let lower = bundleID.lowercased()
+                guard !bundleID.isEmpty,
+                      lower != ownBundleID,
+                      seen.insert(lower).inserted else {
                     return nil
                 }
                 return AudioApplicationOption(

@@ -66,6 +66,7 @@ public actor CaptureManager {
     public private(set) var isUsingFallbackDisplay2: Bool = false
 
     private var isDualMode = false
+    private var hasAudioStreamOutput = false
     private var userInitiatedStop = false
 
     private var interruptionHandler: (@Sendable (CaptureInterruption) -> Void)?
@@ -193,6 +194,103 @@ public actor CaptureManager {
 
         self.dualConfiguration1 = config1
         self.dualConfiguration2 = config2
+    }
+
+    public func updateAudioCapture(
+        captureAudio: Bool,
+        excludeOwnAppAudio: Bool
+    ) async throws {
+        if isDualMode {
+            guard let activeStream1 = stream1,
+                  let activeStream2 = stream2,
+                  let currentConfig1 = dualConfiguration1,
+                  let currentConfig2 = dualConfiguration2 else {
+                throw CaptureRestartError.missingConfiguration
+            }
+
+            delegate1.setAcceptsAudio(captureAudio)
+            if captureAudio && !hasAudioStreamOutput {
+                try? activeStream1.addStreamOutput(delegate1, type: .audio, sampleHandlerQueue: audioQueue)
+                hasAudioStreamOutput = true
+            } else if !captureAudio && hasAudioStreamOutput {
+                try? activeStream1.removeStreamOutput(delegate1, type: .audio)
+                hasAudioStreamOutput = false
+            }
+
+            let config1 = SCStreamConfiguration()
+            config1.width = currentConfig1.width
+            config1.height = currentConfig1.height
+            config1.minimumFrameInterval = currentConfig1.minimumFrameInterval
+            config1.queueDepth = currentConfig1.queueDepth
+            Self.copyColorConfiguration(from: currentConfig1, to: config1)
+            config1.capturesAudio = captureAudio
+            config1.excludesCurrentProcessAudio = excludeOwnAppAudio
+
+            let config2 = SCStreamConfiguration()
+            config2.width = currentConfig2.width
+            config2.height = currentConfig2.height
+            config2.minimumFrameInterval = currentConfig2.minimumFrameInterval
+            config2.queueDepth = currentConfig2.queueDepth
+            Self.copyColorConfiguration(from: currentConfig2, to: config2)
+            config2.capturesAudio = false
+            config2.excludesCurrentProcessAudio = excludeOwnAppAudio
+
+            try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
+                activeStream1.updateConfiguration(config1) { error in
+                    if let error {
+                        continuation.resume(throwing: error)
+                    } else {
+                        continuation.resume()
+                    }
+                }
+            }
+            try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
+                activeStream2.updateConfiguration(config2) { error in
+                    if let error {
+                        continuation.resume(throwing: error)
+                    } else {
+                        continuation.resume()
+                    }
+                }
+            }
+
+            self.dualConfiguration1 = config1
+            self.dualConfiguration2 = config2
+        } else {
+            guard let activeStream = stream, let currentConfig = currentConfiguration else {
+                throw CaptureRestartError.missingConfiguration
+            }
+
+            delegate.setAcceptsAudio(captureAudio)
+            if captureAudio && !hasAudioStreamOutput {
+                try? activeStream.addStreamOutput(delegate, type: .audio, sampleHandlerQueue: audioQueue)
+                hasAudioStreamOutput = true
+            } else if !captureAudio && hasAudioStreamOutput {
+                try? activeStream.removeStreamOutput(delegate, type: .audio)
+                hasAudioStreamOutput = false
+            }
+
+            let config = SCStreamConfiguration()
+            config.width = currentConfig.width
+            config.height = currentConfig.height
+            config.minimumFrameInterval = currentConfig.minimumFrameInterval
+            config.queueDepth = currentConfig.queueDepth
+            Self.copyColorConfiguration(from: currentConfig, to: config)
+            config.capturesAudio = captureAudio
+            config.excludesCurrentProcessAudio = excludeOwnAppAudio
+
+            try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
+                activeStream.updateConfiguration(config) { error in
+                    if let error {
+                        continuation.resume(throwing: error)
+                    } else {
+                        continuation.resume()
+                    }
+                }
+            }
+
+            self.currentConfiguration = config
+        }
     }
 
     // MARK: - Single-display handlers (backward compatible)
@@ -324,6 +422,7 @@ public actor CaptureManager {
         config.capturesAudio = captureAudio
         config.excludesCurrentProcessAudio = excludeOwnAppAudio
 
+        delegate.setAcceptsAudio(captureAudio)
         let newStream = SCStream(filter: filter, configuration: config, delegate: delegate)
         try newStream.addStreamOutput(delegate, type: .screen, sampleHandlerQueue: videoQueue)
         if captureAudio {
@@ -333,6 +432,7 @@ public actor CaptureManager {
 
         userInitiatedStop = false
         isDualMode = false
+        hasAudioStreamOutput = captureAudio
         currentFilter = filter
         currentConfiguration = config
         self.stream = newStream
@@ -437,6 +537,8 @@ public actor CaptureManager {
         config2.capturesAudio = false
         config2.excludesCurrentProcessAudio = excludeOwnAppAudio
 
+        delegate1.setAcceptsAudio(captureAudio)
+        delegate2.setAcceptsAudio(false)
         let newStream1 = SCStream(filter: filter1, configuration: config1, delegate: delegate1)
         try newStream1.addStreamOutput(delegate1, type: .screen, sampleHandlerQueue: videoQueue)
         if captureAudio {
@@ -450,6 +552,7 @@ public actor CaptureManager {
 
         userInitiatedStop = false
         isDualMode = true
+        hasAudioStreamOutput = captureAudio
         dualFilter1 = filter1
         dualFilter2 = filter2
         dualConfiguration1 = config1
@@ -515,6 +618,7 @@ public actor CaptureManager {
         }
 
         isDualMode = false
+        hasAudioStreamOutput = false
         userInitiatedStop = false
         capturedDisplayID = nil
         capturedDisplayID1 = nil

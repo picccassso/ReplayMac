@@ -85,6 +85,51 @@ public enum ReplayControlLabels {
                                  accessibilityDescription: "System audio active")
     }
 
+    public static func appAudioMute(
+        isSystemAudioEnabled: Bool,
+        isPerAppMode: Bool,
+        mutedCount: Int
+    ) -> ReplayControlLabel {
+        if !isSystemAudioEnabled {
+            return ReplayControlLabel(
+                title: "Mute App Audio",
+                symbol: "speaker.slash",
+                accessibilityDescription: "System audio disabled"
+            )
+        }
+        if isPerAppMode {
+            return ReplayControlLabel(
+                title: "Selected App Audio",
+                symbol: "app.badge.checkmark.fill",
+                accessibilityDescription: "Selected app audio mode active"
+            )
+        }
+        if mutedCount == 1 {
+            return ReplayControlLabel(
+                title: "1 App Muted",
+                symbol: "speaker.slash.circle.fill",
+                accessibilityDescription: "1 application muted"
+            )
+        }
+        if mutedCount > 1 {
+            return ReplayControlLabel(
+                title: "\(mutedCount) Apps Muted",
+                symbol: "speaker.slash.circle.fill",
+                accessibilityDescription: "\(mutedCount) applications muted"
+            )
+        }
+        return ReplayControlLabel(
+            title: "Mute App Audio",
+            symbol: "speaker.wave.2.bubble.fill",
+            accessibilityDescription: "Mute application audio"
+        )
+    }
+
+    public static func mutedAppsMenuTitle(mutedCount: Int) -> String {
+        guard mutedCount > 0 else { return "Mute App Audio" }
+        return mutedCount == 1 ? "Mute App Audio (1 Muted)" : "Mute App Audio (\(mutedCount) Muted)"
+    }
+
     /// A session recording that started capture on its own deliberately leaves
     /// the replay buffers empty, so reporting them would look like a fault.
     public static func isSessionOnlyCapture(isRecording: Bool, isSessionRecording: Bool) -> Bool {

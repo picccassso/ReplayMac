@@ -1,3 +1,4 @@
+import Defaults
 import XCTest
 @testable import UI
 
@@ -10,6 +11,61 @@ final class ReplayControlLabelsTests: XCTestCase {
         XCTAssertEqual(ReplayControlLabels.systemAudio(isEnabled: false, isMuted: true).title, "Enable & Unmute System Audio")
         XCTAssertEqual(ReplayControlLabels.systemAudio(isEnabled: true, isMuted: true).title, "Unmute System Audio")
         XCTAssertEqual(ReplayControlLabels.systemAudio(isEnabled: true, isMuted: false).symbol, "speaker.wave.2.fill")
+    }
+
+    @MainActor
+    func testAppAudioMuteLabelsAndMenuTitles() {
+        XCTAssertEqual(
+            ReplayControlLabels.appAudioMute(isSystemAudioEnabled: false, isPerAppMode: false, mutedCount: 2).title,
+            "Mute App Audio"
+        )
+        XCTAssertEqual(
+            ReplayControlLabels.appAudioMute(isSystemAudioEnabled: true, isPerAppMode: true, mutedCount: 2).title,
+            "Selected App Audio"
+        )
+        XCTAssertEqual(
+            ReplayControlLabels.appAudioMute(isSystemAudioEnabled: true, isPerAppMode: false, mutedCount: 0).title,
+            "Mute App Audio"
+        )
+        XCTAssertEqual(
+            ReplayControlLabels.appAudioMute(isSystemAudioEnabled: true, isPerAppMode: false, mutedCount: 1).title,
+            "1 App Muted"
+        )
+        XCTAssertEqual(
+            ReplayControlLabels.appAudioMute(isSystemAudioEnabled: true, isPerAppMode: false, mutedCount: 3).title,
+            "3 Apps Muted"
+        )
+
+        XCTAssertEqual(ReplayControlLabels.mutedAppsMenuTitle(mutedCount: 0), "Mute App Audio")
+        XCTAssertEqual(ReplayControlLabels.mutedAppsMenuTitle(mutedCount: 1), "Mute App Audio (1 Muted)")
+        XCTAssertEqual(ReplayControlLabels.mutedAppsMenuTitle(mutedCount: 4), "Mute App Audio (4 Muted)")
+    }
+
+    func testAppSettingsMuteAndUnmuteAudioApps() {
+        let original = Defaults[.mutedAudioAppBundleIDs]
+        defer { Defaults[.mutedAudioAppBundleIDs] = original }
+
+        Defaults[.mutedAudioAppBundleIDs] = []
+        XCTAssertFalse(AppSettings.isAppAudioMuted("com.spotify.client"))
+
+        AppSettings.muteAudioApp("com.spotify.client")
+        XCTAssertTrue(AppSettings.isAppAudioMuted("com.spotify.client"))
+        XCTAssertTrue(AppSettings.isAppAudioMuted("COM.SPOTIFY.CLIENT"))
+        XCTAssertEqual(AppSettings.mutedAudioAppBundleIDs, ["com.spotify.client"])
+
+        // Duplicate mutes should be ignored.
+        AppSettings.muteAudioApp("com.spotify.client")
+        XCTAssertEqual(AppSettings.mutedAudioAppBundleIDs.count, 1)
+
+        AppSettings.toggleAudioAppMute("com.hnc.Discord")
+        XCTAssertEqual(AppSettings.mutedAudioAppBundleIDs, ["com.spotify.client", "com.hnc.Discord"])
+
+        AppSettings.toggleAudioAppMute("com.spotify.client")
+        XCTAssertFalse(AppSettings.isAppAudioMuted("com.spotify.client"))
+        XCTAssertEqual(AppSettings.mutedAudioAppBundleIDs, ["com.hnc.Discord"])
+
+        AppSettings.unmuteAllAudioApps()
+        XCTAssertTrue(AppSettings.mutedAudioAppBundleIDs.isEmpty)
     }
 
     @MainActor

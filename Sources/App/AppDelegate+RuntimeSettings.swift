@@ -1,3 +1,4 @@
+import Audio
 import AVFoundation
 import Branding
 import Capture
@@ -63,7 +64,7 @@ extension AppDelegate {
             self?.scheduleRuntimeSettingsReconcile()
         })
         settingsObservations.append(Defaults.observe(.excludeOwnAppAudio) { [weak self] _ in
-            self?.scheduleRuntimeSettingsReconcile()
+            self?.scheduleRuntimeSettingsReconcile(needsVideoReset: false, needsFullRestart: false)
         })
 
         settingsObservations.append(Defaults.observe(.captureHDR) { [weak self] _ in
@@ -98,13 +99,18 @@ extension AppDelegate {
         settingsObservations.append(Defaults.observe(.captureSystemAudio) { [weak self] _ in
             self?.syncMemoryCapsToSettings()
             self?.syncAudioMuteStateToUI()
-            self?.scheduleRuntimeSettingsReconcile(needsFullRestart: true)
+            self?.scheduleRuntimeSettingsReconcile(needsVideoReset: false, needsFullRestart: false)
         })
         settingsObservations.append(Defaults.observe(.perAppAudioEnabled) { [weak self] _ in
-            self?.scheduleRuntimeSettingsReconcile(needsFullRestart: true)
+            self?.statusItemController.refreshPresentation()
+            self?.scheduleRuntimeSettingsReconcile(needsVideoReset: false, needsFullRestart: false)
         })
         settingsObservations.append(Defaults.observe(.perAppAudioBundleID) { [weak self] _ in
-            self?.scheduleRuntimeSettingsReconcile(needsFullRestart: true)
+            self?.scheduleRuntimeSettingsReconcile(needsVideoReset: false, needsFullRestart: false)
+        })
+        settingsObservations.append(Defaults.observe(.mutedAudioAppBundleIDs) { [weak self] _ in
+            self?.statusItemController.refreshPresentation()
+            self?.scheduleRuntimeSettingsReconcile(needsVideoReset: false, needsFullRestart: false)
         })
         settingsObservations.append(Defaults.observe(.dualCaptureSaveMode) { [weak self] _ in
             self?.scheduleRuntimeSettingsReconcile(needsFullRestart: true)
@@ -202,6 +208,7 @@ extension AppDelegate {
                 if needsVideoReset {
                     try await applyPipelineShapeChanges()
                 }
+                await applySystemAudioSettingIfNeeded()
                 await applyMicSettingIfNeeded()
                 await configureLongBufferForCurrentSettings()
             }
@@ -361,6 +368,94 @@ extension AppDelegate {
                 bitrate: bitrate,
                 captureHDR: captureHDR
             )
+        }
+    }
+
+    func applySystemAudioSettingIfNeeded() async {
+        guard isCaptureRunning else { return }
+
+        let captureSystemAudio = AppSettings.captureSystemAudio
+        let excludeOwn = AppSettings.excludeOwnAppAudio
+        let perAppEnabled = AppSettings.perAppAudioEnabled
+        let perAppBundleID = AppSettings.perAppAudioBundleID
+        let mutedBundleIDs = AppSettings.mutedAudioAppBundleIDs
+
+        if !captureSystemAudio {
+            isCapturingMainSystemAudio = false
+            await perAppAudioCapture.stop()
+            try? await captureManager.updateAudioCapture(
+                captureAudio: false,
+                excludeOwnAppAudio: excludeOwn
+            )
+            AudioLevelMonitor.shared.resetSystemAudio()
+            return
+        }
+
+        if perAppEnabled && !perAppBundleID.isEmpty {
+            isCapturingMainSystemAudio = false
+            try? await captureManager.updateAudioCapture(
+                captureAudio: false,
+                excludeOwnAppAudio: excludeOwn
+            )
+            do {
+                try await perAppAudioCapture.start(
+                    mode: .includeOnly(bundleID: perAppBundleID),
+                    excludeOwnAppAudio: excludeOwn
+                )
+            } catch {
+                await perAppAudioCapture.stop()
+                NotificationManager.shared.showOperationalNotification(
+                    title: "Per-App Audio Unavailable",
+                    body: "No system audio will be captured for this session. \(error.localizedDescription)"
+                )
+            }
+            return
+        }
+
+        if !perAppEnabled && !mutedBundleIDs.isEmpty {
+            isCapturingMainSystemAudio = false
+            try? await captureManager.updateAudioCapture(
+                captureAudio: false,
+                excludeOwnAppAudio: excludeOwn
+            )
+            do {
+                try await perAppAudioCapture.start(
+                    mode: .exclude(bundleIDs: mutedBundleIDs),
+                    excludeOwnAppAudio: excludeOwn
+                )
+            } catch {
+                await perAppAudioCapture.stop()
+                try? await captureManager.updateAudioCapture(
+                    captureAudio: true,
+                    excludeOwnAppAudio: excludeOwn
+                )
+                isCapturingMainSystemAudio = true
+            }
+            return
+        }
+
+        if perAppAudioCapture.isRunning {
+            isCapturingMainSystemAudio = false
+            do {
+                try await perAppAudioCapture.start(
+                    mode: .exclude(bundleIDs: []),
+                    excludeOwnAppAudio: excludeOwn
+                )
+                return
+            } catch {
+                await perAppAudioCapture.stop()
+            }
+        }
+
+        await perAppAudioCapture.stop()
+        do {
+            try await captureManager.updateAudioCapture(
+                captureAudio: true,
+                excludeOwnAppAudio: excludeOwn
+            )
+            isCapturingMainSystemAudio = true
+        } catch {
+            print("Warning: Failed to update main stream audio capture: \(error)")
         }
     }
 

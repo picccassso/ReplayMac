@@ -263,6 +263,7 @@ extension SettingsView {
         excludeOwnAppAudio = profile.excludeOwnAppAudio
         perAppAudioEnabled = profile.perAppAudioEnabled
         perAppAudioBundleID = profile.perAppAudioBundleID
+        mutedAudioAppBundleIDs = profile.mutedAudioAppBundleIDs ?? []
         systemAudioVolume = profile.systemAudioVolume
         microphoneVolume = profile.microphoneVolume
 
@@ -300,6 +301,7 @@ extension SettingsView {
             excludeOwnAppAudio: excludeOwnAppAudio,
             perAppAudioEnabled: perAppAudioEnabled,
             perAppAudioBundleID: perAppAudioBundleID,
+            mutedAudioAppBundleIDs: mutedAudioAppBundleIDs,
             systemAudioVolume: systemAudioVolume,
             microphoneVolume: microphoneVolume,
             memoryCapMB: memoryCapMB,
@@ -343,7 +345,16 @@ private extension CaptureProfile {
     }
 
     var audioDetail: String {
-        let system = !captureSystemAudio ? "Off" : (perAppAudioEnabled ? "Selected app" : "All apps")
+        let system: String
+        if !captureSystemAudio {
+            system = "Off"
+        } else if perAppAudioEnabled {
+            system = "Selected app"
+        } else if let muted = mutedAudioAppBundleIDs, !muted.isEmpty {
+            system = "All apps (\(muted.count) muted)"
+        } else {
+            system = "All apps"
+        }
         let mic = captureMicrophone ? "Mic on" : "Mic off"
         let merge = (mergeAudioTracks ?? true) ? "Merged" : "Separate tracks"
         return "\(system) · \(mic) · \(merge)"

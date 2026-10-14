@@ -18,6 +18,8 @@ struct HomeView: View {
     @Default(.longBufferDurationMinutes) private var longBufferMinutes
     @Default(.captureMicrophone) private var captureMicrophone
     @Default(.captureSystemAudio) private var captureSystemAudio
+    @Default(.perAppAudioEnabled) private var perAppAudioEnabled
+    @Default(.mutedAudioAppBundleIDs) private var mutedAudioAppBundleIDs
     /// Read when the page appears; returning from Hotkeys rebuilds this view.
     @State private var shortcuts: [KeyboardShortcuts.Name: String] = [:]
     /// Natural width of "Stop Buffer", so the button can grow from a circle to a pill.
@@ -337,6 +339,137 @@ struct HomeView: View {
              shortcut: .toggleMicrophoneMute, action: controls.toggleMicrophone)
         tile(ReplayControlLabels.systemAudio(isEnabled: captureSystemAudio, isMuted: menuBar.isSystemAudioMuted),
              shortcut: .toggleSystemAudioMute, action: controls.toggleSystemAudio)
+        muteAppsTile
+    }
+
+    private var muteAppsTile: some View {
+        let canMuteApps = captureSystemAudio && !perAppAudioEnabled
+        let mutedCount = canMuteApps ? mutedAudioAppBundleIDs.count : 0
+        let label = ReplayControlLabels.appAudioMute(
+            isSystemAudioEnabled: captureSystemAudio,
+            isPerAppMode: perAppAudioEnabled,
+            mutedCount: mutedCount
+        )
+        let isActive = mutedCount > 0
+
+        return VStack(alignment: .leading, spacing: 6) {
+            if canMuteApps {
+                Menu {
+                    let runningApps = AppSettings.capturableRunningApplications()
+                    if runningApps.isEmpty {
+                        Text("No running applications")
+                    } else {
+                        Section("Mute Application Audio") {
+                            ForEach(runningApps) { app in
+                                Toggle(
+                                    app.name,
+                                    isOn: Binding(
+                                        get: { AppSettings.isAppAudioMuted(app.bundleID) },
+                                        set: { shouldMute in
+                                            if shouldMute {
+                                                AppSettings.muteAudioApp(app.bundleID)
+                                            } else {
+                                                AppSettings.unmuteAudioApp(app.bundleID)
+                                            }
+                                        }
+                                    )
+                                )
+                            }
+                        }
+                    }
+
+                    let nonRunningMuted = mutedAudioAppBundleIDs.filter { !AppSettings.isApplicationRunning($0) }
+                    if !nonRunningMuted.isEmpty {
+                        Section("Muted (Not Running)") {
+                            ForEach(nonRunningMuted, id: \.self) { bundleID in
+                                Button("Unmute \(AppSettings.appDisplayName(for: bundleID))") {
+                                    AppSettings.unmuteAudioApp(bundleID)
+                                }
+                            }
+                        }
+                    }
+
+                    if !mutedAudioAppBundleIDs.isEmpty {
+                        Divider()
+                        Button("Unmute All Applications") {
+                            AppSettings.unmuteAllAudioApps()
+                        }
+                    }
+
+                    Divider()
+                    Button("Audio Settings…") {
+                        windowState.select(.audio)
+                    }
+                } label: {
+                    muteAppsTileContent(label: label, isActive: isActive, showsMenuChevron: true)
+                }
+                .menuStyle(.button)
+                .buttonStyle(HomeTileButtonStyle(prominent: false))
+                .help("Choose applications whose audio should be muted in recordings")
+            } else {
+                Button {
+                    windowState.select(.audio)
+                } label: {
+                    muteAppsTileContent(label: label, isActive: false, showsMenuChevron: false)
+                }
+                .buttonStyle(HomeTileButtonStyle(prominent: false))
+                .help("Open Audio Settings")
+            }
+
+            muteAppsHint(canMuteApps: canMuteApps)
+                .padding(.horizontal, 6)
+        }
+    }
+
+    private func muteAppsTileContent(label: ReplayControlLabel, isActive: Bool, showsMenuChevron: Bool) -> some View {
+        HStack(spacing: 10) {
+            Image(systemName: label.symbol)
+                .font(.system(size: 20))
+                .contentTransition(.symbolEffect(.replace))
+                .foregroundStyle(isActive ? AppTheme.danger : AppTheme.accent)
+                .frame(width: 24)
+                .accessibilityHidden(true)
+            Text(label.title)
+                .font(.system(size: 13, weight: .semibold, design: .rounded))
+                .contentTransition(.opacity)
+                .lineLimit(2)
+                .multilineTextAlignment(.leading)
+            Spacer(minLength: 0)
+            if showsMenuChevron {
+                Image(systemName: "chevron.up.chevron.down")
+                    .font(.system(size: 11, weight: .semibold))
+                    .foregroundStyle(.secondary)
+                    .accessibilityHidden(true)
+            }
+        }
+        .padding(.horizontal, 14)
+        .frame(maxWidth: .infinity, minHeight: 52, alignment: .leading)
+        .contentShape(Rectangle())
+    }
+
+    @ViewBuilder
+    private func muteAppsHint(canMuteApps: Bool) -> some View {
+        if !captureSystemAudio {
+            Button("System audio off") { windowState.select(.audio) }
+                .buttonStyle(.link)
+                .font(.system(size: 11, design: .rounded))
+        } else if perAppAudioEnabled {
+            Button("Selected app only") { windowState.select(.audio) }
+                .buttonStyle(.link)
+                .font(.system(size: 11, design: .rounded))
+        } else if mutedAudioAppBundleIDs.isEmpty {
+            Button("All apps audible") { windowState.select(.audio) }
+                .buttonStyle(.link)
+                .font(.system(size: 11, design: .rounded))
+        } else {
+            let names = mutedAudioAppBundleIDs.map { AppSettings.appDisplayName(for: $0) }.joined(separator: ", ")
+            Button(names) { windowState.select(.audio) }
+                .buttonStyle(.link)
+                .font(.system(size: 11, design: .rounded))
+                .lineLimit(1)
+                .truncationMode(.tail)
+                .help("Muted: \(names). Click to open Audio Settings.")
+        }
     }
 
     private func tile(_ label: ReplayControlLabel, shortcut: KeyboardShortcuts.Name,

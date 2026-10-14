@@ -14,6 +14,8 @@ public final class StatusItemController: NSObject, NSMenuDelegate, @unchecked Se
     private var toggleRecordingItem: NSMenuItem?
     private var toggleMicMuteItem: NSMenuItem?
     private var toggleSystemAudioMuteItem: NSMenuItem?
+    private var muteAppsItem: NSMenuItem?
+    private var muteAppsSubmenu: NSMenu?
     private var copyLastClipItem: NSMenuItem?
     private var revealLastClipItem: NSMenuItem?
     private var openLastClipItem: NSMenuItem?
@@ -37,6 +39,7 @@ public final class StatusItemController: NSObject, NSMenuDelegate, @unchecked Se
     public var onOpenMainWindow: (() -> Void)?
     public var onOpenClipLibrary: (() -> Void)?
     public var onOpenSettings: (() -> Void)?
+    public var onOpenAudioSettings: (() -> Void)?
     public var onQuit: (() -> Void)?
 
     public override init() {
@@ -179,6 +182,11 @@ public final class StatusItemController: NSObject, NSMenuDelegate, @unchecked Se
         toggleSystemAudioMuteItem.target = self
         menu.addItem(toggleSystemAudioMuteItem)
 
+        let muteAppsSubmenu = NSMenu()
+        let muteAppsItem = NSMenuItem(title: "Mute App Audio", action: nil, keyEquivalent: "")
+        muteAppsItem.submenu = muteAppsSubmenu
+        menu.addItem(muteAppsItem)
+
         menu.addItem(NSMenuItem.separator())
 
         let libraryItem = NSMenuItem(title: "Clip Library", action: #selector(openClipLibrary), keyEquivalent: "")
@@ -241,6 +249,8 @@ public final class StatusItemController: NSObject, NSMenuDelegate, @unchecked Se
         self.toggleRecordingItem = toggleRecordingItem
         self.toggleMicMuteItem = toggleMicMuteItem
         self.toggleSystemAudioMuteItem = toggleSystemAudioMuteItem
+        self.muteAppsItem = muteAppsItem
+        self.muteAppsSubmenu = muteAppsSubmenu
         self.copyLastClipItem = copyLastClipItem
         self.openLastClipItem = openLastClipItem
         self.revealLastClipItem = revealLastClipItem
@@ -293,6 +303,8 @@ public final class StatusItemController: NSObject, NSMenuDelegate, @unchecked Se
         toggleSystemAudioMuteItem?.image = NSImage(systemSymbolName: systemAudio.symbol,
                                                    accessibilityDescription: systemAudio.accessibilityDescription)
 
+        refreshMuteAppsSubmenu()
+
         // Drop the reference if the clip has since been moved, renamed, or deleted.
         if let url = lastClipURL, !FileManager.default.fileExists(atPath: url.path) {
             lastClipURL = nil
@@ -341,6 +353,100 @@ public final class StatusItemController: NSObject, NSMenuDelegate, @unchecked Se
         }
     }
 
+    private func refreshMuteAppsSubmenu() {
+        guard let muteAppsItem, let submenu = muteAppsSubmenu else { return }
+        submenu.removeAllItems()
+
+        let canMuteApps = AppSettings.captureSystemAudio && !AppSettings.perAppAudioEnabled
+        let mutedIDs = AppSettings.mutedAudioAppBundleIDs
+        let effectiveMutedCount = canMuteApps ? mutedIDs.count : 0
+
+        muteAppsItem.title = ReplayControlLabels.mutedAppsMenuTitle(mutedCount: effectiveMutedCount)
+        let symbolName = effectiveMutedCount > 0 ? "speaker.slash.circle.fill" : "speaker.wave.2.bubble.fill"
+        muteAppsItem.image = NSImage(systemSymbolName: symbolName, accessibilityDescription: "Mute application audio")
+            ?? NSImage(systemSymbolName: effectiveMutedCount > 0 ? "speaker.slash.fill" : "speaker.wave.2.fill",
+                       accessibilityDescription: "Mute application audio")
+
+        if !AppSettings.captureSystemAudio {
+            let infoItem = NSMenuItem(title: "System audio capture is off", action: nil, keyEquivalent: "")
+            infoItem.isEnabled = false
+            submenu.addItem(infoItem)
+        } else if AppSettings.perAppAudioEnabled {
+            let infoItem = NSMenuItem(title: "Using Selected App Only mode", action: nil, keyEquivalent: "")
+            infoItem.isEnabled = false
+            submenu.addItem(infoItem)
+        } else {
+            let runningApps = AppSettings.capturableRunningApplications()
+            if runningApps.isEmpty {
+                let emptyItem = NSMenuItem(title: "No running applications", action: nil, keyEquivalent: "")
+                emptyItem.isEnabled = false
+                submenu.addItem(emptyItem)
+            } else {
+                let headerItem = NSMenuItem(title: "Checked apps are muted in recordings", action: nil, keyEquivalent: "")
+                headerItem.isEnabled = false
+                submenu.addItem(headerItem)
+
+                for app in runningApps {
+                    let isMuted = AppSettings.isAppAudioMuted(app.bundleID)
+                    let item = NSMenuItem(
+                        title: app.name,
+                        action: #selector(toggleMutedAppFromMenu(_:)),
+                        keyEquivalent: ""
+                    )
+                    item.target = self
+                    item.representedObject = app.bundleID
+                    item.state = isMuted ? .on : .off
+                    if let icon = AppSettings.appIcon(for: app.bundleID) {
+                        let copy = (icon.copy() as? NSImage) ?? icon
+                        copy.size = NSSize(width: 16, height: 16)
+                        item.image = copy
+                    }
+                    submenu.addItem(item)
+                }
+            }
+
+            let nonRunningMuted = mutedIDs.filter { !AppSettings.isApplicationRunning($0) }
+            if !nonRunningMuted.isEmpty {
+                submenu.addItem(NSMenuItem.separator())
+                let header = NSMenuItem(title: "Muted (Not Running)", action: nil, keyEquivalent: "")
+                header.isEnabled = false
+                submenu.addItem(header)
+
+                for bundleID in nonRunningMuted {
+                    let item = NSMenuItem(
+                        title: AppSettings.appDisplayName(for: bundleID),
+                        action: #selector(toggleMutedAppFromMenu(_:)),
+                        keyEquivalent: ""
+                    )
+                    item.target = self
+                    item.representedObject = bundleID
+                    item.state = .on
+                    submenu.addItem(item)
+                }
+            }
+
+            if !mutedIDs.isEmpty {
+                submenu.addItem(NSMenuItem.separator())
+                let unmuteAllItem = NSMenuItem(
+                    title: "Unmute All Applications",
+                    action: #selector(unmuteAllAppsFromMenu),
+                    keyEquivalent: ""
+                )
+                unmuteAllItem.target = self
+                submenu.addItem(unmuteAllItem)
+            }
+        }
+
+        submenu.addItem(NSMenuItem.separator())
+        let audioSettingsItem = NSMenuItem(
+            title: "Audio Settings…",
+            action: #selector(openAudioSettings),
+            keyEquivalent: ""
+        )
+        audioSettingsItem.target = self
+        submenu.addItem(audioSettingsItem)
+    }
+
     private func updateTooltip() {
         guard let button = statusItem?.button else { return }
 
@@ -351,6 +457,9 @@ public final class StatusItemController: NSObject, NSMenuDelegate, @unchecked Se
         }
         if state.isSystemAudioMuted {
             muteDetails.append("System Audio Muted")
+        } else if AppSettings.captureSystemAudio && !AppSettings.perAppAudioEnabled && !AppSettings.mutedAudioAppBundleIDs.isEmpty {
+            let count = AppSettings.mutedAudioAppBundleIDs.count
+            muteDetails.append(count == 1 ? "1 App Muted" : "\(count) Apps Muted")
         }
         let muteSuffix = muteDetails.isEmpty ? "" : " · \(muteDetails.joined(separator: ", "))"
 
@@ -398,6 +507,28 @@ public final class StatusItemController: NSObject, NSMenuDelegate, @unchecked Se
 
     @objc private func toggleSystemAudioMute() {
         onToggleSystemAudioMute?()
+    }
+
+    @objc private func toggleMutedAppFromMenu(_ sender: NSMenuItem) {
+        guard let bundleID = sender.representedObject as? String else { return }
+        AppSettings.toggleAudioAppMute(bundleID)
+        refreshPresentation()
+    }
+
+    @objc private func unmuteAllAppsFromMenu() {
+        AppSettings.unmuteAllAudioApps()
+        refreshPresentation()
+    }
+
+    @objc private func openAudioSettings() {
+        DispatchQueue.main.async { [weak self] in
+            guard let self else { return }
+            if let onOpenAudioSettings = self.onOpenAudioSettings {
+                onOpenAudioSettings()
+                return
+            }
+            self.openSettings()
+        }
     }
 
     @objc private func openSettings() {

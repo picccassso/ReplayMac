@@ -67,11 +67,16 @@ struct MicrophoneOption: Identifiable, Hashable {
     let name: String
 }
 
-struct AudioApplicationOption: Identifiable, Hashable {
-    let bundleID: String
-    let name: String
+public struct AudioApplicationOption: Identifiable, Hashable, Sendable {
+    public let bundleID: String
+    public let name: String
 
-    var id: String { bundleID }
+    public var id: String { bundleID }
+
+    public init(bundleID: String, name: String) {
+        self.bundleID = bundleID
+        self.name = name
+    }
 }
 
 struct CaptureProfile: Identifiable, Codable, Equatable {
@@ -101,6 +106,7 @@ struct CaptureProfile: Identifiable, Codable, Equatable {
     var excludeOwnAppAudio: Bool
     var perAppAudioEnabled: Bool
     var perAppAudioBundleID: String
+    var mutedAudioAppBundleIDs: [String]? = []
     var systemAudioVolume: Double
     var microphoneVolume: Double
 
@@ -116,6 +122,8 @@ struct CaptureProfile: Identifiable, Codable, Equatable {
             audioLabel = "No system audio"
         } else if perAppAudioEnabled {
             audioLabel = "Selected app audio"
+        } else if let muted = mutedAudioAppBundleIDs, !muted.isEmpty {
+            audioLabel = "All app audio (\(muted.count) muted)"
         } else {
             audioLabel = "All app audio"
         }

@@ -31,6 +31,12 @@ public final class SystemAudioCapture: @unchecked Sendable {
         lock.unlock()
     }
 
+    public func reset() {
+        lock.lock()
+        nextExpectedPTS = nil
+        lock.unlock()
+    }
+
     public func process(sampleBuffer: CMSampleBuffer) {
         // Deep-copy the buffer so SCK can recycle its original. SCK audio uses
         // a small internal pool (~1.3s) and stops delivering once we exhaust it
@@ -50,15 +56,24 @@ public final class SystemAudioCapture: @unchecked Sendable {
         lock.lock()
         defer { lock.unlock() }
 
-        if let nextExpected = nextExpectedPTS, pts > nextExpected {
-            let gapSeconds = CMTimeGetSeconds(CMTimeSubtract(pts, nextExpected))
-            if gapSeconds > 0.005, let format = copied.formatDescription {
-                fillGap(
-                    seconds: gapSeconds,
-                    startingAt: nextExpected,
-                    formatDescription: format,
-                    handler: handler
-                )
+        if let nextExpected = nextExpectedPTS {
+            if pts < nextExpected {
+                let rewindSeconds = CMTimeGetSeconds(CMTimeSubtract(nextExpected, pts))
+                if rewindSeconds < Self.maximumGapFillSeconds {
+                    // Drop any overlapping sample when handing off between the main stream
+                    // and a filtered per-app audio stream so timestamps remain monotonic.
+                    return
+                }
+            } else if pts > nextExpected {
+                let gapSeconds = CMTimeGetSeconds(CMTimeSubtract(pts, nextExpected))
+                if gapSeconds > 0.005, let format = copied.formatDescription {
+                    fillGap(
+                        seconds: gapSeconds,
+                        startingAt: nextExpected,
+                        formatDescription: format,
+                        handler: handler
+                    )
+                }
             }
         }
 

@@ -20,6 +20,8 @@ public final class AudioLevelPreview {
         public var microphoneDeviceID: String
         /// Bundle ID for per-app system audio, or nil to measure all apps.
         public var perAppAudioBundleID: String?
+        /// Bundle IDs of applications whose audio should be excluded in All Apps mode.
+        public var excludedAudioBundleIDs: [String]
         public var excludeOwnAppAudio: Bool
         public var systemAudioVolume: Double
         public var microphoneVolume: Double
@@ -29,6 +31,7 @@ public final class AudioLevelPreview {
             monitorMicrophone: Bool,
             microphoneDeviceID: String,
             perAppAudioBundleID: String?,
+            excludedAudioBundleIDs: [String] = [],
             excludeOwnAppAudio: Bool,
             systemAudioVolume: Double,
             microphoneVolume: Double
@@ -37,6 +40,7 @@ public final class AudioLevelPreview {
             self.monitorMicrophone = monitorMicrophone
             self.microphoneDeviceID = microphoneDeviceID
             self.perAppAudioBundleID = perAppAudioBundleID
+            self.excludedAudioBundleIDs = excludedAudioBundleIDs
             self.excludeOwnAppAudio = excludeOwnAppAudio
             self.systemAudioVolume = systemAudioVolume
             self.microphoneVolume = microphoneVolume
@@ -54,6 +58,7 @@ public final class AudioLevelPreview {
     private var runningMicrophoneDeviceID = ""
     private var isSystemAudioRunning = false
     private var runningSystemAudioBundleID: String?
+    private var runningExcludedAudioBundleIDs: [String] = []
     private var runningExcludesOwnAppAudio = false
 
     private var reconcileTask: Task<Void, Never>?
@@ -179,6 +184,7 @@ public final class AudioLevelPreview {
 
         let isRunningWithSameSource = isSystemAudioRunning
             && runningSystemAudioBundleID == target.perAppAudioBundleID
+            && runningExcludedAudioBundleIDs == target.excludedAudioBundleIDs
             && runningExcludesOwnAppAudio == target.excludeOwnAppAudio
         guard !isRunningWithSameSource else {
             return
@@ -189,10 +195,12 @@ public final class AudioLevelPreview {
         do {
             try await systemAudioTap.start(
                 bundleID: target.perAppAudioBundleID,
+                excludedBundleIDs: target.excludedAudioBundleIDs,
                 excludeOwnAppAudio: target.excludeOwnAppAudio
             )
             isSystemAudioRunning = true
             runningSystemAudioBundleID = target.perAppAudioBundleID
+            runningExcludedAudioBundleIDs = target.excludedAudioBundleIDs
             runningExcludesOwnAppAudio = target.excludeOwnAppAudio
         } catch {
             print("[LEVELS] System audio level preview unavailable: \(error)")
@@ -210,6 +218,7 @@ public final class AudioLevelPreview {
         await systemAudioTap.stop()
         isSystemAudioRunning = false
         runningSystemAudioBundleID = nil
+        runningExcludedAudioBundleIDs = []
         AudioLevelMonitor.shared.resetSystemAudio()
     }
 
@@ -320,21 +329,26 @@ private final class SystemAudioLevelTap: NSObject, SCStreamOutput, @unchecked Se
         lock.unlock()
     }
 
-    func start(bundleID: String?, excludeOwnAppAudio: Bool) async throws {
+    func start(bundleID: String?, excludedBundleIDs: [String] = [], excludeOwnAppAudio: Bool) async throws {
         await stop()
 
-        let content = try await SCShareableContent.excludingDesktopWindows(false, onScreenWindowsOnly: true)
+        let content = try await SCShareableContent.excludingDesktopWindows(false, onScreenWindowsOnly: false)
         guard let display = content.displays.first else {
             throw PerAppAudioCaptureError.noDisplay
         }
 
         let filter: SCContentFilter
         if let bundleID, !bundleID.isEmpty {
-            let matches = content.applications.filter { $0.bundleIdentifier == bundleID }
+            let matches = content.applications.filter { PerAppAudioCapture.matchesBundleID($0.bundleIdentifier, target: bundleID) }
             guard !matches.isEmpty else {
                 throw PerAppAudioCaptureError.appNotFound(bundleID)
             }
             filter = SCContentFilter(display: display, including: matches, exceptingWindows: [])
+        } else if !excludedBundleIDs.isEmpty {
+            let excludedMatches = content.applications.filter {
+                PerAppAudioCapture.matchesAnyBundleID($0.bundleIdentifier, in: excludedBundleIDs)
+            }
+            filter = SCContentFilter(display: display, excludingApplications: excludedMatches, exceptingWindows: [])
         } else {
             filter = SCContentFilter(display: display, excludingWindows: [])
         }

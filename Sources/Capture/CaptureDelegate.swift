@@ -14,6 +14,7 @@ public final class CaptureDelegate: NSObject, SCStreamOutput, SCStreamDelegate, 
     private let lock = NSLock()
     private var videoHandler: ((CMSampleBuffer) -> Void)?
     private var audioHandler: ((CMSampleBuffer) -> Void)?
+    private var acceptsAudio = true
     private var frameCount = 0
     private var lastVideoSampleDate: Date?
     private var audioSampleCount = 0
@@ -40,6 +41,16 @@ public final class CaptureDelegate: NSObject, SCStreamOutput, SCStreamDelegate, 
         audioSampleCount = 0
         invalidAudioSampleCount = 0
         lastAudioSampleDate = nil
+        lock.unlock()
+    }
+
+    public func setAcceptsAudio(_ accepts: Bool) {
+        lock.lock()
+        let becameActive = accepts && !acceptsAudio
+        acceptsAudio = accepts
+        if becameActive {
+            lastAudioSampleDate = Date()
+        }
         lock.unlock()
     }
 
@@ -86,8 +97,12 @@ public final class CaptureDelegate: NSObject, SCStreamOutput, SCStreamDelegate, 
 
         case .audio:
             let now = Date()
+            lock.lock()
+            guard acceptsAudio else {
+                lock.unlock()
+                return
+            }
             if !sampleBuffer.isValid {
-                lock.lock()
                 invalidAudioSampleCount += 1
                 lastAudioSampleDate = now
                 let n = invalidAudioSampleCount
@@ -97,7 +112,6 @@ public final class CaptureDelegate: NSObject, SCStreamOutput, SCStreamDelegate, 
                 }
                 return
             }
-            lock.lock()
             audioSampleCount += 1
             lastAudioSampleDate = now
             let n = audioSampleCount
