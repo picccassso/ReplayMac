@@ -132,6 +132,65 @@ final class CompanionServerProtocolTests: XCTestCase {
         XCTAssertEqual(dict?["clipId"] as? String, "test-clip")
         XCTAssertEqual(dict?["thumbnailBase64"] as? String, "dGVzdA==")
     }
+
+    func testExtendedStateSnapshotRoundTripAndDefaults() throws {
+        let app = CompanionAudioApp(bundleId: "com.hnc.Discord", name: "Discord", isMuted: true, isRunning: true)
+        let display = CompanionDisplayInfo(id: "builtin:main", name: "Built-in Display", isActive: true, isConnected: true)
+        let profile = CompanionProfileSummary(id: "prof-1", name: "Gaming", summary: "120 fps · 35 Mbps", isActive: true)
+
+        let snapshot = CompanionStateSnapshot(
+            isRecording: true,
+            isSessionRecording: false,
+            saveStatus: "idle",
+            recordingElapsedSeconds: 10,
+            extendedBufferElapsedSeconds: 10,
+            sessionElapsedSeconds: 0,
+            bufferedSeconds: 10,
+            bufferDurationSeconds: 30,
+            bufferMemoryBytes: 1024,
+            bufferMemoryFormatted: "1 KB",
+            longBufferEnabled: false,
+            longBufferDurationSeconds: 300,
+            capturedDisplayName: "Built-in Display",
+            isMicrophoneEnabled: true,
+            isMicrophoneMuted: false,
+            isSystemAudioEnabled: true,
+            isSystemAudioMuted: false,
+            microphoneVolume: 0.8,
+            systemAudioVolume: 0.65,
+            perAppAudioEnabled: false,
+            audioApps: [app],
+            displays: [display],
+            profiles: [profile],
+            recentClips: []
+        )
+
+        let encoded = try JSONEncoder().encode(snapshot)
+        let decoded = try JSONDecoder().decode(CompanionStateSnapshot.self, from: encoded)
+        XCTAssertEqual(decoded.microphoneVolume, 0.8, accuracy: 0.001)
+        XCTAssertEqual(decoded.systemAudioVolume, 0.65, accuracy: 0.001)
+        XCTAssertFalse(decoded.perAppAudioEnabled)
+        XCTAssertEqual(decoded.audioApps, [app])
+        XCTAssertEqual(decoded.displays, [display])
+        XCTAssertEqual(decoded.profiles, [profile])
+
+        // Legacy payload without new fields decodes with sensible defaults
+        let legacyJSON = """
+        {
+            "type": "state_snapshot",
+            "isRecording": false,
+            "isSessionRecording": false,
+            "saveStatus": "idle"
+        }
+        """.data(using: .utf8)!
+        let legacy = try JSONDecoder().decode(CompanionStateSnapshot.self, from: legacyJSON)
+        XCTAssertEqual(legacy.microphoneVolume, 1.0)
+        XCTAssertEqual(legacy.systemAudioVolume, 1.0)
+        XCTAssertFalse(legacy.perAppAudioEnabled)
+        XCTAssertTrue(legacy.audioApps.isEmpty)
+        XCTAssertTrue(legacy.displays.isEmpty)
+        XCTAssertTrue(legacy.profiles.isEmpty)
+    }
 }
 
 @MainActor
@@ -484,5 +543,59 @@ final class CompanionServerLifecycleTests: XCTestCase {
 
         client.close()
         try await waitUntil { !server.isDeviceConnected(id: "dev-tracking-1") }
+    }
+
+    func testExtendedClipAudioAndSetupActions() async throws {
+        let secret = pairing.approveDevice(id: "test-device-ext", name: "iPhone 16 Pro")
+        let server = try await startTestServer(pairing: pairing, defaults: defaults)
+        defer { server.stop() }
+
+        var trimmedId: String?
+        var copiedId: String?
+        var receivedVolume: (String, Double)?
+        var toggledBundleId: String?
+        var unmutedAll = false
+        var selectedDisplayId: String?
+        var appliedProfileId: String?
+
+        server.onTrimClip = { trimmedId = $0 }
+        server.onCopyClip = { copiedId = $0 }
+        server.onSetVolume = { receivedVolume = ($0, $1) }
+        server.onToggleAppMute = { toggledBundleId = $0 }
+        server.onUnmuteAllApps = { unmutedAll = true }
+        server.onSelectDisplay = { selectedDisplayId = $0 }
+        server.onApplyProfile = { appliedProfileId = $0 }
+
+        let client = CompanionTestClient(port: server.listeningPort, deviceId: "test-device-ext")
+        defer { client.close() }
+        _ = try await client.signIn(secret: secret)
+        _ = try await client.receiveData() // initial snapshot
+
+        try await client.send(CompanionClientMessage(type: "trim_clip", action: "trim_clip", clipId: "clip-trim-1"))
+        try await client.send(CompanionClientMessage(type: "copy_clip", action: "copy_clip", clipId: "clip-copy-2"))
+        try await client.send(CompanionClientMessage(type: "set_volume", action: "set_volume", target: "microphone", volume: 0.42))
+        try await client.send(CompanionClientMessage(type: "toggle_app_mute", action: "toggle_app_mute", bundleId: "com.hnc.Discord"))
+        try await client.send(CompanionClientMessage(type: "unmute_all_apps", action: "unmute_all_apps"))
+        try await client.send(CompanionClientMessage(type: "select_display", action: "select_display", displayId: "builtin:main"))
+        try await client.send(CompanionClientMessage(type: "apply_profile", action: "apply_profile", profileId: "profile-uuid-1"))
+
+        try await waitUntil {
+            trimmedId != nil &&
+            copiedId != nil &&
+            receivedVolume != nil &&
+            toggledBundleId != nil &&
+            unmutedAll &&
+            selectedDisplayId != nil &&
+            appliedProfileId != nil
+        }
+
+        XCTAssertEqual(trimmedId, "clip-trim-1")
+        XCTAssertEqual(copiedId, "clip-copy-2")
+        XCTAssertEqual(receivedVolume?.0, "microphone")
+        XCTAssertEqual(receivedVolume?.1 ?? 0, 0.42, accuracy: 0.001)
+        XCTAssertEqual(toggledBundleId, "com.hnc.Discord")
+        XCTAssertTrue(unmutedAll)
+        XCTAssertEqual(selectedDisplayId, "builtin:main")
+        XCTAssertEqual(appliedProfileId, "profile-uuid-1")
     }
 }

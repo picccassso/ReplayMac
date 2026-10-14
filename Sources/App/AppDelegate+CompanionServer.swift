@@ -1,5 +1,6 @@
 import Cocoa
 import Branding
+import Capture
 import CompanionServer
 import UI
 import Defaults
@@ -41,6 +42,54 @@ extension AppDelegate {
             try? FileManager.default.trashItem(at: clip.url, resultingItemURL: nil)
             self.mainWindowState.removeRecentClip(id: clip.id)
             self.broadcastCompanionSnapshot()
+        }
+        companionServer.onTrimClip = { [weak self] clipId in
+            guard let self,
+                  let clip = self.mainWindowState.recentClips.first(where: {
+                      $0.id.uuidString.caseInsensitiveCompare(clipId) == .orderedSame || $0.id.uuidString == clipId
+                  }),
+                  FileManager.default.fileExists(atPath: clip.url.path) else { return }
+            NSApp.setActivationPolicy(.regular)
+            NSApp.activate(ignoringOtherApps: true)
+            self.mainWindowState.openEditor(clip.url)
+        }
+        companionServer.onCopyClip = { [weak self] clipId in
+            guard let self,
+                  let clip = self.mainWindowState.recentClips.first(where: {
+                      $0.id.uuidString.caseInsensitiveCompare(clipId) == .orderedSame || $0.id.uuidString == clipId
+                  }),
+                  FileManager.default.fileExists(atPath: clip.url.path) else { return }
+            let pasteboard = NSPasteboard.general
+            pasteboard.clearContents()
+            pasteboard.writeObjects([clip.url as NSURL])
+        }
+        companionServer.onSetVolume = { [weak self] target, volume in
+            switch target {
+            case "microphone", "mic":
+                AppSettings.setMicrophoneVolume(volume)
+            case "systemAudio", "system_audio", "system":
+                AppSettings.setSystemAudioVolume(volume)
+            default:
+                break
+            }
+            self?.broadcastCompanionSnapshot()
+        }
+        companionServer.onToggleAppMute = { [weak self] bundleId in
+            AppSettings.toggleAudioAppMute(bundleId)
+            self?.broadcastCompanionSnapshot()
+        }
+        companionServer.onUnmuteAllApps = { [weak self] in
+            AppSettings.unmuteAllAudioApps()
+            self?.broadcastCompanionSnapshot()
+        }
+        companionServer.onSelectDisplay = { [weak self] displayId in
+            AppSettings.selectPrimaryDisplay(displayId)
+            self?.broadcastCompanionSnapshot()
+        }
+        companionServer.onApplyProfile = { [weak self] profileId in
+            if AppSettings.applyCaptureProfile(id: profileId) {
+                self?.broadcastCompanionSnapshot()
+            }
         }
         companionServer.onGetThumbnail = { [weak self] clipId in
             guard let self else { return nil }
@@ -94,6 +143,50 @@ extension AppDelegate {
             )
         }
 
+        let runningApps = AppSettings.capturableRunningApplications()
+        var audioApps = runningApps.map { app in
+            CompanionAudioApp(
+                bundleId: app.bundleID,
+                name: app.name,
+                isMuted: AppSettings.isAppAudioMuted(app.bundleID),
+                isRunning: true,
+                iconBase64: AppSettings.appIconBase64(for: app.bundleID)
+            )
+        }
+        let runningLower = Set(runningApps.map { $0.bundleID.lowercased() })
+        for mutedBundleId in AppSettings.mutedAudioAppBundleIDs where !runningLower.contains(mutedBundleId.lowercased()) {
+            audioApps.append(
+                CompanionAudioApp(
+                    bundleId: mutedBundleId,
+                    name: AppSettings.appDisplayName(for: mutedBundleId),
+                    isMuted: true,
+                    isRunning: false,
+                    iconBase64: AppSettings.appIconBase64(for: mutedBundleId)
+                )
+            )
+        }
+
+        let onlineIDs = DisplayIdentity.onlineDisplayIDs()
+        let priorities = AppSettings.captureDisplayPriorities
+        let resolvedDisplayID = DisplayIdentity.resolveFirst(in: priorities, among: onlineIDs) ?? onlineIDs.first
+        let displays = onlineIDs.map { displayID in
+            CompanionDisplayInfo(
+                id: DisplayIdentity.stableKey(for: displayID),
+                name: DisplayIdentity.localizedDisplayName(for: displayID),
+                isActive: displayID == resolvedDisplayID,
+                isConnected: true
+            )
+        }
+
+        let profiles = AppSettings.loadCaptureProfiles().map { profile in
+            CompanionProfileSummary(
+                id: profile.id.uuidString,
+                name: profile.name,
+                summary: profile.summary,
+                isActive: AppSettings.isCaptureProfileActive(profile)
+            )
+        }
+
         return CompanionStateSnapshot(
             type: type,
             // The replay buffer, as the desktop shows it. Capture also runs for a
@@ -116,6 +209,12 @@ extension AppDelegate {
             isMicrophoneMuted: menuBarState.isMicrophoneMuted,
             isSystemAudioEnabled: AppSettings.captureSystemAudio,
             isSystemAudioMuted: menuBarState.isSystemAudioMuted,
+            microphoneVolume: AppSettings.microphoneVolume,
+            systemAudioVolume: AppSettings.systemAudioVolume,
+            perAppAudioEnabled: AppSettings.perAppAudioEnabled,
+            audioApps: audioApps,
+            displays: displays,
+            profiles: profiles,
             recentClips: clips
         )
     }

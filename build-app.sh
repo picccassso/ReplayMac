@@ -36,6 +36,11 @@ if [ "${1:-}" = "--appstore" ]; then
 fi
 # Allow local review builds alongside an app that is currently running.
 APP_DIR="${REPLAYMAC_BUILD_OUTPUT_DIR:-$ROOT_DIR/dist}/${APP_NAME}.app"
+SCRATCH_DIR="${REPLAYMAC_SCRATCH_PATH:-$ROOT_DIR/.build}"
+if [ -z "${REPLAYMAC_SCRATCH_PATH:-}" ] && [ -d "$SCRATCH_DIR" ] && [ -n "$(find "$SCRATCH_DIR" ! -user "$(id -u)" -print -quit 2>/dev/null)" ]; then
+  SCRATCH_DIR="$ROOT_DIR/.build-user"
+fi
+SCRATCH_FLAGS="--scratch-path $SCRATCH_DIR"
 
 resolve_signing_identity() {
   if [ -n "${SIGNING_IDENTITY:-}" ]; then
@@ -81,7 +86,7 @@ fi
 
 # Build once so SPM generates resource bundle accessors
 # shellcheck disable=SC2086  # Build flag lists are intentionally word-split
-swift build -c release --package-path "$ROOT_DIR" $ARCH_FLAGS $APPSTORE_FLAG
+swift build -c release --package-path "$ROOT_DIR" $SCRATCH_FLAGS $ARCH_FLAGS $APPSTORE_FLAG
 
 # Patch generated accessors to load bundles from Contents/Resources
 # instead of the app root, which avoids breaking code signing.
@@ -93,7 +98,7 @@ swift build -c release --package-path "$ROOT_DIR" $ARCH_FLAGS $APPSTORE_FLAG
 # directories globbed below. Kept as a guard for thin builds (empty
 # ARCH_FLAGS), where the native build system emits the naive
 # Bundle.main.bundleURL form that does need patching.
-for accessor in "$ROOT_DIR"/.build/*-apple-macosx/release/*.build/DerivedSources/resource_bundle_accessor.swift; do
+for accessor in "$SCRATCH_DIR"/*-apple-macosx/release/*.build/DerivedSources/resource_bundle_accessor.swift; do
   if [ -f "$accessor" ]; then
     sed -i '' 's|Bundle.main.bundleURL.appendingPathComponent("\(.*\)_\1.bundle")|Bundle.main.bundleURL.appendingPathComponent("Contents/Resources/\1_\1.bundle")|g' "$accessor"
   fi
@@ -101,15 +106,20 @@ done
 
 # Rebuild so the patched accessors are compiled in
 # shellcheck disable=SC2086
-swift build -c release --package-path "$ROOT_DIR" $ARCH_FLAGS $APPSTORE_FLAG
+swift build -c release --package-path "$ROOT_DIR" $SCRATCH_FLAGS $ARCH_FLAGS $APPSTORE_FLAG
 
 # ARCH_FLAGS must be repeated here: without them SwiftPM reports the per-arch
 # path and we would ship a thin binary out of a universal build.
 # shellcheck disable=SC2086
-BIN_DIR="$(swift build -c release --show-bin-path --package-path "$ROOT_DIR" $ARCH_FLAGS)"
+BIN_DIR="$(swift build -c release --show-bin-path --package-path "$ROOT_DIR" $SCRATCH_FLAGS $ARCH_FLAGS)"
 BIN_PATH="$BIN_DIR/$BIN_NAME"
 
-rm -rf "$APP_DIR"
+if [ -d "$APP_DIR" ] && ! rm -rf "$APP_DIR" 2>/dev/null; then
+  if ! mv "$APP_DIR" "$(dirname "$APP_DIR")/.${APP_NAME}-stale-$$" 2>/dev/null; then
+    APP_DIR="$(dirname "$APP_DIR")/latest/${APP_NAME}.app"
+    rm -rf "$APP_DIR"
+  fi
+fi
 mkdir -p "$APP_DIR/Contents/MacOS" "$APP_DIR/Contents/Resources" "$APP_DIR/Contents/Frameworks"
 
 cp "$INFO_PLIST" "$APP_DIR/Contents/Info.plist"

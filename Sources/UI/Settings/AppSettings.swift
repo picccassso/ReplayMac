@@ -267,6 +267,113 @@ public enum AppSettings {
     public static var isSystemAudioMuted: Bool { Defaults[.isSystemAudioMuted] }
     public static var isMicrophoneMuted: Bool { Defaults[.isMicrophoneMuted] }
 
+    public static func setSystemAudioVolume(_ volume: Double) {
+        Defaults[.systemAudioVolume] = min(max(volume, 0.0), 1.0)
+    }
+
+    public static func setMicrophoneVolume(_ volume: Double) {
+        Defaults[.microphoneVolume] = min(max(volume, 0.0), 1.0)
+    }
+
+    public static func selectPrimaryDisplay(_ displayKey: String) {
+        let trimmed = displayKey.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return }
+
+        let previousPrimary = Defaults[.captureDisplayID]
+        let onlineKeys = DisplayIdentity.onlineDisplayIDs().map { DisplayIdentity.stableKey(for: $0) }
+        var priorities = Defaults[.captureDisplayPriorities].filter { !$0.isEmpty }
+        for key in onlineKeys where !priorities.contains(key) {
+            priorities.append(key)
+        }
+        priorities.removeAll { $0 == trimmed }
+        priorities.insert(trimmed, at: 0)
+
+        Defaults[.captureDisplayPriorities] = priorities
+        Defaults[.captureDisplayID] = trimmed
+
+        if Defaults[.captureMode] == CaptureMode.dualSideBySide.rawValue,
+           Defaults[.captureDisplayID2] == trimmed,
+           !previousPrimary.isEmpty,
+           previousPrimary != trimmed {
+            Defaults[.captureDisplayID2] = previousPrimary
+        }
+    }
+
+    public static func loadCaptureProfiles() -> [CaptureProfile] {
+        guard let data = Defaults[.captureProfilesJSON].data(using: .utf8),
+              let profiles = try? JSONDecoder().decode([CaptureProfile].self, from: data) else {
+            return []
+        }
+        return profiles.sorted { $0.updatedAt > $1.updatedAt }
+    }
+
+    public static func isCaptureProfileActive(_ profile: CaptureProfile) -> Bool {
+        let currentHDR = Defaults[.captureHDR]
+        let profileHDR = profile.captureHDR ?? false
+        guard currentHDR == profileHDR,
+              Defaults[.videoCodec] == profile.videoCodecRawValue,
+              Defaults[.captureMode] == profile.captureModeRawValue,
+              Defaults[.captureResolution] == profile.captureResolutionRawValue,
+              Defaults[.frameRate] == profile.frameRate,
+              abs(Defaults[.bitrateMbps] - profile.bitrateMbps) < 0.01,
+              Defaults[.captureSystemAudio] == profile.captureSystemAudio,
+              Defaults[.captureMicrophone] == profile.captureMicrophone,
+              Defaults[.perAppAudioEnabled] == profile.perAppAudioEnabled,
+              Defaults[.longBufferEnabled] == profile.longBufferEnabled,
+              Defaults[.longBufferDurationMinutes] == profile.longBufferDurationMinutes else {
+            return false
+        }
+        if !profile.captureDisplayID.isEmpty && Defaults[.captureDisplayID] != profile.captureDisplayID {
+            return false
+        }
+        return true
+    }
+
+    @discardableResult
+    public static func applyCaptureProfile(id: String) -> Bool {
+        let profiles = loadCaptureProfiles()
+        guard let profile = profiles.first(where: {
+            $0.id.uuidString.caseInsensitiveCompare(id) == .orderedSame || $0.id.uuidString == id
+        }) else {
+            return false
+        }
+
+        Defaults[.captureHDR] = profile.captureHDR ?? false
+        Defaults[.videoCodec] = profile.videoCodecRawValue
+        Defaults[.captureMode] = profile.captureModeRawValue
+        Defaults[.captureDisplayID] = profile.captureDisplayID
+        Defaults[.captureDisplayID2] = profile.captureDisplayID2
+        if let priorities = profile.captureDisplayPriorities, !priorities.isEmpty {
+            Defaults[.captureDisplayPriorities] = priorities
+        } else if !profile.captureDisplayID.isEmpty {
+            Defaults[.captureDisplayPriorities] = [profile.captureDisplayID]
+        }
+        Defaults[.dualCaptureSaveMode] = profile.dualCaptureSaveModeRawValue
+        Defaults[.captureResolution] = profile.captureResolutionRawValue
+        Defaults[.customCaptureWidth] = profile.customCaptureWidth
+        Defaults[.customCaptureHeight] = profile.customCaptureHeight
+        Defaults[.frameRate] = profile.frameRate
+        Defaults[.bitrateMbps] = profile.bitrateMbps
+        Defaults[.qualityPreset] = profile.qualityPresetRawValue
+
+        Defaults[.captureSystemAudio] = profile.captureSystemAudio
+        Defaults[.captureMicrophone] = profile.captureMicrophone
+        Defaults[.mergeAudioTracks] = profile.mergeAudioTracks ?? true
+        Defaults[.microphoneID] = profile.microphoneID
+        Defaults[.excludeOwnAppAudio] = profile.excludeOwnAppAudio
+        Defaults[.perAppAudioEnabled] = profile.perAppAudioEnabled
+        Defaults[.perAppAudioBundleID] = profile.perAppAudioBundleID
+        Defaults[.mutedAudioAppBundleIDs] = profile.mutedAudioAppBundleIDs ?? []
+        Defaults[.systemAudioVolume] = profile.systemAudioVolume
+        Defaults[.microphoneVolume] = profile.microphoneVolume
+
+        Defaults[.memoryCapMB] = profile.memoryCapMB
+        Defaults[.queueDepth] = profile.queueDepth
+        Defaults[.longBufferEnabled] = profile.longBufferEnabled
+        Defaults[.longBufferDurationMinutes] = profile.longBufferDurationMinutes
+        return true
+    }
+
     public static func effectiveSystemAudioVolume(
         volume: Double = systemAudioVolume,
         isMuted: Bool = isSystemAudioMuted
@@ -395,6 +502,50 @@ public enum AppSettings {
             return NSWorkspace.shared.icon(forFile: url.path)
         }
         return nil
+    }
+
+    nonisolated(unsafe) private static let appIconBase64Cache = NSCache<NSString, NSString>()
+
+    public static func appIconBase64(for bundleID: String, dimension: Int = 64) -> String? {
+        let trimmed = bundleID.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return nil }
+        let cacheKey = "\(trimmed.lowercased()):\(dimension)" as NSString
+        if let cached = appIconBase64Cache.object(forKey: cacheKey) {
+            return cached as String
+        }
+        guard let icon = appIcon(for: trimmed),
+              let bitmap = NSBitmapImageRep(
+                  bitmapDataPlanes: nil,
+                  pixelsWide: dimension,
+                  pixelsHigh: dimension,
+                  bitsPerSample: 8,
+                  samplesPerPixel: 4,
+                  hasAlpha: true,
+                  isPlanar: false,
+                  colorSpaceName: .deviceRGB,
+                  bytesPerRow: 0,
+                  bitsPerPixel: 0
+              ) else {
+            return nil
+        }
+        bitmap.size = NSSize(width: dimension, height: dimension)
+        NSGraphicsContext.saveGraphicsState()
+        let context = NSGraphicsContext(bitmapImageRep: bitmap)
+        NSGraphicsContext.current = context
+        context?.imageInterpolation = .high
+        icon.draw(
+            in: NSRect(x: 0, y: 0, width: dimension, height: dimension),
+            from: .zero,
+            operation: .copy,
+            fraction: 1.0
+        )
+        NSGraphicsContext.restoreGraphicsState()
+        guard let pngData = bitmap.representation(using: .png, properties: [:]) else {
+            return nil
+        }
+        let encoded = pngData.base64EncodedString()
+        appIconBase64Cache.setObject(encoded as NSString, forKey: cacheKey)
+        return encoded
     }
 
     public static var longBufferEnabled: Bool { Defaults[.longBufferEnabled] }

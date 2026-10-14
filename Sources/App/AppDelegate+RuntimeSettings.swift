@@ -43,9 +43,11 @@ extension AppDelegate {
         })
         settingsObservations.append(Defaults.observe(.systemAudioVolume) { [weak self] _ in
             self?.applyEffectiveAudioVolumes()
+            self?.broadcastCompanionSnapshot()
         })
         settingsObservations.append(Defaults.observe(.microphoneVolume) { [weak self] _ in
             self?.applyEffectiveAudioVolumes()
+            self?.broadcastCompanionSnapshot()
         })
         settingsObservations.append(Defaults.observe(.isSystemAudioMuted) { [weak self] _ in
             self?.applyEffectiveAudioVolumes()
@@ -103,6 +105,7 @@ extension AppDelegate {
         })
         settingsObservations.append(Defaults.observe(.perAppAudioEnabled) { [weak self] _ in
             self?.statusItemController.refreshPresentation()
+            self?.broadcastCompanionSnapshot()
             self?.scheduleRuntimeSettingsReconcile(needsVideoReset: false, needsFullRestart: false)
         })
         settingsObservations.append(Defaults.observe(.perAppAudioBundleID) { [weak self] _ in
@@ -110,7 +113,11 @@ extension AppDelegate {
         })
         settingsObservations.append(Defaults.observe(.mutedAudioAppBundleIDs) { [weak self] _ in
             self?.statusItemController.refreshPresentation()
+            self?.broadcastCompanionSnapshot()
             self?.scheduleRuntimeSettingsReconcile(needsVideoReset: false, needsFullRestart: false)
+        })
+        settingsObservations.append(Defaults.observe(.captureProfilesJSON) { [weak self] _ in
+            self?.broadcastCompanionSnapshot()
         })
         settingsObservations.append(Defaults.observe(.dualCaptureSaveMode) { [weak self] _ in
             self?.scheduleRuntimeSettingsReconcile(needsFullRestart: true)
@@ -137,12 +144,15 @@ extension AppDelegate {
             self.scheduleRuntimeSettingsReconcile(needsFullRestart: true)
         })
         settingsObservations.append(Defaults.observe(.captureDisplayID) { [weak self] _ in
+            self?.broadcastCompanionSnapshot()
             self?.scheduleRuntimeSettingsReconcile(needsFullRestart: true)
         })
         settingsObservations.append(Defaults.observe(.captureDisplayID2) { [weak self] _ in
+            self?.broadcastCompanionSnapshot()
             self?.scheduleRuntimeSettingsReconcile(needsFullRestart: true)
         })
         settingsObservations.append(Defaults.observe(.captureDisplayPriorities) { [weak self] _ in
+            self?.broadcastCompanionSnapshot()
             self?.scheduleRuntimeSettingsReconcile(needsFullRestart: true)
         })
     }

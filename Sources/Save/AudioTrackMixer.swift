@@ -280,7 +280,9 @@ private struct PCMTrack {
 
             let frameCount = CMSampleBufferGetNumSamples(sample)
             let byteCount = frameCount * channels * MemoryLayout<Float>.size
-            guard byteCount > 0 else { continue }
+            let availableBytes = CMBlockBufferGetDataLength(dataBuffer)
+            let copyByteCount = min(byteCount, availableBytes)
+            guard byteCount > 0, copyByteCount > 0 else { continue }
 
             var bytes = [UInt8](repeating: 0, count: byteCount)
             let status = bytes.withUnsafeMutableBytes { buffer in
@@ -290,7 +292,7 @@ private struct PCMTrack {
                 return CMBlockBufferCopyDataBytes(
                     dataBuffer,
                     atOffset: 0,
-                    dataLength: byteCount,
+                    dataLength: copyByteCount,
                     destination: baseAddress
                 )
             }

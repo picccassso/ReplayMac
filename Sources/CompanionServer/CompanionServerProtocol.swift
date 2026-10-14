@@ -8,6 +8,13 @@ public enum CompanionClientMessageType: String, Codable, Sendable {
     case getThumbnail = "get_thumbnail"
     case revealClip = "reveal_clip"
     case deleteClip = "delete_clip"
+    case trimClip = "trim_clip"
+    case copyClip = "copy_clip"
+    case setVolume = "set_volume"
+    case toggleAppMute = "toggle_app_mute"
+    case unmuteAllApps = "unmute_all_apps"
+    case selectDisplay = "select_display"
+    case applyProfile = "apply_profile"
     case authProof = "auth_proof"
     case ping
 }
@@ -23,6 +30,16 @@ public struct CompanionClientMessage: Codable, Sendable {
     public let protocolVersion: Int?
     /// Base64 HMAC answering an `auth_challenge`; absent when the phone has no secret for this Mac.
     public let proof: String?
+    /// Bundle identifier for `toggle_app_mute`.
+    public let bundleId: String?
+    /// Audio target (`"microphone"` or `"systemAudio"`) for `set_volume`.
+    public let target: String?
+    /// Volume level (`0.0...1.0`) for `set_volume`.
+    public let volume: Double?
+    /// Display stable key for `select_display`.
+    public let displayId: String?
+    /// Capture profile UUID string for `apply_profile`.
+    public let profileId: String?
 
     public init(
         type: String,
@@ -32,7 +49,12 @@ public struct CompanionClientMessage: Codable, Sendable {
         action: String? = nil,
         clipId: String? = nil,
         protocolVersion: Int? = nil,
-        proof: String? = nil
+        proof: String? = nil,
+        bundleId: String? = nil,
+        target: String? = nil,
+        volume: Double? = nil,
+        displayId: String? = nil,
+        profileId: String? = nil
     ) {
         self.type = type
         self.deviceId = deviceId
@@ -42,6 +64,11 @@ public struct CompanionClientMessage: Codable, Sendable {
         self.clipId = clipId
         self.protocolVersion = protocolVersion
         self.proof = proof
+        self.bundleId = bundleId
+        self.target = target
+        self.volume = volume
+        self.displayId = displayId
+        self.profileId = profileId
     }
 }
 
@@ -97,6 +124,68 @@ public struct CompanionClipSummary: Codable, Sendable, Identifiable, Equatable {
     }
 }
 
+public struct CompanionAudioApp: Codable, Sendable, Identifiable, Equatable {
+    public let bundleId: String
+    public let name: String
+    public let isMuted: Bool
+    public let isRunning: Bool
+    public let iconBase64: String?
+
+    public var id: String { bundleId }
+
+    public init(
+        bundleId: String,
+        name: String,
+        isMuted: Bool = false,
+        isRunning: Bool = true,
+        iconBase64: String? = nil
+    ) {
+        self.bundleId = bundleId
+        self.name = name
+        self.isMuted = isMuted
+        self.isRunning = isRunning
+        self.iconBase64 = iconBase64
+    }
+}
+
+public struct CompanionDisplayInfo: Codable, Sendable, Identifiable, Equatable {
+    public let id: String
+    public let name: String
+    public let isActive: Bool
+    public let isConnected: Bool
+
+    public init(
+        id: String,
+        name: String,
+        isActive: Bool = false,
+        isConnected: Bool = true
+    ) {
+        self.id = id
+        self.name = name
+        self.isActive = isActive
+        self.isConnected = isConnected
+    }
+}
+
+public struct CompanionProfileSummary: Codable, Sendable, Identifiable, Equatable {
+    public let id: String
+    public let name: String
+    public let summary: String
+    public let isActive: Bool
+
+    public init(
+        id: String,
+        name: String,
+        summary: String,
+        isActive: Bool = false
+    ) {
+        self.id = id
+        self.name = name
+        self.summary = summary
+        self.isActive = isActive
+    }
+}
+
 public struct CompanionStateSnapshot: Codable, Sendable, Equatable {
     public let type: String
     public let isRecording: Bool
@@ -118,6 +207,12 @@ public struct CompanionStateSnapshot: Codable, Sendable, Equatable {
     public let isMicrophoneMuted: Bool
     public let isSystemAudioEnabled: Bool
     public let isSystemAudioMuted: Bool
+    public let microphoneVolume: Double
+    public let systemAudioVolume: Double
+    public let perAppAudioEnabled: Bool
+    public let audioApps: [CompanionAudioApp]
+    public let displays: [CompanionDisplayInfo]
+    public let profiles: [CompanionProfileSummary]
     public let recentClips: [CompanionClipSummary]
 
     public init(
@@ -140,6 +235,12 @@ public struct CompanionStateSnapshot: Codable, Sendable, Equatable {
         isMicrophoneMuted: Bool,
         isSystemAudioEnabled: Bool,
         isSystemAudioMuted: Bool,
+        microphoneVolume: Double = 1.0,
+        systemAudioVolume: Double = 1.0,
+        perAppAudioEnabled: Bool = false,
+        audioApps: [CompanionAudioApp] = [],
+        displays: [CompanionDisplayInfo] = [],
+        profiles: [CompanionProfileSummary] = [],
         recentClips: [CompanionClipSummary]
     ) {
         self.type = type
@@ -161,7 +262,53 @@ public struct CompanionStateSnapshot: Codable, Sendable, Equatable {
         self.isMicrophoneMuted = isMicrophoneMuted
         self.isSystemAudioEnabled = isSystemAudioEnabled
         self.isSystemAudioMuted = isSystemAudioMuted
+        self.microphoneVolume = microphoneVolume
+        self.systemAudioVolume = systemAudioVolume
+        self.perAppAudioEnabled = perAppAudioEnabled
+        self.audioApps = audioApps
+        self.displays = displays
+        self.profiles = profiles
         self.recentClips = recentClips
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case type, isRecording, isSessionRecording, saveStatus
+        case recordingElapsedSeconds, extendedBufferElapsedSeconds, sessionElapsedSeconds
+        case bufferedSeconds, bufferDurationSeconds, bufferMemoryBytes, bufferMemoryFormatted
+        case longBufferEnabled, longBufferDurationSeconds, capturedDisplayName, isUsingFallbackDisplay
+        case isMicrophoneEnabled, isMicrophoneMuted, isSystemAudioEnabled, isSystemAudioMuted
+        case microphoneVolume, systemAudioVolume, perAppAudioEnabled
+        case audioApps, displays, profiles, recentClips
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        self.type = try container.decodeIfPresent(String.self, forKey: .type) ?? "state_snapshot"
+        self.isRecording = try container.decodeIfPresent(Bool.self, forKey: .isRecording) ?? false
+        self.isSessionRecording = try container.decodeIfPresent(Bool.self, forKey: .isSessionRecording) ?? false
+        self.saveStatus = try container.decodeIfPresent(String.self, forKey: .saveStatus) ?? "idle"
+        self.recordingElapsedSeconds = try container.decodeIfPresent(Double.self, forKey: .recordingElapsedSeconds) ?? 0
+        self.extendedBufferElapsedSeconds = try container.decodeIfPresent(Double.self, forKey: .extendedBufferElapsedSeconds) ?? 0
+        self.sessionElapsedSeconds = try container.decodeIfPresent(Double.self, forKey: .sessionElapsedSeconds) ?? 0
+        self.bufferedSeconds = try container.decodeIfPresent(Double.self, forKey: .bufferedSeconds) ?? 0
+        self.bufferDurationSeconds = try container.decodeIfPresent(Int.self, forKey: .bufferDurationSeconds) ?? 30
+        self.bufferMemoryBytes = try container.decodeIfPresent(Int.self, forKey: .bufferMemoryBytes) ?? 0
+        self.bufferMemoryFormatted = try container.decodeIfPresent(String.self, forKey: .bufferMemoryFormatted) ?? "0 MB"
+        self.longBufferEnabled = try container.decodeIfPresent(Bool.self, forKey: .longBufferEnabled) ?? false
+        self.longBufferDurationSeconds = try container.decodeIfPresent(Int.self, forKey: .longBufferDurationSeconds) ?? 300
+        self.capturedDisplayName = try container.decodeIfPresent(String.self, forKey: .capturedDisplayName)
+        self.isUsingFallbackDisplay = try container.decodeIfPresent(Bool.self, forKey: .isUsingFallbackDisplay) ?? false
+        self.isMicrophoneEnabled = try container.decodeIfPresent(Bool.self, forKey: .isMicrophoneEnabled) ?? false
+        self.isMicrophoneMuted = try container.decodeIfPresent(Bool.self, forKey: .isMicrophoneMuted) ?? false
+        self.isSystemAudioEnabled = try container.decodeIfPresent(Bool.self, forKey: .isSystemAudioEnabled) ?? true
+        self.isSystemAudioMuted = try container.decodeIfPresent(Bool.self, forKey: .isSystemAudioMuted) ?? false
+        self.microphoneVolume = try container.decodeIfPresent(Double.self, forKey: .microphoneVolume) ?? 1.0
+        self.systemAudioVolume = try container.decodeIfPresent(Double.self, forKey: .systemAudioVolume) ?? 1.0
+        self.perAppAudioEnabled = try container.decodeIfPresent(Bool.self, forKey: .perAppAudioEnabled) ?? false
+        self.audioApps = try container.decodeIfPresent([CompanionAudioApp].self, forKey: .audioApps) ?? []
+        self.displays = try container.decodeIfPresent([CompanionDisplayInfo].self, forKey: .displays) ?? []
+        self.profiles = try container.decodeIfPresent([CompanionProfileSummary].self, forKey: .profiles) ?? []
+        self.recentClips = try container.decodeIfPresent([CompanionClipSummary].self, forKey: .recentClips) ?? []
     }
 }
 

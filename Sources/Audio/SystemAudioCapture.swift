@@ -216,9 +216,12 @@ public final class SystemAudioCapture: @unchecked Sendable {
         }
         let asbd = asbdPointer.pointee
         let sampleRate = asbd.mSampleRate
-        let bytesPerFrame = asbd.mBytesPerFrame
+        let isNonInterleaved = (asbd.mFormatFlags & kAudioFormatFlagIsNonInterleaved) != 0
+        let bytesPerFrame = isNonInterleaved
+            ? Int(asbd.mBytesPerFrame) * max(1, Int(asbd.mChannelsPerFrame))
+            : Int(asbd.mBytesPerFrame)
         let totalFrames = Int64(duration * Double(sampleRate))
-        let totalBytes = Int(totalFrames) * Int(bytesPerFrame)
+        let totalBytes = Int(totalFrames) * bytesPerFrame
         guard totalBytes > 0 else { return nil }
 
         var blockBuffer: CMBlockBuffer?

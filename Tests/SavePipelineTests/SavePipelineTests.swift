@@ -251,6 +251,87 @@ final class SavePipelineTests: XCTestCase {
         XCTAssertEqual(samples[5], 0.5, accuracy: 0.0001) // frame 2 right
     }
 
+    func testAudioTrackMixerHandlesUnderallocatedNonInterleavedSilenceBuffer() throws {
+        // Simulates a non-interleaved stereo buffer whose blockBuffer was sized using
+        // planar mBytesPerFrame (4 bytes) instead of channels * 4 bytes (8 bytes).
+        let frameCount = 4
+        let channels = 2
+        var asbd = AudioStreamBasicDescription(
+            mSampleRate: 48_000,
+            mFormatID: kAudioFormatLinearPCM,
+            mFormatFlags: kAudioFormatFlagIsFloat | kAudioFormatFlagIsPacked | kAudioFormatFlagIsNonInterleaved,
+            mBytesPerPacket: 4,
+            mFramesPerPacket: 1,
+            mBytesPerFrame: 4,
+            mChannelsPerFrame: UInt32(channels),
+            mBitsPerChannel: 32,
+            mReserved: 0
+        )
+        var formatDescription: CMAudioFormatDescription?
+        XCTAssertEqual(
+            CMAudioFormatDescriptionCreate(
+                allocator: kCFAllocatorDefault,
+                asbd: &asbd,
+                layoutSize: 0,
+                layout: nil,
+                magicCookieSize: 0,
+                magicCookie: nil,
+                extensions: nil,
+                formatDescriptionOut: &formatDescription
+            ),
+            noErr
+        )
+        let shortByteCount = frameCount * Int(asbd.mBytesPerFrame) // 16 bytes instead of 32
+        var blockBuffer: CMBlockBuffer?
+        XCTAssertEqual(
+            CMBlockBufferCreateWithMemoryBlock(
+                allocator: kCFAllocatorDefault,
+                memoryBlock: nil,
+                blockLength: shortByteCount,
+                blockAllocator: kCFAllocatorDefault,
+                customBlockSource: nil,
+                offsetToData: 0,
+                dataLength: shortByteCount,
+                flags: kCMBlockBufferAssureMemoryNowFlag,
+                blockBufferOut: &blockBuffer
+            ),
+            noErr
+        )
+        XCTAssertEqual(CMBlockBufferFillDataBytes(with: 0, blockBuffer: blockBuffer!, offsetIntoDestination: 0, dataLength: shortByteCount), noErr)
+        var timing = CMSampleTimingInfo(
+            duration: CMTime(value: 1, timescale: 48_000),
+            presentationTimeStamp: .zero,
+            decodeTimeStamp: .invalid
+        )
+        var systemSilence: CMSampleBuffer?
+        XCTAssertEqual(
+            CMSampleBufferCreateReady(
+                allocator: kCFAllocatorDefault,
+                dataBuffer: blockBuffer,
+                formatDescription: formatDescription,
+                sampleCount: frameCount,
+                sampleTimingEntryCount: 1,
+                sampleTimingArray: &timing,
+                sampleSizeEntryCount: 0,
+                sampleSizeArray: nil,
+                sampleBufferOut: &systemSilence
+            ),
+            noErr
+        )
+
+        let mic = try makePCMSampleBuffer(
+            samples: [0.25, 0.25, 0.25, 0.25],
+            channels: 1,
+            startFrame: 0
+        )
+
+        let merged = try AudioTrackMixer.merge(
+            systemAudioSamples: [systemSilence!],
+            micAudioSamples: [mic]
+        )
+        XCTAssertEqual(merged.count, 1)
+    }
+
     private func makePCMSampleBuffer(
         samples: [Float],
         channels: Int,

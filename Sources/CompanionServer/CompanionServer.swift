@@ -59,6 +59,13 @@ public final class CompanionServer: ObservableObject {
     public var onToggleSystemAudio: (@MainActor () -> Void)?
     public var onRevealClip: (@MainActor (String) -> Void)?
     public var onDeleteClip: (@MainActor (String) -> Void)?
+    public var onTrimClip: (@MainActor (String) -> Void)?
+    public var onCopyClip: (@MainActor (String) -> Void)?
+    public var onSetVolume: (@MainActor (String, Double) -> Void)?
+    public var onToggleAppMute: (@MainActor (String) -> Void)?
+    public var onUnmuteAllApps: (@MainActor () -> Void)?
+    public var onSelectDisplay: (@MainActor (String) -> Void)?
+    public var onApplyProfile: (@MainActor (String) -> Void)?
     public var onGetThumbnail: (@MainActor (String) async -> Data?)?
     public var snapshotProvider: (@MainActor () -> CompanionStateSnapshot)?
 
@@ -401,6 +408,32 @@ public final class CompanionServer: ObservableObject {
                 if let clipId = message.clipId {
                     onDeleteClip?(clipId)
                 }
+            case "trim_clip", "trimClip":
+                if let clipId = message.clipId {
+                    onTrimClip?(clipId)
+                }
+            case "copy_clip", "copyClip":
+                if let clipId = message.clipId {
+                    onCopyClip?(clipId)
+                }
+            case "set_volume", "setVolume":
+                if let target = message.target, let volume = message.volume {
+                    onSetVolume?(target, volume)
+                }
+            case "toggle_app_mute", "toggleAppMute":
+                if let bundleId = message.bundleId {
+                    onToggleAppMute?(bundleId)
+                }
+            case "unmute_all_apps", "unmuteAllApps":
+                onUnmuteAllApps?()
+            case "select_display", "selectDisplay":
+                if let displayId = message.displayId {
+                    onSelectDisplay?(displayId)
+                }
+            case "apply_profile", "applyProfile":
+                if let profileId = message.profileId {
+                    onApplyProfile?(profileId)
+                }
             case "get_thumbnail", "getThumbnail":
                 if let clipId = message.clipId {
                     Task { @MainActor in
@@ -702,6 +735,12 @@ public final class CompanionServer: ObservableObject {
             isMicrophoneMuted: snapshot.isMicrophoneMuted,
             isSystemAudioEnabled: snapshot.isSystemAudioEnabled,
             isSystemAudioMuted: snapshot.isSystemAudioMuted,
+            microphoneVolume: snapshot.microphoneVolume,
+            systemAudioVolume: snapshot.systemAudioVolume,
+            perAppAudioEnabled: snapshot.perAppAudioEnabled,
+            audioApps: snapshot.audioApps,
+            displays: snapshot.displays,
+            profiles: snapshot.profiles,
             recentClips: snapshot.recentClips
         )
         broadcast(changed)

@@ -289,11 +289,15 @@ public actor ClipSaver {
         mergeAudioTracks: Bool
     ) throws -> [AudioAppendPlan] {
         if mergeAudioTracks, !systemAudioSamples.isEmpty, !micAudioSamples.isEmpty {
-            let mergedSamples = try AudioTrackMixer.merge(
-                systemAudioSamples: systemAudioSamples,
-                micAudioSamples: micAudioSamples
-            )
-            return [AudioAppendPlan(label: "mergedAudio", samples: mergedSamples)]
+            do {
+                let mergedSamples = try AudioTrackMixer.merge(
+                    systemAudioSamples: systemAudioSamples,
+                    micAudioSamples: micAudioSamples
+                )
+                return [AudioAppendPlan(label: "mergedAudio", samples: mergedSamples)]
+            } catch {
+                logger.error("AudioTrackMixer failed (\(String(describing: error), privacy: .public)); falling back to separate audio tracks")
+            }
         }
 
         var plans: [AudioAppendPlan] = []
@@ -327,7 +331,10 @@ public actor ClipSaver {
         let totalFrames = Int(gapDuration * sampleRate)
         guard totalFrames > 0 else { return samples }
 
-        let bytesPerFrame = Int(asbd.mBytesPerFrame)
+        let isNonInterleaved = (asbd.mFormatFlags & kAudioFormatFlagIsNonInterleaved) != 0
+        let bytesPerFrame = isNonInterleaved
+            ? Int(asbd.mBytesPerFrame) * max(1, Int(asbd.mChannelsPerFrame))
+            : Int(asbd.mBytesPerFrame)
         let maxFramesPerChunk = 2048
         var silenceBuffers: [CMSampleBuffer] = []
         var currentFrame = 0

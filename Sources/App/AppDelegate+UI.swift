@@ -76,6 +76,7 @@ extension AppDelegate {
 
     @objc private func workspaceApplicationLifecycleDidChange(_ notification: Notification) {
         statusItemController.refreshPresentation()
+        broadcastCompanionSnapshot()
         guard isCaptureRunning else { return }
         guard perAppAudioCapture.isRunning
             || (AppSettings.captureSystemAudio && (AppSettings.perAppAudioEnabled || !AppSettings.mutedAudioAppBundleIDs.isEmpty)) else {

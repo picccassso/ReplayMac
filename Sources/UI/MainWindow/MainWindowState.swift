@@ -135,7 +135,7 @@ public final class MainWindowState: ObservableObject {
         }
     }
 
-    func openEditor(_ url: URL) {
+    public func openEditor(_ url: URL) {
         let source = url.standardizedFileURL
         let session = editors[source] ?? ClipEditorSession(url: source, exports: exports)
         editors[source] = session

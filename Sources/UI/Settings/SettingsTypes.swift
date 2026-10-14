@@ -79,43 +79,43 @@ public struct AudioApplicationOption: Identifiable, Hashable, Sendable {
     }
 }
 
-struct CaptureProfile: Identifiable, Codable, Equatable {
-    var id: UUID
-    var name: String
-    var createdAt: Date
-    var updatedAt: Date
+public struct CaptureProfile: Identifiable, Codable, Equatable, Sendable {
+    public var id: UUID
+    public var name: String
+    public var createdAt: Date
+    public var updatedAt: Date
 
-    var captureHDR: Bool? = false
-    var videoCodecRawValue: String
-    var captureModeRawValue: String
-    var captureDisplayID: String
-    var captureDisplayID2: String
-    var captureDisplayPriorities: [String]? = []
-    var dualCaptureSaveModeRawValue: String
-    var captureResolutionRawValue: String
-    var customCaptureWidth: Int
-    var customCaptureHeight: Int
-    var frameRate: Int
-    var bitrateMbps: Double
-    var qualityPresetRawValue: String
+    public var captureHDR: Bool? = false
+    public var videoCodecRawValue: String
+    public var captureModeRawValue: String
+    public var captureDisplayID: String
+    public var captureDisplayID2: String
+    public var captureDisplayPriorities: [String]? = []
+    public var dualCaptureSaveModeRawValue: String
+    public var captureResolutionRawValue: String
+    public var customCaptureWidth: Int
+    public var customCaptureHeight: Int
+    public var frameRate: Int
+    public var bitrateMbps: Double
+    public var qualityPresetRawValue: String
 
-    var captureSystemAudio: Bool
-    var captureMicrophone: Bool
-    var mergeAudioTracks: Bool? = true
-    var microphoneID: String
-    var excludeOwnAppAudio: Bool
-    var perAppAudioEnabled: Bool
-    var perAppAudioBundleID: String
-    var mutedAudioAppBundleIDs: [String]? = []
-    var systemAudioVolume: Double
-    var microphoneVolume: Double
+    public var captureSystemAudio: Bool
+    public var captureMicrophone: Bool
+    public var mergeAudioTracks: Bool? = true
+    public var microphoneID: String
+    public var excludeOwnAppAudio: Bool
+    public var perAppAudioEnabled: Bool
+    public var perAppAudioBundleID: String
+    public var mutedAudioAppBundleIDs: [String]? = []
+    public var systemAudioVolume: Double
+    public var microphoneVolume: Double
 
-    var memoryCapMB: Double
-    var queueDepth: Int
-    var longBufferEnabled: Bool
-    var longBufferDurationMinutes: Int
+    public var memoryCapMB: Double
+    public var queueDepth: Int
+    public var longBufferEnabled: Bool
+    public var longBufferDurationMinutes: Int
 
-    var summary: String {
+    public var summary: String {
         let fpsLabel = "\(frameRate) fps"
         let audioLabel: String
         if !captureSystemAudio {
