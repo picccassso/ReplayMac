@@ -276,7 +276,9 @@ class AppDelegate: NSObject, NSApplicationDelegate, @unchecked Sendable {
 
         DispatchQueue.main.async { [weak self] in
             guard let self else { return }
-            if Defaults[.hasCompletedOnboarding] && !self.isLaunchedAsLoginItem {
+            if Defaults[.hasCompletedOnboarding]
+                && !self.isLaunchedAsLoginItem
+                && self.mainWindowState.opensWindowOnLaunch {
                 self.openMainWindow()
             }
             self.updateActivationPolicy(bringVisibleWindowToFront: true)

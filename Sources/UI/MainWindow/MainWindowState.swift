@@ -38,25 +38,32 @@ public enum MainWindowPage: String, CaseIterable, Identifiable {
     }
 }
 
-/// The page the main window shows when it opens without a specific destination,
-/// such as at launch or from the Dock. Set in Settings > General.
+/// How the main window behaves at launch and when reopened without a specific
+/// destination, such as from the Dock. Set in Settings > General.
 public enum MainWindowStartPage: String, CaseIterable, Identifiable {
-    case home, library, lastViewed
+    case home, library, settings, lastViewed, hidden
     public var id: String { rawValue }
     public var title: String {
         switch self {
         case .home: "Home"
         case .library: "Clip Library"
+        case .settings: "Settings"
         case .lastViewed: "Last Viewed Page"
+        case .hidden: "Hidden (Menu Bar Only)"
         }
     }
     /// Nil restores whichever page was open last.
     var page: MainWindowPage? {
         switch self {
-        case .home: .home
+        case .home, .hidden: .home
         case .library: .library
+        case .settings: .general
         case .lastViewed: nil
         }
+    }
+    /// False when the app should launch quietly in the menu bar without opening the main window.
+    public var opensWindowOnLaunch: Bool {
+        self != .hidden
     }
 }
 
@@ -112,6 +119,11 @@ public final class MainWindowState: ObservableObject {
     /// or nil to keep the page that was open last.
     public var startPageDestination: MainWindowPage? {
         (MainWindowStartPage(rawValue: defaults.string(forKey: Self.startPageKey) ?? "") ?? .home).page
+    }
+
+    /// Whether launching the app should automatically open the main window.
+    public var opensWindowOnLaunch: Bool {
+        (MainWindowStartPage(rawValue: defaults.string(forKey: Self.startPageKey) ?? "") ?? .home).opensWindowOnLaunch
     }
     var isSettingsPage: Bool { SettingsTab(rawValue: page.rawValue) != nil }
 
