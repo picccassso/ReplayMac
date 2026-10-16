@@ -102,6 +102,70 @@ final class MainWindowStateTests: XCTestCase {
     }
 
     @MainActor
+    func testShouldOpenWindowOnLaunchAndLoginItemDetection() {
+        XCTAssertFalse(MainWindowState.isLoginItemLaunchEvent(nil))
+
+        let plainOpenEvent = NSAppleEventDescriptor(
+            eventClass: AEEventClass(kCoreEventClass),
+            eventID: AEEventID(kAEOpenApplication),
+            targetDescriptor: nil,
+            returnID: AEReturnID(kAutoGenerateReturnID),
+            transactionID: AETransactionID(kAnyTransactionID)
+        )
+        XCTAssertFalse(MainWindowState.isLoginItemLaunchEvent(plainOpenEvent))
+
+        let otherEvent = NSAppleEventDescriptor(
+            eventClass: AEEventClass(kCoreEventClass),
+            eventID: AEEventID(kAEQuitApplication),
+            targetDescriptor: nil,
+            returnID: AEReturnID(kAutoGenerateReturnID),
+            transactionID: AETransactionID(kAnyTransactionID)
+        )
+        XCTAssertFalse(MainWindowState.isLoginItemLaunchEvent(otherEvent))
+
+        let loginItemEvent = NSAppleEventDescriptor(
+            eventClass: AEEventClass(kCoreEventClass),
+            eventID: AEEventID(kAEOpenApplication),
+            targetDescriptor: nil,
+            returnID: AEReturnID(kAutoGenerateReturnID),
+            transactionID: AETransactionID(kAnyTransactionID)
+        )
+        loginItemEvent.setParam(NSAppleEventDescriptor(enumCode: keyAELaunchedAsLogInItem), forKeyword: keyAEPropData)
+        XCTAssertTrue(MainWindowState.isLoginItemLaunchEvent(loginItemEvent))
+
+        let serviceItemEvent = NSAppleEventDescriptor(
+            eventClass: AEEventClass(kCoreEventClass),
+            eventID: AEEventID(kAEOpenApplication),
+            targetDescriptor: nil,
+            returnID: AEReturnID(kAutoGenerateReturnID),
+            transactionID: AETransactionID(kAnyTransactionID)
+        )
+        serviceItemEvent.setParam(NSAppleEventDescriptor(enumCode: keyAELaunchedAsServiceItem), forKeyword: keyAEPropData)
+        XCTAssertTrue(MainWindowState.isLoginItemLaunchEvent(serviceItemEvent))
+
+        withState { state, defaults in
+            defaults.set(MainWindowLaunchBehavior.mainWindow.rawValue, forKey: MainWindowState.launchBehaviorKey)
+            XCTAssertTrue(state.opensWindowOnLaunch)
+
+            // Incomplete onboarding never opens the main window on launch.
+            XCTAssertFalse(state.shouldOpenWindowOnLaunch(hasCompletedOnboarding: false, isLaunchedAsLoginItem: false))
+            XCTAssertFalse(state.shouldOpenWindowOnLaunch(hasCompletedOnboarding: false, isLaunchedAsLoginItem: true))
+
+            // Automatic login-item launches stay quiet in the menu bar.
+            XCTAssertFalse(state.shouldOpenWindowOnLaunch(hasCompletedOnboarding: true, isLaunchedAsLoginItem: true))
+
+            // Manual launches open the window when On launch is mainWindow.
+            XCTAssertTrue(state.shouldOpenWindowOnLaunch(hasCompletedOnboarding: true, isLaunchedAsLoginItem: false))
+
+            // Hidden launch behavior keeps manual launches quiet in the menu bar too.
+            defaults.set(MainWindowLaunchBehavior.hidden.rawValue, forKey: MainWindowState.launchBehaviorKey)
+            XCTAssertFalse(state.opensWindowOnLaunch)
+            XCTAssertFalse(state.shouldOpenWindowOnLaunch(hasCompletedOnboarding: true, isLaunchedAsLoginItem: false))
+            XCTAssertFalse(state.shouldOpenWindowOnLaunch(hasCompletedOnboarding: true, isLaunchedAsLoginItem: true))
+        }
+    }
+
+    @MainActor
     func testClosingTheWindowResetsToTheStartPageOnReopenButMinimisingDoesNot() {
         withState { state, defaults in
             defaults.set(MainWindowStartPage.library.rawValue, forKey: MainWindowState.startPageKey)

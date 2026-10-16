@@ -106,7 +106,7 @@ extension SettingsView {
                         Text(behavior.title).tag(behavior.rawValue)
                     }
                 }
-                .help("Whether launching \(AppBranding.name) opens the main window right away or starts quietly in the menu bar.")
+                .help("Whether launching \(AppBranding.name) opens the main window right away or starts quietly in the menu bar. Launching automatically at login always starts in the menu bar.")
                 Picker("Open window to", selection: $mainWindowStartPage) {
                     ForEach(MainWindowStartPage.allCases) { page in
                         Text(page.title).tag(page.rawValue)

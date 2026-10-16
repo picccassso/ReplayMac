@@ -128,11 +128,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, @unchecked Sendable {
 
     /// Detects if the application was started automatically at login via SMAppService / Login Items.
     private var isLaunchedAsLoginItem: Bool {
-        guard let event = NSAppleEventManager.shared().currentAppleEvent else {
-            return false
-        }
-        return event.eventID == kAEOpenApplication &&
-               event.paramDescriptor(forKeyword: keyAEPropData)?.enumCodeValue == keyAELaunchedAsLogInItem
+        MainWindowState.isLoginItemLaunchEvent(NSAppleEventManager.shared().currentAppleEvent)
     }
 
     override init() {
@@ -274,11 +270,16 @@ class AppDelegate: NSObject, NSApplicationDelegate, @unchecked Sendable {
         syncMemoryCapsToSettings()
         configureCompanionServer()
 
+        // Capture the launch Apple Event synchronously before it is popped when
+        // applicationDidFinishLaunching returns.
+        let launchedAsLoginItem = isLaunchedAsLoginItem
+
         DispatchQueue.main.async { [weak self] in
             guard let self else { return }
-            if Defaults[.hasCompletedOnboarding]
-                && !self.isLaunchedAsLoginItem
-                && self.mainWindowState.opensWindowOnLaunch {
+            if self.mainWindowState.shouldOpenWindowOnLaunch(
+                hasCompletedOnboarding: Defaults[.hasCompletedOnboarding],
+                isLaunchedAsLoginItem: launchedAsLoginItem
+            ) {
                 self.openMainWindow()
             }
             self.updateActivationPolicy(bringVisibleWindowToFront: true)

@@ -145,6 +145,27 @@ public final class MainWindowState: ObservableObject {
     public var opensWindowOnLaunch: Bool {
         (MainWindowLaunchBehavior(rawValue: defaults.string(forKey: Self.launchBehaviorKey) ?? "") ?? .mainWindow).opensWindowOnLaunch
     }
+
+    /// Whether the main window should open automatically during app launch.
+    /// Login-item launches always stay quiet in the menu bar; manual launches
+    /// follow the user's "On launch" preference once onboarding is complete.
+    public func shouldOpenWindowOnLaunch(
+        hasCompletedOnboarding: Bool,
+        isLaunchedAsLoginItem: Bool
+    ) -> Bool {
+        hasCompletedOnboarding && !isLaunchedAsLoginItem && opensWindowOnLaunch
+    }
+
+    /// Detects whether an `oapp` Apple Event was sent by macOS Login Items / `SMAppService`.
+    /// Must be evaluated synchronously inside `applicationDidFinishLaunching` while
+    /// `NSAppleEventManager.shared().currentAppleEvent` is still populated.
+    nonisolated public static func isLoginItemLaunchEvent(_ event: NSAppleEventDescriptor?) -> Bool {
+        guard let event, event.eventID == kAEOpenApplication,
+              let propData = event.paramDescriptor(forKeyword: keyAEPropData)?.enumCodeValue else {
+            return false
+        }
+        return propData == keyAELaunchedAsLogInItem || propData == keyAELaunchedAsServiceItem
+    }
     var isSettingsPage: Bool { SettingsTab(rawValue: page.rawValue) != nil }
 
     /// Returns whether the caller should hide the native window. Otherwise the
