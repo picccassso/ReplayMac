@@ -1,5 +1,31 @@
 # Changelog
 
+## 2.1.0
+
+### Companion app
+
+- Add an audio mixer to the Companion server: phones can set the microphone and system audio volume, mute or unmute individual apps, and unmute them all at once
+- Let phones switch the captured display and apply a capture profile from Settings > Profiles
+- Add Trim and Copy to the phone's clip actions. Trim opens the clip in Trim & Export on the Mac, and Copy puts the clip on the Mac's clipboard
+
+### Audio
+
+- Mute specific apps in recordings. Settings > Audio has a new Mute Application Audio section listing running apps; muted apps stay out of the replay buffer and session recordings, and apps that aren't running stay listed so you can unmute them. Changes apply while recording, without restarting the buffer
+- Show the system audio mode on Home (system audio off, selected app only, or all apps audible), with the muted apps listed in its tooltip and a click through to Audio Settings
+- If muting apps can't be set up, a notification now explains that system audio won't be recorded for that session, instead of it going missing without warning
+
+### Launch and menu bar
+
+- Split startup into two settings in Settings > General: On launch (open the main window, or stay hidden in the menu bar) and Open window to (Home, Clip Library, Settings or the last page you viewed)
+- Add an Open ReplayMac item to the menu bar that opens the main window on your chosen page
+- Show "Buffer Not Running" in the menu bar when you try to save a replay while the replay buffer is off
+
+### Fixes
+
+- Fix saving a clip with both microphone and system audio failing when one of them was silent. If the tracks still can't be mixed, the clip now saves with separate audio tracks instead of failing
+- Fix ReplayMac sometimes opening its main window when it launches at login. It now always starts quietly in the menu bar
+- Close a clip's Quick Preview when you click outside it
+
 ## 2.0.1
 
 ### Fixes
