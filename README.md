@@ -34,7 +34,7 @@ Click ReplayMac in the Dock to open **Home** (or the page you choose under Setti
 
 ### Companion App
 
-Control ReplayMac from your phone with the ReplayCap Companion app for iPhone and Android. Save replays, start and stop the buffer or a session, mute audio and browse this session's clips from across the room or on a second screen.
+Control ReplayMac from your phone with the ReplayCap Companion app, [on the App Store](https://apps.apple.com/us/app/replaycap-companion/id6821022359) for iPhone and iPad and [on GitHub](https://github.com/picccassso/ReplayMac-Companion/releases/latest) for Android. Save replays, start and stop the buffer or a session, mute audio and browse this session's clips from across the room or on a second screen.
 
 - **Off until you want it**: Turn on the Companion server in the Companion page. Nothing listens on your network otherwise.
 - **You approve every phone**: New devices show an Allow prompt on your Mac with a 4-digit code that matches the phone. Approved phones get a pairing key, and you can rename or revoke them at any time.
