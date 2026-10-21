@@ -34,6 +34,8 @@ Click ReplayMac in the Dock to open **Home** (or the page you choose under Setti
 
 ### Companion App
 
+[![Download ReplayCap Companion on the App Store](https://tools.applemediaservices.com/api/badges/download-on-the-app-store/black/en-us?size=250x83)](https://apps.apple.com/us/app/replaycap-companion/id6821022359)
+
 Control ReplayMac from your phone with the ReplayCap Companion app, [on the App Store](https://apps.apple.com/us/app/replaycap-companion/id6821022359) for iPhone and iPad and [on GitHub](https://github.com/picccassso/ReplayMac-Companion/releases/latest) for Android. Save replays, start and stop the buffer or a session, mute audio and browse this session's clips from across the room or on a second screen.
 
 - **Off until you want it**: Turn on the Companion server in the Companion page. Nothing listens on your network otherwise.
