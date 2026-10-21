@@ -4,7 +4,9 @@
 
 [![Download on the Mac App Store](https://tools.applemediaservices.com/api/badges/download-on-the-mac-app-store/black/en-us?size=250x83)](https://apps.apple.com/us/app/replaycap/id6789296427?mt=12)
 
-> Note: ReplayMac is available on the Mac App Store as **ReplayCap** (same app, different name). It is a one-time purchase that supports development.
+**ReplayMac is free.** Download it from [GitHub](https://github.com/picccassso/ReplayMac/releases) and you get the full app, with every feature included and nothing to unlock.
+
+**Prefer the Mac App Store?** The same app is on there as **ReplayCap**. It has exactly the same features, updates itself automatically through the App Store, and the one-time purchase directly supports development. See [Download](#download) for a side-by-side comparison.
 
 ReplayMac is a macOS menu bar instant-replay clipper. It continuously buffers recent screen and audio capture, saving the last N seconds to an MP4 when triggered. Recording and save status stay visible in the menu bar so you always know what the app is doing.
 
@@ -56,9 +58,19 @@ Control ReplayMac from your phone with the ReplayCap Companion app, [on the App 
 
 ## Download
 
-Grab the latest release from the [Releases](https://github.com/picccassso/ReplayMac/releases) page. ReplayMac is notarized by Apple and opens directly on macOS.
+ReplayMac comes in two versions. They're the same app, built from the same source code, with the same features. Pick whichever suits you.
 
-> Prefer the App Store? The same app is published there as **[ReplayCap](https://apps.apple.com/us/app/replaycap/id6789296427?mt=12)**, a one-time purchase that helps fund development and updates automatically through the App Store.
+| | GitHub: **ReplayMac** | Mac App Store: **ReplayCap** |
+| --- | --- | --- |
+| Price | Free | One-time purchase |
+| Features | Every feature | Every feature, identical to GitHub |
+| Updates | The menu bar tells you when a new release is out, and you download it yourself | Automatic, through the App Store |
+| Supporting development | Optional tips on [Ko-fi](https://ko-fi.com/picccassso) | Your purchase funds development |
+| Get it | [Latest release](https://github.com/picccassso/ReplayMac/releases) | [Mac App Store](https://apps.apple.com/us/app/replaycap/id6789296427?mt=12) |
+
+The GitHub version is notarized by Apple and opens directly on macOS. The App Store version is called ReplayCap because Apple's rules keep "Mac" out of App Store app names.
+
+If ReplayMac is useful to you, buying it on the App Store is the easiest way to support it, and you get automatic updates in return.
 
 ## Build from source
 
