@@ -2,6 +2,7 @@ import Foundation
 
 public enum SettingsTab: String, CaseIterable, Hashable {
     case general
+    case appearance
     case video
     case audio
     case profiles
@@ -114,6 +115,7 @@ public struct CaptureProfile: Identifiable, Codable, Equatable, Sendable {
     public var queueDepth: Int
     public var longBufferEnabled: Bool
     public var longBufferDurationMinutes: Int
+    public var themeSnapshot: ProfileThemeSnapshot? = nil
 
     public var summary: String {
         let fpsLabel = "\(frameRate) fps"
@@ -129,6 +131,11 @@ public struct CaptureProfile: Identifiable, Codable, Equatable, Sendable {
         }
         let micLabel = captureMicrophone ? "Mic on" : "Mic off"
         let mergeLabel = (mergeAudioTracks ?? true) ? "Merged audio" : "Separate audio"
-        return "\(fpsLabel) · \(Int(bitrateMbps)) Mbps · \(audioLabel) · \(micLabel) · \(mergeLabel)"
+        var parts = [fpsLabel, "\(Int(bitrateMbps)) Mbps", audioLabel, micLabel, mergeLabel]
+        if let themeSnapshot {
+            let atmosphere = (ThemeAtmosphere(rawValue: themeSnapshot.atmosphereRawValue) ?? .native).title
+            parts.append("\(atmosphere) theme")
+        }
+        return parts.joined(separator: " · ")
     }
 }

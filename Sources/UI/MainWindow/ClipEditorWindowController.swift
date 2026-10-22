@@ -38,8 +38,8 @@ final class ClipEditorWindowController: NSWindowController, NSWindowDelegate {
         window.collectionBehavior.insert(.fullScreenPrimary)
         window.isReleasedWhenClosed = false
         let editor = ClipTrimView(session: session, exports: session.exports) { [weak self] in self?.close() }
-            .tint(AppTheme.accent)
-            .background(WindowBackdrop().ignoresSafeArea())
+            .background(ThemedEditorBackdrop().ignoresSafeArea())
+            .themedWindowRoot()
         window.contentViewController = NSHostingController(rootView: editor)
         window.addTitlebarAccessoryViewController(Self.overviewHelpAccessory())
         let titleBarHeight = window.frame.height - window.contentRect(forFrameRect: window.frame).height
@@ -111,6 +111,26 @@ final class ClipEditorWindowController: NSWindowController, NSWindowDelegate {
 /// It stays translucent while another app is in front, so the editor keeps its
 /// look on a second screen. A system material, so Reduce Transparency and
 /// Increase Contrast make it opaque automatically.
+/// Renders either a solid themed canvas (when Solid Matte or a custom atmosphere is
+/// active) or the translucent desktop-tinted sidebar material.
+private struct ThemedEditorBackdrop: View {
+    @ObservedObject private var themeController = ThemeController.shared
+
+    var body: some View {
+        let _ = themeController.revision
+        if AppTheme.surfaceStyle == .matte {
+            AppTheme.backgroundPrimary
+        } else if AppTheme.atmosphere != .native {
+            ZStack {
+                WindowBackdrop()
+                AppTheme.backgroundPrimary.opacity(AppTheme.surfaceStyle == .tintedGlass ? 0.82 : 0.6)
+            }
+        } else {
+            WindowBackdrop()
+        }
+    }
+}
+
 private struct WindowBackdrop: NSViewRepresentable {
     func makeNSView(context: Context) -> NSVisualEffectView {
         let view = NSVisualEffectView()

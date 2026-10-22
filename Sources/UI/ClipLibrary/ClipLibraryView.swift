@@ -220,7 +220,7 @@ public struct ClipLibraryView: View {
 
                 Image(systemName: "film.stack")
                     .font(.system(size: 40, weight: .medium))
-                    .foregroundStyle(AppTheme.accent)
+                    .foregroundStyle(AppTheme.accentGradient)
             }
 
             VStack(spacing: 6) {
@@ -336,6 +336,9 @@ public struct ClipLibraryView: View {
             .width(164)
         }
         .tableStyle(.inset(alternatesRowBackgrounds: true))
+        .scrollContentBackground(
+            AppTheme.atmosphere == .native && AppTheme.surfaceStyle == .glass ? .automatic : .hidden
+        )
         .contextMenu(forSelectionType: ClipRow.ID.self) { ids in
             clipContextMenu(for: rows(for: ids))
         } primaryAction: { ids in

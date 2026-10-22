@@ -50,6 +50,7 @@ public struct OnboardingView: View {
         }
         .frame(width: 580, height: 560)
         .background(AppTheme.backgroundPrimary)
+        .themedWindowRoot()
         .onChange(of: launchAtLogin) { _, newValue in
             applyLaunchAtLogin(newValue)
         }

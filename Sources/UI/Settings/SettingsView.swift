@@ -54,12 +54,21 @@ public struct SettingsView: View {
     @Default(.longBufferWarningAccepted) var longBufferWarningAccepted
     @Default(.captureProfilesJSON) var captureProfilesJSON
 
+    @Default(.themeColorScheme) var themeColorScheme
+    @Default(.themeAtmosphere) var themeAtmosphere
+    @Default(.themeAccentMode) var themeAccentMode
+    @Default(.themePrimaryAccentHex) var themePrimaryAccentHex
+    @Default(.themeSecondaryAccentHex) var themeSecondaryAccentHex
+    @Default(.themeUseDualToneAccent) var themeUseDualToneAccent
+    @Default(.themeSurfaceStyle) var themeSurfaceStyle
+
     @State var displays: [DisplayOption] = []
     @State var audioApplications: [AudioApplicationOption] = []
     @State var microphones: [MicrophoneOption] = []
     @State var captureProfiles: [CaptureProfile] = []
     @State var selectedProfileID: UUID?
     @State var newProfileName = ""
+    @State var includeThemeInProfile = false
     @State var selectedProfileNameDraft = ""
     @State var profileErrorMessage: String?
     @State var launchAtLoginError: String?
@@ -82,6 +91,7 @@ public struct SettingsView: View {
         Group {
             switch selectedTab {
             case .general: generalTab
+            case .appearance: appearanceTab
             case .video: videoTab
             case .audio: audioTab
             case .profiles: profilesTab
@@ -92,6 +102,9 @@ public struct SettingsView: View {
         }
         // The form fills the page so it scrolls under the toolbar with its
         // scroller at the window edge; margins keep rows a readable width.
+        .scrollContentBackground(
+            themeAtmosphere == .native && themeSurfaceStyle == .glass ? .automatic : .hidden
+        )
         .contentMargins(.horizontal, readableMargin, for: .scrollContent)
         .onGeometryChange(for: CGFloat.self, of: \.size.width) { pageWidth = $0 }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)

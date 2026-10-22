@@ -543,10 +543,21 @@ private struct HomeTileButtonStyle: ButtonStyle {
         @Environment(\.isEnabled) private var isEnabled
 
         var body: some View {
+            let shape = RoundedRectangle(cornerRadius: AppTheme.cornerRadiusMedium, style: .continuous)
             configuration.label
                 .foregroundStyle(prominent ? Color.white : AppTheme.textPrimary)
-                .background(prominent ? AppTheme.accent : AppTheme.backgroundSecondary,
-                            in: RoundedRectangle(cornerRadius: AppTheme.cornerRadiusMedium, style: .continuous))
+                .background {
+                    if prominent {
+                        shape.fill(AppTheme.horizontalAccentGradient)
+                    } else {
+                        shape.fill(AppTheme.backgroundSecondary)
+                    }
+                }
+                .overlay {
+                    if !prominent && (AppTheme.surfaceStyle != .glass || AppTheme.atmosphere != .native) {
+                        shape.strokeBorder(AppTheme.cardBorderColor, lineWidth: 1)
+                    }
+                }
                 .opacity(isEnabled ? (configuration.isPressed ? 0.75 : 1) : 0.45)
                 .animation(.easeInOut(duration: 0.2), value: isEnabled)
         }

@@ -15,6 +15,9 @@ extension SettingsView {
                     .buttonStyle(AccentButtonStyle())
                     .disabled(newProfileName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
                 }
+
+                Toggle("Include current appearance theme", isOn: $includeThemeInProfile)
+                    .help("Saves your active Atmosphere, color scheme, surface style, and accent colors into this profile so applying the profile switches the app's look too.")
             } header: {
                 Text("Create")
             }
@@ -84,6 +87,9 @@ extension SettingsView {
                     ProfileDetailRow(label: "Capture", value: selectedProfile.captureDetail)
                     ProfileDetailRow(label: "Audio", value: selectedProfile.audioDetail)
                     ProfileDetailRow(label: "Buffer", value: selectedProfile.bufferDetail)
+                    if let themeSnapshot = selectedProfile.themeSnapshot {
+                        ProfileDetailRow(label: "Theme", value: themeSnapshot.summary)
+                    }
                 } header: {
                     Text("Selected Profile")
                 }
@@ -271,6 +277,9 @@ extension SettingsView {
         queueDepth = profile.queueDepth
         longBufferEnabled = profile.longBufferEnabled
         longBufferDurationMinutes = profile.longBufferDurationMinutes
+        if let themeSnapshot = profile.themeSnapshot {
+            AppSettings.applyThemeSnapshot(themeSnapshot)
+        }
 
         finishApplyingQualityPresetOnNextRunLoop()
     }
@@ -307,12 +316,14 @@ extension SettingsView {
             memoryCapMB: memoryCapMB,
             queueDepth: queueDepth,
             longBufferEnabled: longBufferEnabled,
-            longBufferDurationMinutes: longBufferDurationMinutes
+            longBufferDurationMinutes: longBufferDurationMinutes,
+            themeSnapshot: includeThemeInProfile ? AppSettings.currentThemeSnapshot() : nil
         )
     }
 
     func syncSelectedProfileNameDraft() {
         selectedProfileNameDraft = selectedProfile?.name ?? ""
+        includeThemeInProfile = selectedProfile?.themeSnapshot != nil
     }
 }
 

@@ -7,6 +7,7 @@ public struct MainWindowView: View {
     @ObservedObject private var state: MainWindowState
     @ObservedObject private var exports: ClipExportCoordinator
     @ObservedObject private var companionServer = CompanionServer.shared
+    @ObservedObject private var themeController = ThemeController.shared
     private let menuBar: MenuBarState
     @Environment(\.accessibilityShowBorders) private var showBorders
     @Environment(\.colorSchemeContrast) private var contrast
@@ -18,6 +19,7 @@ public struct MainWindowView: View {
     }
 
     public var body: some View {
+        let _ = themeController.revision
         // The sidebar is always shown at a fixed width; it cannot be collapsed
         // or resized, so its layout never needs adjusting.
         NavigationSplitView(columnVisibility: .constant(.all)) {
@@ -30,7 +32,7 @@ public struct MainWindowView: View {
                 .navigationTitle(pageTitle)
                 .toolbar { detailToolbar }
         }
-        .tint(AppTheme.accent)
+        .themedWindowRoot()
     }
 
     // MARK: Sidebar
@@ -79,7 +81,23 @@ public struct MainWindowView: View {
         }
         .padding(.horizontal, 10)
         .frame(maxWidth: .infinity, alignment: .leading)
+        .background(sidebarBackdrop)
         .ignoresSafeArea(.container, edges: .top)
+    }
+
+    private var sidebarBackdrop: Color {
+        switch AppTheme.surfaceStyle {
+        case .matte:
+            return AppTheme.backgroundPrimary
+        case .tintedGlass:
+            return AppTheme.atmosphere == .native
+                ? AppTheme.accent.opacity(0.05)
+                : AppTheme.backgroundPrimary.opacity(0.75)
+        case .glass:
+            return AppTheme.atmosphere == .native
+                ? .clear
+                : AppTheme.backgroundPrimary.opacity(0.45)
+        }
     }
 
     private func sidebarRow(_ title: String, detail: String? = nil, icon: String,
@@ -152,6 +170,11 @@ public struct MainWindowView: View {
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .background(
+            (AppTheme.atmosphere == .native && AppTheme.surfaceStyle == .glass)
+                ? Color.clear
+                : AppTheme.backgroundPrimary
+        )
         .floatingBottomBar { statusBars }
     }
 

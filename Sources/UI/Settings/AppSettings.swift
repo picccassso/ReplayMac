@@ -326,7 +326,42 @@ public enum AppSettings {
         if !profile.captureDisplayID.isEmpty && Defaults[.captureDisplayID] != profile.captureDisplayID {
             return false
         }
+        if let theme = profile.themeSnapshot, currentThemeSnapshot() != theme {
+            return false
+        }
         return true
+    }
+
+    public static func currentThemeSnapshot() -> ProfileThemeSnapshot {
+        ProfileThemeSnapshot(
+            colorSchemeRawValue: Defaults[.themeColorScheme].rawValue,
+            atmosphereRawValue: Defaults[.themeAtmosphere].rawValue,
+            accentModeRawValue: Defaults[.themeAccentMode].rawValue,
+            primaryAccentHex: ColorHex.normalized(Defaults[.themePrimaryAccentHex]),
+            secondaryAccentHex: ColorHex.normalized(Defaults[.themeSecondaryAccentHex], defaultHex: "#00A3FF"),
+            useDualToneAccent: Defaults[.themeUseDualToneAccent],
+            surfaceStyleRawValue: Defaults[.themeSurfaceStyle].rawValue
+        )
+    }
+
+    public static func applyThemeSnapshot(_ snapshot: ProfileThemeSnapshot) {
+        Defaults[.themeColorScheme] = ThemeColorScheme(rawValue: snapshot.colorSchemeRawValue) ?? .system
+        Defaults[.themeAtmosphere] = ThemeAtmosphere(rawValue: snapshot.atmosphereRawValue) ?? .native
+        Defaults[.themeAccentMode] = ThemeAccentMode(rawValue: snapshot.accentModeRawValue) ?? .atmosphere
+        Defaults[.themePrimaryAccentHex] = ColorHex.normalized(snapshot.primaryAccentHex)
+        Defaults[.themeSecondaryAccentHex] = ColorHex.normalized(snapshot.secondaryAccentHex, defaultHex: "#00A3FF")
+        Defaults[.themeUseDualToneAccent] = snapshot.useDualToneAccent
+        Defaults[.themeSurfaceStyle] = ThemeSurfaceStyle(rawValue: snapshot.surfaceStyleRawValue) ?? .glass
+    }
+
+    public static func resetThemeToDefaults() {
+        Defaults[.themeColorScheme] = .system
+        Defaults[.themeAtmosphere] = .native
+        Defaults[.themeAccentMode] = .atmosphere
+        Defaults[.themePrimaryAccentHex] = "#00E5CC"
+        Defaults[.themeSecondaryAccentHex] = "#00A3FF"
+        Defaults[.themeUseDualToneAccent] = true
+        Defaults[.themeSurfaceStyle] = .glass
     }
 
     @discardableResult
@@ -371,6 +406,9 @@ public enum AppSettings {
         Defaults[.queueDepth] = profile.queueDepth
         Defaults[.longBufferEnabled] = profile.longBufferEnabled
         Defaults[.longBufferDurationMinutes] = profile.longBufferDurationMinutes
+        if let themeSnapshot = profile.themeSnapshot {
+            applyThemeSnapshot(themeSnapshot)
+        }
         return true
     }
 
@@ -696,4 +734,12 @@ public extension Defaults.Keys {
     static let companionCustomServerName = Key<String>("companionCustomServerName", default: "")
 
     static let hasCompletedOnboarding = Key<Bool>("hasCompletedOnboarding", default: false)
+
+    static let themeColorScheme = Key<ThemeColorScheme>("themeColorScheme", default: .system)
+    static let themeAtmosphere = Key<ThemeAtmosphere>("themeAtmosphere", default: .native)
+    static let themeAccentMode = Key<ThemeAccentMode>("themeAccentMode", default: .atmosphere)
+    static let themePrimaryAccentHex = Key<String>("themePrimaryAccentHex", default: "#00E5CC")
+    static let themeSecondaryAccentHex = Key<String>("themeSecondaryAccentHex", default: "#00A3FF")
+    static let themeUseDualToneAccent = Key<Bool>("themeUseDualToneAccent", default: true)
+    static let themeSurfaceStyle = Key<ThemeSurfaceStyle>("themeSurfaceStyle", default: .glass)
 }

@@ -8,13 +8,14 @@ public extension Notification.Name {
 }
 
 public enum MainWindowPage: String, CaseIterable, Identifiable {
-    case home, library, general, video, audio, profiles, hotkeys, companion, advanced
+    case home, library, general, appearance, video, audio, profiles, hotkeys, companion, advanced
     public var id: String { rawValue }
     public var title: String {
         switch self {
         case .home: "Home"
         case .library: "Clip Library"
         case .general: "General"
+        case .appearance: "Appearance"
         case .video: "Video"
         case .audio: "Audio"
         case .profiles: "Profiles"
@@ -28,6 +29,7 @@ public enum MainWindowPage: String, CaseIterable, Identifiable {
         case .home: "house"
         case .library: "film.stack"
         case .general: "gearshape"
+        case .appearance: "paintbrush"
         case .video: "video"
         case .audio: "speaker.wave.2"
         case .profiles: "rectangle.stack.badge.play"
