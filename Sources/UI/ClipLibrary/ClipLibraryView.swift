@@ -10,9 +10,18 @@ import Defaults
 
 public struct ClipLibraryView: View {
     @Default(.outputDirectoryPath) private var outputDirectoryPath
+    @Default(.clipLibraryLayout) private var layout
+    @Default(.clipLibraryGridCardWidth) private var gridCardWidth
     @ObservedObject var state: ClipLibraryState
     @ObservedObject var model: ClipLibraryViewModel
     @ObservedObject var windowState: MainWindowState
+
+    @State private var gridWidth: CGFloat = 0
+    /// Where shift-click and shift-arrow ranges start in the grid.
+    @State private var gridAnchorID: ClipRow.ID?
+    /// The card arrow keys move from.
+    @State private var gridCursorID: ClipRow.ID?
+    @FocusState private var gridFocused: Bool
 
     public init(windowState: MainWindowState) {
         self.windowState = windowState
@@ -29,6 +38,8 @@ public struct ClipLibraryView: View {
             if visibleRows.isEmpty {
                 emptyStateView
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
+            } else if layout == .grid {
+                gridView
             } else {
                 tableView
             }
@@ -169,6 +180,9 @@ public struct ClipLibraryView: View {
                     .foregroundStyle(AppTheme.textSecondary)
             }
             Spacer()
+            if layout == .grid {
+                gridSizeSlider
+            }
         }
         .font(.system(size: 11, weight: .medium, design: .rounded))
         .padding(.horizontal, 16)
@@ -308,22 +322,7 @@ public struct ClipLibraryView: View {
         }
         .tableStyle(.inset(alternatesRowBackgrounds: true))
         .contextMenu(forSelectionType: ClipRow.ID.self) { ids in
-            let targets = rows(for: ids)
-            if !targets.isEmpty {
-                if let row = targets.first, targets.count == 1 {
-                    Button("Quick Preview") { state.previewURL = row.info.fileURL }
-                    Button("Trim & Export…") { openTrim(row.info.fileURL) }
-                    Button("Copy File") { copyFile(row.info.fileURL) }
-                }
-                Button("Reveal in Finder") {
-                    NSWorkspace.shared.activateFileViewerSelecting(targets.map(\.info.fileURL))
-                }
-                Divider()
-                Button(targets.count == 1 ? "Delete Clip" : "Delete \(targets.count) Clips", role: .destructive) {
-                    requestDelete(targets)
-                }
-                .disabled(targets.contains { windowState.isProtected($0.info.fileURL) })
-            }
+            clipContextMenu(for: rows(for: ids))
         } primaryAction: { ids in
             if let row = rows(for: ids).first {
                 state.previewURL = row.info.fileURL
@@ -331,6 +330,230 @@ public struct ClipLibraryView: View {
         }
         .onDeleteCommand {
             requestDelete(selectedRows)
+        }
+    }
+
+    @ViewBuilder
+    private func clipContextMenu(for targets: [ClipRow]) -> some View {
+        if !targets.isEmpty {
+            if let row = targets.first, targets.count == 1 {
+                Button("Quick Preview") { state.previewURL = row.info.fileURL }
+                Button("Trim & Export…") { openTrim(row.info.fileURL) }
+                Button("Copy File") { copyFile(row.info.fileURL) }
+            }
+            Button("Reveal in Finder") {
+                NSWorkspace.shared.activateFileViewerSelecting(targets.map(\.info.fileURL))
+            }
+            Divider()
+            Button(targets.count == 1 ? "Delete Clip" : "Delete \(targets.count) Clips", role: .destructive) {
+                requestDelete(targets)
+            }
+            .disabled(targets.contains { windowState.isProtected($0.info.fileURL) })
+        }
+    }
+
+    // MARK: Grid
+
+    private var gridSizeSlider: some View {
+        HStack(spacing: 6) {
+            Image(systemName: "square.grid.3x3.fill")
+                .font(.system(size: 9))
+            Slider(value: $gridCardWidth, in: ClipGridMetrics.cardWidthRange)
+                .controlSize(.mini)
+                .frame(width: 96)
+                .accessibilityLabel("Thumbnail size")
+            Image(systemName: "square.grid.2x2.fill")
+                .font(.system(size: 12))
+        }
+        .foregroundStyle(AppTheme.textSecondary)
+        .help("Thumbnail size")
+    }
+
+    /// As many columns as fit at the chosen card width; flexible items then
+    /// stretch the cards so each row fills the window edge to edge.
+    private var gridColumnCount: Int {
+        let cardWidth = CGFloat(gridCardWidth)
+        let available = max(gridWidth - ClipGridMetrics.padding * 2, cardWidth)
+        return max(1, Int((available + ClipGridMetrics.spacing) / (cardWidth + ClipGridMetrics.spacing)))
+    }
+
+    /// Width of each card's 16:9 thumbnail, computed once from the grid's width
+    /// so individual cards don't need their own geometry observers while scrolling.
+    private var gridThumbnailWidth: CGFloat {
+        let columns = CGFloat(gridColumnCount)
+        let available = max(gridWidth - ClipGridMetrics.padding * 2, CGFloat(gridCardWidth))
+        let cardWidth = (available - ClipGridMetrics.spacing * (columns - 1)) / columns
+        return max(cardWidth - 12, 1)
+    }
+
+    private var gridView: some View {
+        let rows = visibleRows
+        let columnCount = gridColumnCount
+        let thumbnailWidth = gridThumbnailWidth
+        let columns = Array(
+            repeating: GridItem(.flexible(), spacing: ClipGridMetrics.spacing, alignment: .top),
+            count: columnCount
+        )
+        return ScrollViewReader { proxy in
+            ScrollView {
+                LazyVGrid(columns: columns, alignment: .leading, spacing: ClipGridMetrics.spacing) {
+                    ForEach(rows) { row in
+                        gridCard(for: row, in: rows, thumbnailWidth: thumbnailWidth)
+                    }
+                }
+                .padding(ClipGridMetrics.padding)
+            }
+            .background {
+                // Clicking between cards clears the selection, as in Finder.
+                Color.clear
+                    .contentShape(Rectangle())
+                    .onTapGesture {
+                        state.selection = []
+                        gridFocused = true
+                    }
+            }
+            .onGeometryChange(for: CGFloat.self) { $0.size.width } action: { gridWidth = $0 }
+            .focusable()
+            .focusEffectDisabled()
+            .focused($gridFocused)
+            .onKeyPress(phases: .down) { press in
+                handleGridKey(press, rows: rows, columnCount: columnCount, proxy: proxy)
+            }
+            .onDeleteCommand {
+                requestDelete(selectedRows)
+            }
+        }
+    }
+
+    private func gridCard(for row: ClipRow, in rows: [ClipRow], thumbnailWidth: CGFloat) -> some View {
+        ClipGridCard(
+            row: row,
+            isSelected: state.selection.contains(row.id),
+            isProtected: windowState.isProtected(row.info.fileURL),
+            thumbnailWidth: thumbnailWidth,
+            actions: ClipGridCardActions(
+                toggleFavorite: {
+                    model.toggleFavorite(row)
+                    if state.selection.contains(row.id) {
+                        syncDraftFromSelection()
+                    }
+                },
+                preview: { state.previewURL = row.info.fileURL },
+                trim: { openTrim(row.info.fileURL) },
+                copyFile: { copyFile(row.info.fileURL) },
+                delete: { requestDelete([row]) }
+            )
+        )
+        .id(row.id)
+        .onTapGesture { handleGridClick(on: row, in: rows) }
+        .contextMenu { clipContextMenu(for: contextTargets(for: row)) }
+        // Drag a clip straight into Finder, Messages, Discord, and so on.
+        .onDrag { NSItemProvider(contentsOf: row.info.fileURL) ?? NSItemProvider() }
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(row.displayTitle)
+        .accessibilityValue("\(row.durationLabel), \(row.sizeLabel), \(row.dateLabel)\(row.userMetadata.isFavorite ? ", favorite" : "")")
+        .accessibilityAddTraits(state.selection.contains(row.id) ? [.isButton, .isSelected] : .isButton)
+        .accessibilityAction { selectOnly(row) }
+        .accessibilityAction(named: "Quick Preview") { state.previewURL = row.info.fileURL }
+        .accessibilityAction(named: "Trim & Export") { openTrim(row.info.fileURL) }
+        .accessibilityAction(named: row.userMetadata.isFavorite ? "Remove Favorite" : "Mark Favorite") {
+            model.toggleFavorite(row)
+        }
+    }
+
+    /// Right-clicking inside the selection acts on all of it; anywhere else
+    /// acts on just that clip.
+    private func contextTargets(for row: ClipRow) -> [ClipRow] {
+        state.selection.contains(row.id) ? selectedRows : [row]
+    }
+
+    private func selectOnly(_ row: ClipRow) {
+        state.selection = [row.id]
+        gridAnchorID = row.id
+        gridCursorID = row.id
+    }
+
+    /// Finder-style clicks: plain selects one, Command toggles, Shift extends
+    /// from the anchor, and a double-click opens Quick Preview.
+    private func handleGridClick(on row: ClipRow, in rows: [ClipRow]) {
+        gridFocused = true
+        if NSApp.currentEvent?.clickCount == 2 {
+            selectOnly(row)
+            state.previewURL = row.info.fileURL
+            return
+        }
+
+        let modifiers = NSEvent.modifierFlags
+        if modifiers.contains(.command) {
+            if state.selection.contains(row.id) {
+                state.selection.remove(row.id)
+            } else {
+                state.selection.insert(row.id)
+            }
+            gridAnchorID = row.id
+            gridCursorID = row.id
+        } else if modifiers.contains(.shift), let anchorID = gridAnchorID, state.selection.contains(anchorID) {
+            selectRange(from: anchorID, to: row.id, in: rows)
+            gridCursorID = row.id
+        } else {
+            selectOnly(row)
+        }
+    }
+
+    private func selectRange(from anchorID: ClipRow.ID, to targetID: ClipRow.ID, in rows: [ClipRow]) {
+        guard let start = rows.firstIndex(where: { $0.id == anchorID }),
+              let end = rows.firstIndex(where: { $0.id == targetID }) else { return }
+        state.selection = Set(rows[min(start, end)...max(start, end)].map(\.id))
+    }
+
+    private func handleGridKey(
+        _ press: KeyPress,
+        rows: [ClipRow],
+        columnCount: Int,
+        proxy: ScrollViewProxy
+    ) -> KeyPress.Result {
+        let extend = press.modifiers.contains(.shift)
+        switch press.key {
+        case .leftArrow:
+            moveGridCursor(by: -1, extend: extend, rows: rows, proxy: proxy)
+        case .rightArrow:
+            moveGridCursor(by: 1, extend: extend, rows: rows, proxy: proxy)
+        case .upArrow:
+            moveGridCursor(by: -columnCount, extend: extend, rows: rows, proxy: proxy)
+        case .downArrow:
+            moveGridCursor(by: columnCount, extend: extend, rows: rows, proxy: proxy)
+        case .space, .return:
+            guard let row = singleSelectedRow else { return .ignored }
+            state.previewURL = row.info.fileURL
+        case .escape:
+            guard !state.selection.isEmpty else { return .ignored }
+            state.selection = []
+        default:
+            guard press.modifiers.contains(.command), press.characters == "a" else { return .ignored }
+            state.selection = Set(rows.map(\.id))
+        }
+        return .handled
+    }
+
+    private func moveGridCursor(by offset: Int, extend: Bool, rows: [ClipRow], proxy: ScrollViewProxy) {
+        guard !rows.isEmpty else { return }
+        let target: Int
+        if let cursorID = gridCursorID, state.selection.contains(cursorID),
+           let current = rows.firstIndex(where: { $0.id == cursorID }) {
+            target = min(max(current + offset, 0), rows.count - 1)
+        } else {
+            target = offset < 0 ? rows.count - 1 : 0
+        }
+
+        let row = rows[target]
+        if extend, let anchorID = gridAnchorID, state.selection.contains(anchorID) {
+            selectRange(from: anchorID, to: row.id, in: rows)
+            gridCursorID = row.id
+        } else {
+            selectOnly(row)
+        }
+        withAnimation(.easeOut(duration: 0.15)) {
+            proxy.scrollTo(row.id)
         }
     }
 
@@ -682,9 +905,33 @@ struct ClipRow: Identifiable {
     let thumbnail: NSImage?
     var userMetadata: ClipUserMetadata
 
-    var id: String { info.fileURL.path }
-    var fileName: String { info.fileURL.lastPathComponent }
-    var fileNameWithoutExtension: String { info.fileURL.deletingPathExtension().lastPathComponent }
+    let id: String
+    let fileName: String
+    let fileNameWithoutExtension: String
+    let durationLabel: String
+    let sizeLabel: String
+    let dateLabel: String
+    let gridSubtitleLabel: String
+
+    init(info: ClipInfo, thumbnail: NSImage?, userMetadata: ClipUserMetadata) {
+        self.info = info
+        self.thumbnail = thumbnail
+        self.userMetadata = userMetadata
+        self.id = info.fileURL.path
+        self.fileName = info.fileURL.lastPathComponent
+        self.fileNameWithoutExtension = info.fileURL.deletingPathExtension().lastPathComponent
+        if info.duration.isFinite, info.duration > 0 {
+            let total = Int(info.duration.rounded(.down))
+            self.durationLabel = String(format: "%02d:%02d", total / 60, total % 60)
+        } else {
+            self.durationLabel = "--:--"
+        }
+        let sizeLabel = ByteCountFormatter.string(fromByteCount: info.fileSize, countStyle: .file)
+        self.sizeLabel = sizeLabel
+        self.dateLabel = DateFormatter.clipLibraryDate.string(from: info.creationDate)
+        self.gridSubtitleLabel = "\(DateFormatter.clipGridDate.string(from: info.creationDate)) · \(sizeLabel)"
+    }
+
     var displayTitle: String {
         userMetadata.displayName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
             ? fileNameWithoutExtension
@@ -696,22 +943,13 @@ struct ClipRow: Identifiable {
     var searchText: String {
         ([displayTitle, fileName, userMetadata.notes] + userMetadata.tags).joined(separator: " ")
     }
+}
 
-    var durationLabel: String {
-        guard info.duration.isFinite, info.duration > 0 else { return "--:--" }
-        let total = Int(info.duration.rounded(.down))
-        let minutes = total / 60
-        let seconds = total % 60
-        return String(format: "%02d:%02d", minutes, seconds)
-    }
-
-    var sizeLabel: String {
-        ByteCountFormatter.string(fromByteCount: info.fileSize, countStyle: .file)
-    }
-
-    var dateLabel: String {
-        DateFormatter.clipLibraryDate.string(from: info.creationDate)
-    }
+/// Carries a pre-decoded `CGImage` across task boundaries so the main thread
+/// never has to decompress a JPEG/PNG when a grid card scrolls into view.
+private final class PredecodedThumbnailBox: @unchecked Sendable {
+    let image: CGImage?
+    init(image: CGImage?) { self.image = image }
 }
 
 @MainActor
@@ -763,22 +1001,20 @@ final class ClipLibraryViewModel: ObservableObject {
         let cache = clipCache
         let misses = base.filter { cache[Self.cacheKey(for: $0)] == nil }
 
-        // Enrich + generate thumbnails for new/changed clips in parallel.
-        // Thumbnails cross the task boundary as PNG `Data` (Sendable) and are
-        // decoded back into `NSImage` on the main actor below.
-        let computed: [(key: String, info: ClipInfo, thumbnail: Data?)] = await withTaskGroup(
-            of: (key: String, info: ClipInfo, thumbnail: Data?).self
+        // Enrich + generate pre-decoded thumbnails for new/changed clips in parallel.
+        let computed: [(key: String, info: ClipInfo, thumbnail: PredecodedThumbnailBox)] = await withTaskGroup(
+            of: (key: String, info: ClipInfo, thumbnail: PredecodedThumbnailBox).self
         ) { group in
             for info in misses {
                 let key = Self.cacheKey(for: info)
                 group.addTask {
                     let enriched = await ClipMetadata.enrichClipInfo(info)
-                    let thumbnail = await Self.thumbnailData(for: enriched.fileURL)
+                    let thumbnail = await Self.predecodedThumbnail(for: enriched.fileURL)
                     return (key: key, info: enriched, thumbnail: thumbnail)
                 }
             }
 
-            var collected: [(key: String, info: ClipInfo, thumbnail: Data?)] = []
+            var collected: [(key: String, info: ClipInfo, thumbnail: PredecodedThumbnailBox)] = []
             for await result in group {
                 collected.append(result)
             }
@@ -798,7 +1034,9 @@ final class ClipLibraryViewModel: ObservableObject {
         for entry in computed {
             refreshedCache[entry.key] = CachedClip(
                 info: entry.info,
-                thumbnail: entry.thumbnail.flatMap { NSImage(data: $0) }
+                thumbnail: entry.thumbnail.image.map {
+                    NSImage(cgImage: $0, size: NSSize(width: $0.width, height: $0.height))
+                }
             )
         }
         clipCache = refreshedCache
@@ -1000,14 +1238,53 @@ final class ClipLibraryViewModel: ObservableObject {
         return candidate
     }
 
+    private static func predecodedThumbnail(for url: URL) async -> PredecodedThumbnailBox {
+        let asset = AVURLAsset(url: url)
+        let generator = AVAssetImageGenerator(asset: asset)
+        generator.appliesPreferredTrackTransform = true
+        // Sized for a large grid card on a Retina display.
+        generator.maximumSize = CGSize(width: 640, height: 360)
+
+        return await withCheckedContinuation { continuation in
+            generator.generateCGImageAsynchronously(for: .zero) { image, _, _ in
+                guard let image else {
+                    continuation.resume(returning: PredecodedThumbnailBox(image: nil))
+                    return
+                }
+                // Rasterize into a standard 32-bit BGRA bitmap off the main thread
+                // so CoreAnimation never decodes or color-converts during scroll.
+                let width = image.width
+                let height = image.height
+                let colorSpace = CGColorSpaceCreateDeviceRGB()
+                let bitmapInfo = CGBitmapInfo.byteOrder32Little.rawValue | CGImageAlphaInfo.premultipliedFirst.rawValue
+                if let context = CGContext(
+                    data: nil,
+                    width: width,
+                    height: height,
+                    bitsPerComponent: 8,
+                    bytesPerRow: width * 4,
+                    space: colorSpace,
+                    bitmapInfo: bitmapInfo
+                ) {
+                    context.draw(image, in: CGRect(x: 0, y: 0, width: width, height: height))
+                    continuation.resume(returning: PredecodedThumbnailBox(image: context.makeImage() ?? image))
+                } else {
+                    continuation.resume(returning: PredecodedThumbnailBox(image: image))
+                }
+            }
+        }
+    }
+
     static func thumbnailData(for url: URL) async -> Data? {
         let asset = AVURLAsset(url: url)
         let generator = AVAssetImageGenerator(asset: asset)
         generator.appliesPreferredTrackTransform = true
-        generator.maximumSize = CGSize(width: 220, height: 124)
+        // Sized for a large grid card on a Retina display.
+        generator.maximumSize = CGSize(width: 640, height: 360)
 
-        // Encode to PNG inside the callback so only `Data` (Sendable) crosses
-        // the continuation and task-group boundaries.
+        // Encode to JPEG inside the callback so only `Data` (Sendable) crosses
+        // the continuation and task-group boundaries. JPEG keeps the larger
+        // posters a fraction of the size PNG would be in the cache.
         return await withCheckedContinuation { continuation in
             generator.generateCGImageAsynchronously(for: .zero) { image, _, _ in
                 guard let image else {
@@ -1015,7 +1292,7 @@ final class ClipLibraryViewModel: ObservableObject {
                     return
                 }
                 let rep = NSBitmapImageRep(cgImage: image)
-                continuation.resume(returning: rep.representation(using: .png, properties: [:]))
+                continuation.resume(returning: rep.representation(using: .jpeg, properties: [.compressionFactor: 0.85]))
             }
         }
     }
@@ -1520,6 +1797,12 @@ private extension DateFormatter {
         let formatter = DateFormatter()
         formatter.dateStyle = .medium
         formatter.timeStyle = .short
+        return formatter
+    }()
+
+    static let clipGridDate: DateFormatter = {
+        let formatter = DateFormatter()
+        formatter.setLocalizedDateFormatFromTemplate("MMMdhm")
         return formatter
     }()
 }

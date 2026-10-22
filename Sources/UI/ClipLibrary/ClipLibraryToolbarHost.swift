@@ -1,4 +1,5 @@
 import SwiftUI
+import Defaults
 
 /// Supplies the library's search field and actions to the window toolbar.
 /// The library view itself stays alive behind other pages to keep its state,
@@ -7,6 +8,7 @@ import SwiftUI
 struct ClipLibraryToolbarHost: View {
     @ObservedObject var state: ClipLibraryState
     @ObservedObject var model: ClipLibraryViewModel
+    @Default(.clipLibraryLayout) private var layout
 
     init(state: ClipLibraryState) {
         self.state = state
@@ -19,6 +21,16 @@ struct ClipLibraryToolbarHost: View {
             .accessibilityHidden(true)
             .searchable(text: $state.searchText, placement: .toolbar, prompt: "Search clips, tags, notes")
             .toolbar {
+                ToolbarItem(placement: .primaryAction) {
+                    Picker("View", selection: $layout) {
+                        ForEach(ClipLibraryLayout.allCases) { layout in
+                            Label(layout.title, systemImage: layout.systemImage).tag(layout)
+                        }
+                    }
+                    .pickerStyle(.segmented)
+                    .help("Show clips as a list or a grid")
+                }
+
                 ToolbarItemGroup(placement: .primaryAction) {
                     Menu {
                         Picker("Sort By", selection: $state.sortMode) {
