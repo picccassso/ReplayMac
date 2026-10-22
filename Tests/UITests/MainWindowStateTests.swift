@@ -416,4 +416,37 @@ final class MainWindowStateTests: XCTestCase {
         XCTAssertTrue(FileManager.default.fileExists(atPath: source.path))
         XCTAssertEqual(model.rows.count, 1)
     }
+
+    @MainActor
+    func testRenamePersistsUnifiedMetadataAndNewFilename() async throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+
+        let source = directory.appendingPathComponent("clip_01.mp4")
+        try Data("clip".utf8).write(to: source)
+
+        let model = ClipLibraryViewModel(outputDirectory: { directory })
+        await model.reload()
+        let row = ClipRow(
+            info: ClipInfo(fileURL: source, creationDate: Date(), duration: 5, fileSize: 4),
+            thumbnail: nil,
+            userMetadata: .empty
+        )
+        model.rows = [row]
+
+        let updatedMetadata = ClipUserMetadata(
+            displayName: "Overtime Clutch",
+            isFavorite: true,
+            tags: ["ranked", "ace"],
+            notes: "Final round"
+        )
+        let newID = model.rename(row, to: "overtime_clutch", metadata: updatedMetadata)
+        let renamedURL = directory.appendingPathComponent("overtime_clutch.mp4")
+
+        XCTAssertEqual(newID, renamedURL.path(percentEncoded: false))
+        XCTAssertTrue(FileManager.default.fileExists(atPath: renamedURL.path))
+        let stored = ClipLibraryMetadataStore.load(in: directory)
+        XCTAssertEqual(stored[ClipLibraryMetadataStore.key(for: renamedURL)], updatedMetadata)
+    }
 }

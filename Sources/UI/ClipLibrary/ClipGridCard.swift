@@ -41,6 +41,7 @@ struct ClipGridCardActions {
     var toggleFavorite: () -> Void
     var preview: () -> Void
     var trim: () -> Void
+    var editInfo: () -> Void
     var copyFile: () -> Void
     var delete: () -> Void
 }
@@ -203,6 +204,7 @@ struct ClipGridCard: View {
             .help("Trim & Export")
 
             Menu {
+                Button("Edit Info…", systemImage: "info.circle", action: actions.editInfo)
                 Button("Copy File", systemImage: "doc.on.doc", action: actions.copyFile)
                 Button("Show in Finder", systemImage: "folder") {
                     NSWorkspace.shared.activateFileViewerSelecting([row.info.fileURL])

@@ -16,5 +16,6 @@ final class ClipLibraryState: ObservableObject {
     @Published var metadataDraft = ClipUserMetadata.empty
     @Published var renameDraft = ""
     @Published var copiedFilePath: String?
+    @Published var isDetailsExpanded = false
 
 }

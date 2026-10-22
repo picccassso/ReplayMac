@@ -22,6 +22,11 @@ public struct ClipLibraryView: View {
     /// The card arrow keys move from.
     @State private var gridCursorID: ClipRow.ID?
     @FocusState private var gridFocused: Bool
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+    private var panelAnimation: Animation {
+        reduceMotion ? .easeInOut(duration: 0.15) : .smooth(duration: 0.26)
+    }
 
     public init(windowState: MainWindowState) {
         self.windowState = windowState
@@ -54,6 +59,7 @@ public struct ClipLibraryView: View {
         }
         .onChange(of: outputDirectoryPath) { _, _ in
             state.selection = []
+            state.isDetailsExpanded = false
             state.metadataDraft = .empty
             state.renameDraft = ""
             Task { await model.reload() }
@@ -62,7 +68,10 @@ public struct ClipLibraryView: View {
             if page == .library { Task { await model.reload() } }
         }
         .onChange(of: model.rows.map(\.id)) { _, _ in pruneSelectionToExistingRows() }
-        .onChange(of: state.selection) { _, _ in
+        .onChange(of: state.selection) { _, selection in
+            if selection.isEmpty {
+                state.isDetailsExpanded = false
+            }
             syncDraftFromSelection()
         }
         .onReceive(NotificationCenter.default.publisher(for: .replayCapClipSaved)) { _ in
@@ -122,22 +131,27 @@ public struct ClipLibraryView: View {
 
     @ViewBuilder
     private var selectionPanel: some View {
-        if state.selection.count > 1 {
-            panel { batchBarView(for: selectedRows) }
-        } else if let row = singleSelectedRow {
-            panel { bottomBarView(for: row) }
+        Group {
+            if state.selection.count > 1 {
+                panel { batchBarView(for: selectedRows) }
+                    .transition(reduceMotion ? .opacity : .move(edge: .bottom).combined(with: .opacity))
+            } else if let row = singleSelectedRow {
+                panel { bottomBarView(for: row) }
+                    .transition(reduceMotion ? .opacity : .move(edge: .bottom).combined(with: .opacity))
+            }
         }
+        .animation(panelAnimation, value: state.selection.isEmpty)
+        .animation(panelAnimation, value: state.selection.count > 1)
+        .animation(panelAnimation, value: state.isDetailsExpanded)
     }
 
-    /// Selection details float over the table as one glass panel. Its own
+    /// Selection details float over the library as a compact glass bar. Its own
     /// buttons stay bordered, since glass controls on glass lose contrast.
     private func panel<Content: View>(@ViewBuilder _ content: () -> Content) -> some View {
-        // Fill the panel's width when there's room, and scroll below 800pt.
-        ScrollView(.horizontal, showsIndicators: false) {
-            content().containerRelativeFrame(.horizontal) { width, _ in max(width, 800) }
-        }
-            .fixedSize(horizontal: false, vertical: true)
-            .padding(14)
+        content()
+            .padding(.horizontal, 14)
+            .padding(.vertical, 10)
+            .frame(maxWidth: 820)
             .glassPanel()
             .padding(.horizontal, 16)
             .padding(.bottom, 12)
@@ -300,6 +314,7 @@ public struct ClipLibraryView: View {
                     ClipShareLink(url: row.info.fileURL)
 
                     Menu {
+                        Button("Edit Info…", systemImage: "info.circle") { editInfo(for: row) }
                         Button("Copy File", systemImage: "doc.on.doc") { copyFile(row.info.fileURL) }
                         Button("Show in Finder", systemImage: "folder") {
                             NSWorkspace.shared.activateFileViewerSelecting([row.info.fileURL])
@@ -339,6 +354,7 @@ public struct ClipLibraryView: View {
             if let row = targets.first, targets.count == 1 {
                 Button("Quick Preview") { state.previewURL = row.info.fileURL }
                 Button("Trim & Export…") { openTrim(row.info.fileURL) }
+                Button("Edit Info…") { editInfo(for: row) }
                 Button("Copy File") { copyFile(row.info.fileURL) }
             }
             Button("Reveal in Finder") {
@@ -440,6 +456,7 @@ public struct ClipLibraryView: View {
                 },
                 preview: { state.previewURL = row.info.fileURL },
                 trim: { openTrim(row.info.fileURL) },
+                editInfo: { editInfo(for: row) },
                 copyFile: { copyFile(row.info.fileURL) },
                 delete: { requestDelete([row]) }
             )
@@ -574,190 +591,253 @@ public struct ClipLibraryView: View {
         }
     }
 
+    private func editInfo(for row: ClipRow) {
+        selectOnly(row)
+        state.isDetailsExpanded = true
+    }
+
     private func bottomBarView(for row: ClipRow) -> some View {
-        VStack(spacing: 10) {
-            HStack(spacing: 12) {
+        let isProtected = windowState.isProtected(row.info.fileURL)
+        let isCopied = state.copiedFilePath == row.info.fileURL.path
+        let hasMetadataBadge = !row.userMetadata.tags.isEmpty || !row.userMetadata.notes.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+
+        return VStack(spacing: 10) {
+            HStack(spacing: 8) {
+                Button {
+                    model.toggleFavorite(row)
+                    syncDraftFromSelection()
+                } label: {
+                    Image(systemName: row.userMetadata.isFavorite ? "star.fill" : "star")
+                        .font(.system(size: 13, weight: .semibold))
+                        .foregroundStyle(row.userMetadata.isFavorite ? .yellow : AppTheme.textSecondary)
+                        .frame(width: 24, height: 24)
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .help(row.userMetadata.isFavorite ? "Remove favorite" : "Mark favorite")
+                .accessibilityLabel(row.userMetadata.isFavorite ? "Remove favorite" : "Mark favorite")
+
+                HStack(spacing: 6) {
+                    Text(row.displayTitle)
+                        .font(.system(size: 13, weight: .semibold, design: .rounded))
+                        .foregroundStyle(AppTheme.textPrimary)
+                        .lineLimit(1)
+                        .truncationMode(.middle)
+
+                    if !state.isDetailsExpanded, !row.userMetadata.tags.isEmpty {
+                        Text(row.userMetadata.tags.count == 1 ? "1 tag" : "\(row.userMetadata.tags.count) tags")
+                            .font(.system(size: 11, weight: .medium, design: .rounded))
+                            .foregroundStyle(AppTheme.accent)
+                            .padding(.horizontal, 6)
+                            .padding(.vertical, 2)
+                            .background(AppTheme.accent.opacity(0.12), in: Capsule())
+                            .fixedSize()
+                    }
+                }
+
+                Spacer(minLength: 8)
+
                 Button {
                     state.previewURL = row.info.fileURL
                 } label: {
-                    HStack(spacing: 6) {
-                        Image(systemName: "play.circle.fill")
-                        Text("Quick Preview")
-                    }
-                    .font(.system(size: 12, weight: .semibold, design: .rounded))
+                    Label("Preview", systemImage: "play.fill")
+                        .font(.system(size: 12, weight: .semibold, design: .rounded))
                 }
                 .buttonStyle(.borderedProminent)
                 .tint(AppTheme.accent)
                 .controlSize(.small)
+                .help("Quick preview")
 
                 Button {
                     openTrim(row.info.fileURL)
                 } label: {
-                    HStack(spacing: 6) {
-                        Image(systemName: "scissors")
-                        Text("Trim & Export")
-                    }
-                    .font(.system(size: 12, weight: .semibold, design: .rounded))
-                }
-                .buttonStyle(.bordered)
-                .controlSize(.small)
-                .help("Trim or crop the clip, choose an audio track, and export as MP4 or GIF")
-
-                ShareLink(item: row.info.fileURL) {
-                    Label("Share", systemImage: "square.and.arrow.up")
+                    Label("Trim", systemImage: "scissors")
                         .font(.system(size: 12, weight: .semibold, design: .rounded))
                 }
-                .buttonStyle(.bordered)
                 .controlSize(.small)
-
-                Button {
-                    copyFile(row.info.fileURL)
-                } label: {
-                    Label(
-                        state.copiedFilePath == row.info.fileURL.path ? "Copied" : "Copy File",
-                        systemImage: state.copiedFilePath == row.info.fileURL.path ? "checkmark" : "doc.on.doc"
-                    )
-                    .font(.system(size: 12, weight: .semibold, design: .rounded))
-                }
-                .buttonStyle(.bordered)
-                .controlSize(.small)
+                .help("Trim or crop the clip, choose an audio track, and export as MP4 or GIF")
 
                 Button {
                     exportWholeClipGIF(for: row)
                 } label: {
-                    HStack(spacing: 6) {
+                    HStack(spacing: 5) {
                         if windowState.exports.isBusy && windowState.exports.sourceURL == row.info.fileURL.standardizedFileURL {
                             ProgressView().controlSize(.small)
                         } else {
                             Image(systemName: "photo.stack")
                         }
-                        Text("Export GIF")
+                        Text("GIF")
                     }
                     .font(.system(size: 12, weight: .semibold, design: .rounded))
                 }
-                .buttonStyle(.bordered)
                 .controlSize(.small)
                 .disabled(windowState.exports.isBusy)
                 .help("Export the whole clip as a looping GIF (no audio). Use Trim to choose a range or size.")
 
-                Text(row.info.fileURL.lastPathComponent)
-                    .font(.system(size: 12, weight: .medium, design: .rounded))
-                    .foregroundStyle(AppTheme.textSecondary)
-                    .lineLimit(1)
+                Button {
+                    copyFile(row.info.fileURL)
+                } label: {
+                    Label(isCopied ? "Copied" : "Copy", systemImage: isCopied ? "checkmark" : "doc.on.doc")
+                        .labelStyle(.iconOnly)
+                        .font(.system(size: 12, weight: .semibold, design: .rounded))
+                }
+                .controlSize(.small)
+                .help(isCopied ? "Copied to clipboard" : "Copy file to clipboard")
+                .accessibilityLabel(isCopied ? "Copied file" : "Copy file")
 
-                Spacer()
+                ShareLink(item: row.info.fileURL) {
+                    Label("Share", systemImage: "square.and.arrow.up")
+                        .labelStyle(.iconOnly)
+                        .font(.system(size: 12, weight: .semibold, design: .rounded))
+                }
+                .controlSize(.small)
+                .help("Share clip")
+                .accessibilityLabel("Share clip")
+
+                Button {
+                    state.isDetailsExpanded.toggle()
+                } label: {
+                    Label("Info", systemImage: state.isDetailsExpanded || hasMetadataBadge ? "info.circle.fill" : "info.circle")
+                        .font(.system(size: 12, weight: .semibold, design: .rounded))
+                }
+                .controlSize(.small)
+                .tint(state.isDetailsExpanded ? AppTheme.accent : nil)
+                .help(state.isDetailsExpanded ? "Hide clip details" : "Rename clip or edit tags and notes")
 
                 Button(role: .destructive) {
                     requestDelete([row])
                 } label: {
                     Label("Delete", systemImage: "trash")
+                        .labelStyle(.iconOnly)
                         .font(.system(size: 12, weight: .semibold, design: .rounded))
                 }
-                .buttonStyle(.bordered)
                 .controlSize(.small)
                 .tint(AppTheme.danger)
-                .disabled(windowState.isProtected(row.info.fileURL))
+                .disabled(isProtected)
                 .help("Move this clip to Trash")
-            }
+                .accessibilityLabel("Delete clip")
 
-            HStack(alignment: .top, spacing: 12) {
-                Toggle("Favorite", isOn: Binding(
-                    get: { state.metadataDraft.isFavorite },
-                    set: { state.metadataDraft.isFavorite = $0 }
-                ))
-                .toggleStyle(.checkbox)
-                .frame(width: 90, alignment: .leading)
-
-                TextField("Display name", text: $state.metadataDraft.displayName)
-                    .textFieldStyle(.roundedBorder)
-
-                TextField("File name", text: $state.renameDraft)
-                    .textFieldStyle(.roundedBorder)
-
-                Button("Rename File") {
-                    applyRename(for: row)
+                Button {
+                    state.selection = []
+                } label: {
+                    Image(systemName: "xmark")
+                        .font(.system(size: 11, weight: .semibold))
+                        .foregroundStyle(AppTheme.textSecondary)
+                        .frame(width: 22, height: 22)
+                        .contentShape(Rectangle())
                 }
-                .disabled(windowState.isProtected(row.info.fileURL) || state.renameDraft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                .buttonStyle(.plain)
+                .help("Clear selection")
+                .accessibilityLabel("Clear selection")
+            }
 
-                Button("Save Details") {
-                    saveDraft(for: row)
+            if state.isDetailsExpanded {
+                Divider()
+
+                VStack(spacing: 8) {
+                    HStack(spacing: 10) {
+                        TextField("Display title", text: $state.metadataDraft.displayName)
+                            .textFieldStyle(.roundedBorder)
+                            .onSubmit { saveChanges(for: row) }
+
+                        TextField("File name", text: $state.renameDraft)
+                            .textFieldStyle(.roundedBorder)
+                            .disabled(isProtected)
+                            .onSubmit { saveChanges(for: row) }
+                    }
+
+                    HStack(spacing: 10) {
+                        TextField("Tags, comma separated", text: Binding(
+                            get: { state.metadataDraft.tags.joined(separator: ", ") },
+                            set: { state.metadataDraft.tags = Self.parseTags($0) }
+                        ))
+                        .textFieldStyle(.roundedBorder)
+                        .onSubmit { saveChanges(for: row) }
+
+                        TextField("Notes", text: $state.metadataDraft.notes)
+                            .textFieldStyle(.roundedBorder)
+                            .onSubmit { saveChanges(for: row) }
+
+                        Button("Save") {
+                            saveChanges(for: row)
+                        }
+                        .buttonStyle(.borderedProminent)
+                        .tint(AppTheme.accent)
+                        .controlSize(.small)
+                        .disabled(!hasUnsavedChanges(for: row))
+                    }
                 }
-                .buttonStyle(.borderedProminent)
-                .tint(AppTheme.accent)
+                .font(.system(size: 12, weight: .regular, design: .rounded))
+                .transition(reduceMotion ? .opacity : .opacity.combined(with: .scale(scale: 0.98, anchor: .bottom)))
             }
-
-            HStack(spacing: 12) {
-                TextField("Tags, comma separated", text: Binding(
-                    get: { state.metadataDraft.tags.joined(separator: ", ") },
-                    set: { state.metadataDraft.tags = Self.parseTags($0) }
-                ))
-                .textFieldStyle(.roundedBorder)
-
-                TextField("Notes", text: $state.metadataDraft.notes, axis: .vertical)
-                    .textFieldStyle(.roundedBorder)
-                    .lineLimit(1...3)
-            }
-            .font(.system(size: 12, weight: .regular, design: .rounded))
         }
     }
 
     private func batchBarView(for rows: [ClipRow]) -> some View {
-        VStack(spacing: 10) {
-            HStack(spacing: 12) {
-                Text("\(rows.count) clips selected")
-                    .font(.system(size: 13, weight: .semibold, design: .rounded))
-                    .foregroundStyle(AppTheme.textPrimary)
+        HStack(spacing: 8) {
+            Text("\(rows.count) selected")
+                .font(.system(size: 13, weight: .semibold, design: .rounded))
+                .foregroundStyle(AppTheme.textPrimary)
+                .fixedSize()
 
-                Button {
-                    model.setFavorite(rows, to: true)
-                } label: {
-                    Label("Favorite", systemImage: "star.fill")
-                        .font(.system(size: 12, weight: .semibold, design: .rounded))
-                }
-                .buttonStyle(.bordered)
-                .controlSize(.small)
-
-                Button {
-                    model.setFavorite(rows, to: false)
-                } label: {
-                    Label("Unfavorite", systemImage: "star.slash")
-                        .font(.system(size: 12, weight: .semibold, design: .rounded))
-                }
-                .buttonStyle(.bordered)
-                .controlSize(.small)
-
-                ShareLink(items: rows.map(\.info.fileURL)) {
-                    Label("Share", systemImage: "square.and.arrow.up")
-                        .font(.system(size: 12, weight: .semibold, design: .rounded))
-                }
-                .buttonStyle(.bordered)
-                .controlSize(.small)
-
-                Spacer()
-
-                Button(role: .destructive) {
-                    requestDelete(rows)
-                } label: {
-                    Label("Delete \(rows.count)", systemImage: "trash")
-                        .font(.system(size: 12, weight: .semibold, design: .rounded))
-                }
-                .buttonStyle(.bordered)
-                .controlSize(.small)
-                .tint(AppTheme.danger)
-                .disabled(rows.contains { windowState.isProtected($0.info.fileURL) })
+            Button {
+                model.setFavorite(rows, to: true)
+            } label: {
+                Label("Favorite", systemImage: "star.fill")
+                    .font(.system(size: 12, weight: .semibold, design: .rounded))
             }
+            .controlSize(.small)
 
-            HStack(spacing: 12) {
-                TextField("Add tag to all selected", text: $state.bulkTagDraft)
-                    .textFieldStyle(.roundedBorder)
-                    .onSubmit { applyBulkTag(to: rows) }
-
-                Button("Add Tag") {
-                    applyBulkTag(to: rows)
-                }
-                .disabled(state.bulkTagDraft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+            Button {
+                model.setFavorite(rows, to: false)
+            } label: {
+                Label("Unfavorite", systemImage: "star.slash")
+                    .font(.system(size: 12, weight: .semibold, design: .rounded))
             }
-            .font(.system(size: 12, weight: .regular, design: .rounded))
+            .controlSize(.small)
+
+            ShareLink(items: rows.map(\.info.fileURL)) {
+                Label("Share", systemImage: "square.and.arrow.up")
+                    .font(.system(size: 12, weight: .semibold, design: .rounded))
+            }
+            .controlSize(.small)
+
+            TextField("Add tag…", text: $state.bulkTagDraft)
+                .textFieldStyle(.roundedBorder)
+                .font(.system(size: 12, weight: .regular, design: .rounded))
+                .frame(minWidth: 110, maxWidth: 180)
+                .onSubmit { applyBulkTag(to: rows) }
+
+            Button("Add") {
+                applyBulkTag(to: rows)
+            }
+            .controlSize(.small)
+            .disabled(state.bulkTagDraft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+
+            Spacer(minLength: 4)
+
+            Button(role: .destructive) {
+                requestDelete(rows)
+            } label: {
+                Label("Delete \(rows.count)", systemImage: "trash")
+                    .font(.system(size: 12, weight: .semibold, design: .rounded))
+            }
+            .controlSize(.small)
+            .tint(AppTheme.danger)
+            .disabled(rows.contains { windowState.isProtected($0.info.fileURL) })
+
+            Button {
+                state.selection = []
+            } label: {
+                Image(systemName: "xmark")
+                    .font(.system(size: 11, weight: .semibold))
+                    .foregroundStyle(AppTheme.textSecondary)
+                    .frame(width: 22, height: 22)
+                    .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .help("Clear selection")
+            .accessibilityLabel("Clear selection")
         }
     }
 
@@ -802,19 +882,36 @@ public struct ClipLibraryView: View {
         state.renameDraft = row.fileNameWithoutExtension
     }
 
-    private func saveDraft(for row: ClipRow) {
-        model.updateMetadata(for: row, metadata: state.metadataDraft)
+    private func hasUnsavedChanges(for row: ClipRow) -> Bool {
+        var draft = state.metadataDraft
+        draft.isFavorite = row.userMetadata.isFavorite
+        let metadataChanged = draft != row.userMetadata
+        let trimmedRename = state.renameDraft.trimmingCharacters(in: .whitespacesAndNewlines)
+        let renameChanged = !windowState.isProtected(row.info.fileURL)
+            && !trimmedRename.isEmpty
+            && trimmedRename != row.fileNameWithoutExtension
+        return metadataChanged || renameChanged
     }
 
-    private func applyRename(for row: ClipRow) {
-        guard !windowState.isProtected(row.info.fileURL) else { return }
-        let oldID = row.id
-        if let newID = model.rename(row, to: state.renameDraft, metadata: state.metadataDraft) {
-            state.selection = [newID]
+    private func saveChanges(for row: ClipRow) {
+        var metadata = state.metadataDraft
+        metadata.isFavorite = row.userMetadata.isFavorite
+        state.metadataDraft = metadata
+
+        let trimmedRename = state.renameDraft.trimmingCharacters(in: .whitespacesAndNewlines)
+        let canRename = !windowState.isProtected(row.info.fileURL) && !trimmedRename.isEmpty
+        if canRename, trimmedRename != row.fileNameWithoutExtension {
+            let oldID = row.id
+            if let newID = model.rename(row, to: trimmedRename, metadata: metadata) {
+                state.selection = [newID]
+            } else {
+                state.selection = [oldID]
+            }
+            syncDraftFromSelection()
         } else {
-            state.selection = [oldID]
+            model.updateMetadata(for: row, metadata: metadata)
+            syncDraftFromSelection()
         }
-        syncDraftFromSelection()
     }
 
     private func exportWholeClipGIF(for row: ClipRow) {
