@@ -42,7 +42,13 @@ extension AppDelegate {
                       $0.id.uuidString.caseInsensitiveCompare(clipId) == .orderedSame || $0.id.uuidString == clipId
                   }),
                   !self.mainWindowState.isProtected(clip.url) else { return }
-            try? FileManager.default.trashItem(at: clip.url, resultingItemURL: nil)
+            do {
+                try FileManager.default.trashItem(at: clip.url, resultingItemURL: nil)
+            } catch {
+                // Leave the clip listed; dropping it would claim a delete that didn't happen.
+                companionLogger.error("Failed to trash clip from companion: \(String(describing: error), privacy: .public)")
+                return
+            }
             self.mainWindowState.removeRecentClip(id: clip.id)
             self.broadcastCompanionSnapshot()
         }
