@@ -30,6 +30,7 @@ public enum MicCaptureError: Error {
 /// a Discord or Zoom call does all three, so the engine is rebuilt in response
 /// to `AVAudioEngineConfigurationChange` and by a stall watchdog behind it.
 public final class MicCapture: @unchecked Sendable {
+    // @unchecked: mutable state is only touched inside `lock`; restart epochs retire engine work queued by an earlier run.
     /// A timeline discontinuity larger than this re-anchors the mic clock.
     /// Comfortably above per-buffer host-time jitter (buffers arrive every
     /// ~21ms), and far below the gap a device change produces.
@@ -634,5 +635,6 @@ public final class MicCapture: @unchecked Sendable {
 }
 
 private final class AudioConversionInputState: @unchecked Sendable {
+    // @unchecked: only used inside one synchronous AVAudioConverter.convert call.
     var didReturnInput = false
 }

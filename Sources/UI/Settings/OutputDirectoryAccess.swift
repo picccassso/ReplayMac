@@ -1,6 +1,7 @@
 import AppKit
 import Foundation
 import Defaults
+import os
 
 public extension Defaults.Keys {
     static let outputDirectoryBookmark = Key<Data?>("outputDirectoryBookmark", default: nil)
@@ -14,6 +15,7 @@ public extension Defaults.Keys {
 /// recording.
 @MainActor
 public enum OutputDirectoryAccess {
+    private static let logger = Logger(subsystem: "com.replaycap", category: "OutputDirectoryAccess")
     private static var scopedURL: URL?
 
     /// True when a security-scoped bookmark is stored (for example, pointing to
@@ -36,7 +38,7 @@ public enum OutputDirectoryAccess {
             )
         } catch {
             bookmark = nil
-            NSLog("OutputDirectoryAccess: failed to create bookmark for \(url.path): \(error)")
+            logger.error("Failed to create bookmark for \(url.path): \(String(describing: error), privacy: .public)")
         }
 
         endScopedAccess()
@@ -146,12 +148,12 @@ public enum OutputDirectoryAccess {
             )
         } catch {
             if shouldPreserveUnresolvedBookmark(storedPath: Defaults[.outputDirectoryPath]) {
-                NSLog("OutputDirectoryAccess: external volume for \(Defaults[.outputDirectoryPath]) is unmounted; keeping bookmark for later retry")
+                logger.info("External volume for \(Defaults[.outputDirectoryPath]) is unmounted; keeping bookmark for later retry")
                 return false
             }
             // Folder is permanently gone. Drop the stored path so App Store
             // builds require a fresh explicit choice.
-            NSLog("OutputDirectoryAccess: dropping unresolvable bookmark: \(error)")
+            logger.error("Dropping unresolvable bookmark: \(String(describing: error), privacy: .public)")
             Defaults[.outputDirectoryBookmark] = nil
             Defaults.reset(.outputDirectoryPath)
             return false
@@ -159,19 +161,25 @@ public enum OutputDirectoryAccess {
 
         endScopedAccess()
         guard url.startAccessingSecurityScopedResource() else {
-            NSLog("OutputDirectoryAccess: security-scoped access could not be restored for \(url.path)")
+            logger.error("Security-scoped access could not be restored for \(url.path)")
             Defaults[.outputDirectoryBookmark] = nil
             Defaults.reset(.outputDirectoryPath)
             return false
         }
         scopedURL = url
 
-        if isStale, let fresh = try? url.bookmarkData(
-            options: .withSecurityScope,
-            includingResourceValuesForKeys: nil,
-            relativeTo: nil
-        ) {
-            Defaults[.outputDirectoryBookmark] = fresh
+        if isStale {
+            do {
+                Defaults[.outputDirectoryBookmark] = try url.bookmarkData(
+                    options: .withSecurityScope,
+                    includingResourceValuesForKeys: nil,
+                    relativeTo: nil
+                )
+            } catch {
+                // Access works for this launch, but the stale bookmark may not
+                // resolve next time, which would ask the user to pick again.
+                logger.error("Failed to refresh stale output folder bookmark: \(String(describing: error), privacy: .public)")
+            }
         }
 
         // Follow the folder if it was moved or renamed since last launch.

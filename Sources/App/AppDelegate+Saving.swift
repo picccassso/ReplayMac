@@ -1,8 +1,11 @@
 import Foundation
 import AppKit
+import os
 import Save
 import UI
 import Feedback
+
+private let clipSaveLogger = Logger(subsystem: "com.replaycap", category: "ClipSave")
 
 @MainActor
 extension AppDelegate {
@@ -81,7 +84,7 @@ extension AppDelegate {
         broadcastCompanionSnapshot()
 
         do {
-            print("Saving clip to output directory: \(outputDirectory.path(percentEncoded: false))")
+            clipSaveLogger.info("Saving clip to output directory: \(outputDirectory.path(percentEncoded: false))")
 
             let baseName = resolvedClipBaseName()
             let finalURLs: [URL]
@@ -117,12 +120,12 @@ extension AppDelegate {
             if AppSettings.showNotificationOnSave {
                 NotificationManager.shared.showClipSavedNotification(fileURL: finalURLs[0], clipDuration: lastSeconds)
             }
-            print("Clip saved: \(finalURLs.map(\.path).joined(separator: ", "))")
+            clipSaveLogger.info("Clip saved: \(finalURLs.map(\.path).joined(separator: ", "))")
         } catch {
             menuBarState.finishSaving(success: false)
             statusItemController.refreshPresentation()
             NotificationManager.shared.showSaveFailedNotification(error: error.localizedDescription)
-            print("Failed to save clip: \(error)")
+            clipSaveLogger.error("Failed to save clip: \(String(describing: error), privacy: .public)")
         }
     }
 
@@ -189,7 +192,7 @@ extension AppDelegate {
             if AppSettings.showNotificationOnSave {
                 NotificationManager.shared.showClipSavedNotification(fileURL: savedURL, clipDuration: lastSeconds)
             }
-            print("Long-buffer clip saved: \(savedURL.path)")
+            clipSaveLogger.info("Long-buffer clip saved: \(savedURL.path)")
         } catch LongBufferRecorderError.longBufferExportAlreadyInProgress {
             menuBarState.finishSaving(success: false)
             statusItemController.refreshPresentation()
@@ -201,7 +204,7 @@ extension AppDelegate {
             menuBarState.finishSaving(success: false)
             statusItemController.refreshPresentation()
             NotificationManager.shared.showSaveFailedNotification(error: error.localizedDescription)
-            print("Failed to save long-buffer clip: \(error)")
+            clipSaveLogger.error("Failed to save long-buffer clip: \(String(describing: error), privacy: .public)")
         }
     }
 

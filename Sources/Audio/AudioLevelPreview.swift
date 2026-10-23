@@ -2,6 +2,9 @@ import Foundation
 @preconcurrency import AVFoundation
 @preconcurrency import CoreMedia
 import ScreenCaptureKit
+import os.log
+
+private let levelPreviewLogger = Logger(subsystem: "com.replaycap", category: "AudioLevelPreview")
 
 /// Drives the live audio level meters while the capture pipeline is idle.
 ///
@@ -168,7 +171,7 @@ public final class AudioLevelPreview {
             isMicrophoneRunning = true
             runningMicrophoneDeviceID = target.microphoneDeviceID
         } catch {
-            print("[LEVELS] Microphone level preview unavailable: \(error)")
+            levelPreviewLogger.error("Microphone level preview unavailable: \(String(describing: error), privacy: .public)")
         }
     }
 
@@ -203,7 +206,7 @@ public final class AudioLevelPreview {
             runningExcludedAudioBundleIDs = target.excludedAudioBundleIDs
             runningExcludesOwnAppAudio = target.excludeOwnAppAudio
         } catch {
-            print("[LEVELS] System audio level preview unavailable: \(error)")
+            levelPreviewLogger.error("System audio level preview unavailable: \(String(describing: error), privacy: .public)")
         }
     }
 
@@ -232,6 +235,7 @@ public final class AudioLevelPreview {
 /// Measurement-only microphone tap. Deliberately independent of `MicCapture`
 /// so preview never touches the recording engine's timing state.
 private final class MicrophoneLevelTap: @unchecked Sendable {
+    // @unchecked: `volume` and `isRunning` are only touched inside `lock`; the engine is only driven from the main actor.
     private let engine = AVAudioEngine()
     private let lock = NSLock()
     private var volume: Double = 1
@@ -318,6 +322,7 @@ private final class MicrophoneLevelTap: @unchecked Sendable {
 /// configuration is deliberately tiny and slow, and no screen output is added,
 /// so the stream costs close to nothing.
 private final class SystemAudioLevelTap: NSObject, SCStreamOutput, @unchecked Sendable {
+    // @unchecked: `volume` is guarded by `lock`; `stream` is only touched by start/stop, which AudioLevelPreview runs one at a time from its reconcile task.
     private let queue = DispatchQueue(label: "com.replaycap.audio-level-preview", qos: .utility)
     private let lock = NSLock()
     private var stream: SCStream?

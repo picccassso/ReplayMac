@@ -3,6 +3,7 @@ import Capture
 import Foundation
 import Branding
 import Defaults
+import os
 import Save
 
 public enum VideoCodec: String, CaseIterable, Identifiable {
@@ -121,6 +122,8 @@ public enum LongBufferDuration: Int, CaseIterable, Identifiable {
 }
 
 public enum AppSettings {
+    static let logger = Logger(subsystem: "com.replaycap", category: "Settings")
+
     /// App Store installs have no proposed output folder. Direct builds retain
     /// their traditional user-visible Movies folder default.
     public static var defaultOutputDirectoryPath: String {
@@ -302,11 +305,16 @@ public enum AppSettings {
     }
 
     public static func loadCaptureProfiles() -> [CaptureProfile] {
-        guard let data = Defaults[.captureProfilesJSON].data(using: .utf8),
-              let profiles = try? JSONDecoder().decode([CaptureProfile].self, from: data) else {
+        guard let data = Defaults[.captureProfilesJSON].data(using: .utf8) else {
             return []
         }
-        return profiles.sorted { $0.updatedAt > $1.updatedAt }
+        do {
+            let profiles = try JSONDecoder().decode([CaptureProfile].self, from: data)
+            return profiles.sorted { $0.updatedAt > $1.updatedAt }
+        } catch {
+            logger.error("Saved capture profiles could not be decoded: \(String(describing: error), privacy: .public)")
+            return []
+        }
     }
 
     public static func isCaptureProfileActive(_ profile: CaptureProfile) -> Bool {
@@ -544,6 +552,7 @@ public enum AppSettings {
         return nil
     }
 
+    // NSCache is documented as thread-safe, but the SDK doesn't mark it Sendable.
     nonisolated(unsafe) private static let appIconBase64Cache = NSCache<NSString, NSString>()
 
     public static func appIconBase64(for bundleID: String, dimension: Int = 64) -> String? {

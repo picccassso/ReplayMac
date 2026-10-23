@@ -1,9 +1,12 @@
 import Darwin.Mach
 import Foundation
+import os
 
 import Capture
 import UI
 import CompanionServer
+
+private let bufferMonitorLogger = Logger(subsystem: "com.replaycap", category: "BufferMonitor")
 
 @MainActor
 extension AppDelegate {
@@ -96,7 +99,7 @@ extension AppDelegate {
                     self.hasWarnedSystemAudioStalled = true
                     let age = captureStats.lastAudioSampleDate
                         .map { String(format: "%.0fs ago", now.timeIntervalSince($0)) } ?? "never"
-                    print("Warning: system audio has not delivered a sample (\(age)). Output device may have changed mid-capture.")
+                    bufferMonitorLogger.warning("System audio has not delivered a sample (\(age, privacy: .public)). Output device may have changed mid-capture.")
                 } else if !systemAudioStalled {
                     self.hasWarnedSystemAudioStalled = false
                 }
@@ -142,7 +145,7 @@ extension AppDelegate {
                 let micMemory = self.micAudioRingBuffer.currentMemoryBytes
                 let micSamples = self.micAudioRingBuffer.totalSampleCount
                 let longBufferStats = self.longBufferAppendPump.snapshot()
-                print("RingBuffer | Video: \(String(format: "%.1f", videoDuration))s \(videoMemory / (1024 * 1024))MB keyframes=\(videoKeyframes) samples=\(videoSamples) | Dual1: \(String(format: "%.1f", dualDisplay1Duration))s \(dualDisplay1Memory / (1024 * 1024))MB | Dual2: \(String(format: "%.1f", dualDisplay2Duration))s \(dualDisplay2Memory / (1024 * 1024))MB | SystemAudio: \(audioSamples) samples \(audioMemory / 1024)KB \(String(format: "%.1f", systemAudioDuration))s | Mic: \(micSamples) samples \(String(format: "%.1f", micDuration))s | LongBuffer pending=\(longBufferStats.pendingSamples) pumpDropped=\(longBufferStats.droppedSamples)")
+                bufferMonitorLogger.debug("RingBuffer | Video: \(videoDuration, format: .fixed(precision: 1))s \(videoMemory / (1024 * 1024))MB keyframes=\(videoKeyframes) samples=\(videoSamples) | Dual1: \(dualDisplay1Duration, format: .fixed(precision: 1))s \(dualDisplay1Memory / (1024 * 1024))MB | Dual2: \(dualDisplay2Duration, format: .fixed(precision: 1))s \(dualDisplay2Memory / (1024 * 1024))MB | SystemAudio: \(audioSamples) samples \(audioMemory / 1024)KB \(systemAudioDuration, format: .fixed(precision: 1))s | Mic: \(micSamples) samples \(micDuration, format: .fixed(precision: 1))s | LongBuffer pending=\(longBufferStats.pendingSamples) pumpDropped=\(longBufferStats.droppedSamples)")
 
                 let totalRingMemory = videoMemory + dualDisplay1Memory + dualDisplay2Memory + audioMemory + micMemory
                 self.menuBarState.setBufferMemoryBytes(totalRingMemory)
@@ -155,7 +158,7 @@ extension AppDelegate {
                 )
 
                 let audioAge = captureStats.lastAudioSampleDate.map { String(format: "%.1fs ago", now.timeIntervalSince($0)) } ?? "never"
-                print("SCKCallbacks | Video: total=\(captureStats.videoSampleCount) | Audio: total=\(captureStats.audioSampleCount) invalid=\(captureStats.invalidAudioSampleCount) last=\(audioAge)")
+                bufferMonitorLogger.debug("SCKCallbacks | Video: total=\(captureStats.videoSampleCount) | Audio: total=\(captureStats.audioSampleCount) invalid=\(captureStats.invalidAudioSampleCount) last=\(audioAge, privacy: .public)")
             }
         }
     }
@@ -184,7 +187,7 @@ extension AppDelegate {
             let evictedDisplay2 = dualDisplay2VideoRingBuffer.trimToDuration(maxSeconds: TimeInterval(reducedSeconds))
             let evictedSystem = systemAudioRingBuffer.trimToDuration(maxSeconds: TimeInterval(reducedSeconds))
             let evictedMic = micAudioRingBuffer.trimToDuration(maxSeconds: TimeInterval(reducedSeconds))
-            print("Critical memory pressure (\(availableMemory / (1024 * 1024))MB avail). Shrunk buffers to \(reducedSeconds)s; evicted video=\(evictedVideo)B display1=\(evictedDisplay1)B display2=\(evictedDisplay2)B systemAudio=\(evictedSystem)B mic=\(evictedMic)B")
+            bufferMonitorLogger.warning("Critical memory pressure (\(availableMemory / (1024 * 1024))MB avail). Shrunk buffers to \(reducedSeconds)s; evicted video=\(evictedVideo)B display1=\(evictedDisplay1)B display2=\(evictedDisplay2)B systemAudio=\(evictedSystem)B mic=\(evictedMic)B")
         }
     }
 

@@ -48,6 +48,7 @@ enum GIFExportError: LocalizedError {
 }
 
 private final class GIFFrameCollector: @unchecked Sendable {
+    // @unchecked: every mutable property is only touched inside `lock`.
     private let lock = NSLock()
     private let total: Int
     private var collected: [(time: Double, image: CGImage)] = []
@@ -251,6 +252,7 @@ enum GIFExporter {
 
 /// Serialises starting and cancelling generation, including cancellation before start.
 private final class GIFImageGeneration: @unchecked Sendable {
+    // @unchecked: the generator and `cancelled` are only touched inside `lock`.
     private let generator: AVAssetImageGenerator
     private let lock = NSLock()
     private var cancelled = false

@@ -3,6 +3,9 @@ import AppKit
 import Branding
 import Defaults
 import CompanionServer
+import os
+
+private let companionLogger = Logger(subsystem: "com.replaycap", category: "CompanionServer")
 
 public struct CompanionSettingsView: View {
     @Default(.companionServerEnabled) private var companionServerEnabled
@@ -94,7 +97,7 @@ public struct CompanionSettingsView: View {
                 do {
                     try server.start(port: UInt16(companionServerPort))
                 } catch {
-                    print("Failed to start companion server: \(error)")
+                    companionLogger.error("Failed to start companion server: \(String(describing: error), privacy: .public)")
                 }
             } else {
                 server.stop()

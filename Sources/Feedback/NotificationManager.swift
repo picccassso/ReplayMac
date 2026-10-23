@@ -1,12 +1,17 @@
 import Branding
 import Foundation
 import AppKit
+import os.log
 @preconcurrency import UserNotifications
+
+private let notificationLogger = Logger(subsystem: "com.replaycap", category: "Notifications")
 
 public final class NotificationManager: NSObject, UNUserNotificationCenterDelegate, @unchecked Sendable {
     public static let shared = NotificationManager()
 
-    private var center: UNUserNotificationCenter?
+    // @unchecked: the only stored state is this constant, and
+    // UNUserNotificationCenter is safe to call from any thread.
+    private let center: UNUserNotificationCenter?
 
     private enum Category {
         static let clipSaved = "CLIP_SAVED"
@@ -18,12 +23,12 @@ public final class NotificationManager: NSObject, UNUserNotificationCenterDelega
     }
 
     private override init() {
-        super.init()
         // UNUserNotificationCenter crashes if called outside a proper .app bundle.
         // Only set up when running inside an app bundle.
-        if Bundle.main.bundlePath.hasSuffix(".app") {
-            self.center = UNUserNotificationCenter.current()
-            self.center?.delegate = self
+        center = Bundle.main.bundlePath.hasSuffix(".app") ? UNUserNotificationCenter.current() : nil
+        super.init()
+        if let center {
+            center.delegate = self
             registerCategories()
         }
     }
@@ -63,10 +68,10 @@ public final class NotificationManager: NSObject, UNUserNotificationCenterDelega
 
             center.requestAuthorization(options: [.alert, .sound]) { granted, error in
                 if let error {
-                    print("Notification authorization error: \(error.localizedDescription)")
+                    notificationLogger.error("Notification authorization error: \(error.localizedDescription, privacy: .public)")
                 }
                 if !granted {
-                    print("Notification authorization denied by user.")
+                    notificationLogger.info("Notification authorization denied by user.")
                 }
             }
         }
@@ -81,7 +86,7 @@ public final class NotificationManager: NSObject, UNUserNotificationCenterDelega
             }
 
             guard settings.authorizationStatus != .denied else {
-                print("Notifications are disabled for \(AppBranding.name) in System Settings.")
+                notificationLogger.info("Notifications are disabled for \(AppBranding.name, privacy: .public) in System Settings.")
                 return
             }
 
@@ -118,7 +123,7 @@ public final class NotificationManager: NSObject, UNUserNotificationCenterDelega
         )
         center.add(request) { error in
             if let error {
-                print("Failed to post clip saved notification: \(error.localizedDescription)")
+                notificationLogger.error("Failed to post clip saved notification: \(error.localizedDescription, privacy: .public)")
             }
         }
     }
@@ -136,7 +141,7 @@ public final class NotificationManager: NSObject, UNUserNotificationCenterDelega
             }
 
             guard settings.authorizationStatus != .denied else {
-                print("Notifications are disabled for \(AppBranding.name) in System Settings.")
+                notificationLogger.info("Notifications are disabled for \(AppBranding.name, privacy: .public) in System Settings.")
                 return
             }
 
@@ -171,7 +176,7 @@ public final class NotificationManager: NSObject, UNUserNotificationCenterDelega
         )
         center.add(request) { addError in
             if let addError {
-                print("Failed to post operational notification: \(addError.localizedDescription)")
+                notificationLogger.error("Failed to post operational notification: \(addError.localizedDescription, privacy: .public)")
             }
         }
     }

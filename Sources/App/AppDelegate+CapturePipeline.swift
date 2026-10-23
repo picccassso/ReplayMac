@@ -11,6 +11,7 @@ import Save
 import UI
 
 let captureRecoveryLogger = Logger(subsystem: "com.replaycap", category: "CaptureRecovery")
+private let capturePipelineLogger = Logger(subsystem: "com.replaycap", category: "CapturePipeline")
 
 @MainActor
 extension AppDelegate {
@@ -171,7 +172,7 @@ extension AppDelegate {
                         )
                     } catch CaptureError.notEnoughDisplays {
                         dualConfigs = nil
-                        print("Dual capture unavailable; falling back to single display capture.")
+                        capturePipelineLogger.warning("Dual capture unavailable; falling back to single display capture.")
                         try await startSingleDisplayCapture(
                             userInitiated: userInitiated,
                             fps: fps,
@@ -185,31 +186,11 @@ extension AppDelegate {
                     }
 
                     if let dualConfigs {
-                        originalDualWidth1 = dualConfigs.config1.sourceWidth
-                        originalDualHeight1 = dualConfigs.config1.sourceHeight
-                        originalDualPointPixelScale1 = dualConfigs.config1.sourcePointPixelScale
-                        originalDualPixelWidth1 = dualConfigs.config1.sourcePixelWidth
-                        originalDualPixelHeight1 = dualConfigs.config1.sourcePixelHeight
-                        originalDualWidth2 = dualConfigs.config2.sourceWidth
-                        originalDualHeight2 = dualConfigs.config2.sourceHeight
-                        originalDualPointPixelScale2 = dualConfigs.config2.sourcePointPixelScale
-                        originalDualPixelWidth2 = dualConfigs.config2.sourcePixelWidth
-                        originalDualPixelHeight2 = dualConfigs.config2.sourcePixelHeight
+                        originalDual1 = DisplayDimensions(sourceOf: dualConfigs.config1)
+                        originalDual2 = DisplayDimensions(sourceOf: dualConfigs.config2)
 
-                        let scaled1 = AppSettings.scaledDimensions(
-                            displayWidth: originalDualWidth1,
-                            displayHeight: originalDualHeight1,
-                            pointPixelScale: originalDualPointPixelScale1,
-                            maxPixelWidth: originalDualPixelWidth1,
-                            maxPixelHeight: originalDualPixelHeight1
-                        )
-                        let scaled2 = AppSettings.scaledDimensions(
-                            displayWidth: originalDualWidth2,
-                            displayHeight: originalDualHeight2,
-                            pointPixelScale: originalDualPointPixelScale2,
-                            maxPixelWidth: originalDualPixelWidth2,
-                            maxPixelHeight: originalDualPixelHeight2
-                        )
+                        let scaled1 = originalDual1.scaledForCaptureResolution()
+                        let scaled2 = originalDual2.scaledForCaptureResolution()
 
                         try await captureManager.updateDualStreamConfigurations(
                             fps: fps,
@@ -247,7 +228,7 @@ extension AppDelegate {
                         isDualMode = true
                         syncMemoryCapsToSettings()
 
-                        print("Dual capture started: Display1=\(originalDualWidth1)x\(originalDualHeight1) @\(originalDualPointPixelScale1)x -> \(scaled1.width)x\(scaled1.height), Display2=\(originalDualWidth2)x\(originalDualHeight2) @\(originalDualPointPixelScale2)x -> \(scaled2.width)x\(scaled2.height), Composite=\(compositeWidth)x\(compositeHeight)")
+                        capturePipelineLogger.info("Dual capture started: Display1=\(self.originalDual1.width)x\(self.originalDual1.height) @\(self.originalDual1.pointPixelScale)x -> \(scaled1.width)x\(scaled1.height), Display2=\(self.originalDual2.width)x\(self.originalDual2.height) @\(self.originalDual2.pointPixelScale)x -> \(scaled2.width)x\(scaled2.height), Composite=\(compositeWidth)x\(compositeHeight)")
                     }
                 } else {
                     try await startSingleDisplayCapture(
@@ -270,7 +251,7 @@ extension AppDelegate {
                         try micAudioCapture.start(deviceID: AppSettings.microphoneID)
                         lastMicDeviceID = AppSettings.microphoneID
                     } catch {
-                        print("Warning: Failed to start mic capture: \(error)")
+                        capturePipelineLogger.error("Failed to start mic capture: \(String(describing: error), privacy: .public)")
                         NotificationManager.shared.showOperationalNotification(
                             title: "Microphone Unavailable",
                             body: error.localizedDescription
@@ -315,7 +296,7 @@ extension AppDelegate {
             if showFailureNotification {
                 NotificationManager.shared.showOperationalNotification(title: message.title, body: message.body)
             }
-            print("Failed to start capture: \(error)")
+            capturePipelineLogger.error("Failed to start capture: \(String(describing: error), privacy: .public)")
         }
     }
 
@@ -364,19 +345,9 @@ extension AppDelegate {
             captureHDR: captureHDR
         )
 
-        originalDisplayWidth = config.sourceWidth
-        originalDisplayHeight = config.sourceHeight
-        originalDisplayPointPixelScale = config.sourcePointPixelScale
-        originalDisplayPixelWidth = config.sourcePixelWidth
-        originalDisplayPixelHeight = config.sourcePixelHeight
+        originalDisplay = DisplayDimensions(sourceOf: config)
 
-        let scaled = AppSettings.scaledDimensions(
-            displayWidth: originalDisplayWidth,
-            displayHeight: originalDisplayHeight,
-            pointPixelScale: originalDisplayPointPixelScale,
-            maxPixelWidth: originalDisplayPixelWidth,
-            maxPixelHeight: originalDisplayPixelHeight
-        )
+        let scaled = originalDisplay.scaledForCaptureResolution()
 
         try await captureManager.updateStreamConfiguration(
             fps: fps,
@@ -397,7 +368,7 @@ extension AppDelegate {
         isDualMode = false
         syncMemoryCapsToSettings()
 
-        print("Single capture started: Display=\(originalDisplayWidth)x\(originalDisplayHeight) @\(originalDisplayPointPixelScale)x -> \(scaled.width)x\(scaled.height)")
+        capturePipelineLogger.info("Single capture started: Display=\(self.originalDisplay.width)x\(self.originalDisplay.height) @\(self.originalDisplay.pointPixelScale)x -> \(scaled.width)x\(scaled.height)")
     }
 
     func stopCapturePipeline() {
@@ -583,7 +554,7 @@ extension AppDelegate {
                 NotificationManager.shared.showOperationalNotification(title: message.title, body: message.body)
             }
             if case .stopped(let reason) = interruption {
-                print("Capture stopped: \(reason)")
+                capturePipelineLogger.info("Capture stopped: \(reason, privacy: .public)")
             }
             stopCapturePipeline()
         }

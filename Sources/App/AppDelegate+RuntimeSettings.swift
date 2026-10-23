@@ -5,7 +5,10 @@ import Capture
 import Defaults
 import Encode
 import Feedback
+import os
 import UI
+
+private let runtimeSettingsLogger = Logger(subsystem: "com.replaycap", category: "RuntimeSettings")
 
 @MainActor
 extension AppDelegate {
@@ -31,7 +34,11 @@ extension AppDelegate {
         settingsObservations.append(Defaults.observe(.companionServerEnabled) { [weak self] change in
             guard let self else { return }
             if change.newValue {
-                try? self.companionServer.start(port: UInt16(AppSettings.companionServerPort))
+                do {
+                    try self.companionServer.start(port: UInt16(AppSettings.companionServerPort))
+                } catch {
+                    runtimeSettingsLogger.error("Failed to start companion server: \(String(describing: error), privacy: .public)")
+                }
             } else {
                 self.companionServer.stop()
             }
@@ -39,7 +46,11 @@ extension AppDelegate {
         settingsObservations.append(Defaults.observe(.companionServerPort) { [weak self] change in
             guard let self, self.companionServer.isRunning else { return }
             self.companionServer.stop()
-            try? self.companionServer.start(port: UInt16(change.newValue))
+            do {
+                try self.companionServer.start(port: UInt16(change.newValue))
+            } catch {
+                runtimeSettingsLogger.error("Failed to restart companion server on port \(change.newValue): \(String(describing: error), privacy: .public)")
+            }
         })
         settingsObservations.append(Defaults.observe(.systemAudioVolume) { [weak self] _ in
             self?.applyEffectiveAudioVolumes()
@@ -223,7 +234,7 @@ extension AppDelegate {
                 await configureLongBufferForCurrentSettings()
             }
         } catch {
-            print("Failed to apply runtime settings: \(error)")
+            runtimeSettingsLogger.error("Failed to apply runtime settings: \(String(describing: error), privacy: .public)")
             NotificationManager.shared.showOperationalNotification(
                 title: "Capture Settings Failed",
                 body: "\(AppBranding.name) could not apply the new capture settings cleanly. Recording is restarting."
@@ -253,20 +264,8 @@ extension AppDelegate {
 
         // Recalculate scaled dimensions from original (unscaled) display sizes
         if isDualMode {
-            let scaled1 = AppSettings.scaledDimensions(
-                displayWidth: originalDualWidth1,
-                displayHeight: originalDualHeight1,
-                pointPixelScale: originalDualPointPixelScale1,
-                maxPixelWidth: originalDualPixelWidth1,
-                maxPixelHeight: originalDualPixelHeight1
-            )
-            let scaled2 = AppSettings.scaledDimensions(
-                displayWidth: originalDualWidth2,
-                displayHeight: originalDualHeight2,
-                pointPixelScale: originalDualPointPixelScale2,
-                maxPixelWidth: originalDualPixelWidth2,
-                maxPixelHeight: originalDualPixelHeight2
-            )
+            let scaled1 = originalDual1.scaledForCaptureResolution()
+            let scaled2 = originalDual2.scaledForCaptureResolution()
             let dualSaveMode = AppSettings.dualCaptureSaveModeEnum
 
             let compositeWidth = scaled1.width + scaled2.width
@@ -305,13 +304,7 @@ extension AppDelegate {
                 captureHDR: captureHDR
             )
         } else {
-            let scaled = AppSettings.scaledDimensions(
-                displayWidth: originalDisplayWidth,
-                displayHeight: originalDisplayHeight,
-                pointPixelScale: originalDisplayPointPixelScale,
-                maxPixelWidth: originalDisplayPixelWidth,
-                maxPixelHeight: originalDisplayPixelHeight
-            )
+            let scaled = originalDisplay.scaledForCaptureResolution()
 
             try await captureManager.updateStreamConfiguration(
                 fps: fps,
@@ -393,20 +386,14 @@ extension AppDelegate {
         if !captureSystemAudio {
             isCapturingMainSystemAudio = false
             await perAppAudioCapture.stop()
-            try? await captureManager.updateAudioCapture(
-                captureAudio: false,
-                excludeOwnAppAudio: excludeOwn
-            )
+            await updateMainStreamAudioCapture(false, excludeOwnAppAudio: excludeOwn)
             AudioLevelMonitor.shared.resetSystemAudio()
             return
         }
 
         if perAppEnabled && !perAppBundleID.isEmpty {
             isCapturingMainSystemAudio = false
-            try? await captureManager.updateAudioCapture(
-                captureAudio: false,
-                excludeOwnAppAudio: excludeOwn
-            )
+            await updateMainStreamAudioCapture(false, excludeOwnAppAudio: excludeOwn)
             do {
                 try await perAppAudioCapture.start(
                     mode: .includeOnly(bundleID: perAppBundleID),
@@ -424,10 +411,7 @@ extension AppDelegate {
 
         if !perAppEnabled && !mutedBundleIDs.isEmpty {
             isCapturingMainSystemAudio = false
-            try? await captureManager.updateAudioCapture(
-                captureAudio: false,
-                excludeOwnAppAudio: excludeOwn
-            )
+            await updateMainStreamAudioCapture(false, excludeOwnAppAudio: excludeOwn)
             do {
                 try await perAppAudioCapture.start(
                     mode: .exclude(bundleIDs: mutedBundleIDs),
@@ -435,10 +419,7 @@ extension AppDelegate {
                 )
             } catch {
                 await perAppAudioCapture.stop()
-                try? await captureManager.updateAudioCapture(
-                    captureAudio: true,
-                    excludeOwnAppAudio: excludeOwn
-                )
+                await updateMainStreamAudioCapture(true, excludeOwnAppAudio: excludeOwn)
                 isCapturingMainSystemAudio = true
             }
             return
@@ -465,7 +446,20 @@ extension AppDelegate {
             )
             isCapturingMainSystemAudio = true
         } catch {
-            print("Warning: Failed to update main stream audio capture: \(error)")
+            runtimeSettingsLogger.error("Failed to update main stream audio capture: \(String(describing: error), privacy: .public)")
+        }
+    }
+
+    /// Toggles audio on the main capture stream where a failure has no
+    /// better fallback than carrying on with the stream as it was.
+    private func updateMainStreamAudioCapture(_ captureAudio: Bool, excludeOwnAppAudio: Bool) async {
+        do {
+            try await captureManager.updateAudioCapture(
+                captureAudio: captureAudio,
+                excludeOwnAppAudio: excludeOwnAppAudio
+            )
+        } catch {
+            runtimeSettingsLogger.error("Failed to update main stream audio capture: \(String(describing: error), privacy: .public)")
         }
     }
 
@@ -485,7 +479,7 @@ extension AppDelegate {
                     lastMicEnabled = true
                     lastMicDeviceID = selectedMicDeviceID
                 } catch {
-                    print("Warning: Failed to restart mic capture: \(error)")
+                    runtimeSettingsLogger.error("Failed to restart mic capture: \(String(describing: error), privacy: .public)")
                     NotificationManager.shared.showOperationalNotification(
                         title: "Microphone Unavailable",
                         body: error.localizedDescription

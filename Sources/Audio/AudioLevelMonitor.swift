@@ -7,6 +7,7 @@ public struct AudioLevelSnapshot: Sendable {
 }
 
 public final class AudioLevelMonitor: @unchecked Sendable {
+    // @unchecked: every mutable property is only touched inside `lock`.
     public static let shared = AudioLevelMonitor()
 
     private struct LevelState {
