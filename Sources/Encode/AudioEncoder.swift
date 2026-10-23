@@ -1,26 +1,18 @@
 import Foundation
 @preconcurrency import CoreMedia
+import Synchronization
 
 /// Passthrough audio handler.
 /// SCK outputs raw PCM float32. We store it directly in the ring buffer
 /// and let AVAssetWriterInput handle AAC encoding during save.
-public final class AudioEncoder: @unchecked Sendable {
+public final class AudioEncoder: Sendable {
     public typealias OutputHandler = @Sendable (CMSampleBuffer) -> Void
 
-    private let lock = NSLock()
-    private var _outputHandler: OutputHandler?
+    private let _outputHandler = Mutex<OutputHandler?>(nil)
 
     public var outputHandler: OutputHandler? {
-        get {
-            lock.lock()
-            defer { lock.unlock() }
-            return _outputHandler
-        }
-        set {
-            lock.lock()
-            defer { lock.unlock() }
-            _outputHandler = newValue
-        }
+        get { _outputHandler.withLock { $0 } }
+        set { _outputHandler.withLock { $0 = newValue } }
     }
 
     public init() {}
@@ -28,9 +20,7 @@ public final class AudioEncoder: @unchecked Sendable {
     public func stop() {}
 
     public func encode(sampleBuffer: CMSampleBuffer) {
-        lock.lock()
-        let handler = _outputHandler
-        lock.unlock()
+        let handler = _outputHandler.withLock { $0 }
         handler?(sampleBuffer)
     }
 }

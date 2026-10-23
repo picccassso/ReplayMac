@@ -1,4 +1,5 @@
 import Foundation
+import Synchronization
 
 /// Whether encoded samples should be retained for replay saves.
 ///
@@ -10,19 +11,14 @@ import Foundation
 ///
 /// Read from encoder callbacks on capture threads, written from the main
 /// actor, so access is lock-guarded.
-final class ReplayBufferGate: @unchecked Sendable {
-    private let lock = NSLock()
-    private var enabled = true
+final class ReplayBufferGate: Sendable {
+    private let enabled = Mutex(true)
 
     var isEnabled: Bool {
-        lock.lock()
-        defer { lock.unlock() }
-        return enabled
+        enabled.withLock { $0 }
     }
 
     func setEnabled(_ newValue: Bool) {
-        lock.lock()
-        defer { lock.unlock() }
-        enabled = newValue
+        enabled.withLock { $0 = newValue }
     }
 }
