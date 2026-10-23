@@ -1,4 +1,5 @@
 import Cocoa
+import Combine
 import Branding
 import Capture
 import Encode
@@ -91,6 +92,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     var bufferDurationObservation: Defaults.Observation?
     var settingsObservations: [Defaults.Observation] = []
     var settingsReconcileTask: Task<Void, Never>?
+    var companionThemeSubscription: AnyCancellable?
     var pendingRuntimeSettingsReconcile = false
     var pendingVideoShapeReconcile = false
     var pendingRuntimeFullRestart = false

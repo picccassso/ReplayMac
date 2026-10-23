@@ -190,6 +190,67 @@ final class CompanionServerProtocolTests: XCTestCase {
         XCTAssertTrue(legacy.audioApps.isEmpty)
         XCTAssertTrue(legacy.displays.isEmpty)
         XCTAssertTrue(legacy.profiles.isEmpty)
+        XCTAssertNil(legacy.theme)
+    }
+
+    func testThemeIsSentWithTheWireNamesPhonesRead() throws {
+        let theme = CompanionTheme(
+            atmosphere: "catppuccin_mocha",
+            atmosphereName: "Catppuccin Mocha",
+            colorScheme: "dark",
+            accentMode: "custom",
+            surfaceStyle: "tinted_glass",
+            dualTone: true,
+            dark: CompanionThemePalette(canvas: "#1E1E2E", card: "#313244", accent: "#CBA6F7", accentSecondary: "#B4BEFE"),
+            light: CompanionThemePalette(canvas: "#EFF1F5", card: "#CCD0DA", accent: "#CBA6F7", accentSecondary: "#B4BEFE")
+        )
+        let snapshot = CompanionStateSnapshot(
+            isRecording: false,
+            isSessionRecording: false,
+            saveStatus: "idle",
+            recordingElapsedSeconds: 0,
+            extendedBufferElapsedSeconds: 0,
+            sessionElapsedSeconds: 0,
+            bufferedSeconds: 0,
+            bufferDurationSeconds: 30,
+            bufferMemoryBytes: 0,
+            bufferMemoryFormatted: "0 MB",
+            longBufferEnabled: false,
+            longBufferDurationSeconds: 300,
+            capturedDisplayName: nil,
+            isMicrophoneEnabled: false,
+            isMicrophoneMuted: false,
+            isSystemAudioEnabled: true,
+            isSystemAudioMuted: false,
+            recentClips: [],
+            theme: theme
+        )
+
+        let data = try JSONEncoder().encode(snapshot)
+        let json = try JSONSerialization.jsonObject(with: data) as? [String: Any]
+        let wireTheme = json?["theme"] as? [String: Any]
+        XCTAssertEqual(wireTheme?["atmosphere"] as? String, "catppuccin_mocha")
+        XCTAssertEqual(wireTheme?["surfaceStyle"] as? String, "tinted_glass")
+        XCTAssertEqual(wireTheme?["dualTone"] as? Bool, true)
+        let dark = wireTheme?["dark"] as? [String: Any]
+        XCTAssertEqual(dark?["canvas"] as? String, "#1E1E2E")
+        XCTAssertEqual(dark?["accentSecondary"] as? String, "#B4BEFE")
+
+        let decoded = try JSONDecoder().decode(CompanionStateSnapshot.self, from: data)
+        XCTAssertEqual(decoded.theme, theme)
+    }
+
+    func testMalformedThemeLeavesTheRestOfTheSnapshotIntact() throws {
+        let json = """
+        {
+            "type": "state_changed",
+            "isRecording": true,
+            "theme": "catppuccin_mocha"
+        }
+        """.data(using: .utf8)!
+        let decoded = try JSONDecoder().decode(CompanionStateSnapshot.self, from: json)
+        XCTAssertNil(decoded.theme)
+        XCTAssertTrue(decoded.isRecording)
     }
 }
 

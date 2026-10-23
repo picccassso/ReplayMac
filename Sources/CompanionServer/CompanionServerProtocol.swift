@@ -167,6 +167,55 @@ public struct CompanionDisplayInfo: Codable, Sendable, Identifiable, Equatable {
     }
 }
 
+/// One appearance's colours, as `#RRGGBB` hex already resolved on the Mac,
+/// so the phone needs no copy of the atmosphere table or the system accent.
+public struct CompanionThemePalette: Codable, Sendable, Equatable {
+    public let canvas: String
+    public let card: String
+    public let accent: String
+    public let accentSecondary: String
+
+    public init(canvas: String, card: String, accent: String, accentSecondary: String) {
+        self.canvas = canvas
+        self.card = card
+        self.accent = accent
+        self.accentSecondary = accentSecondary
+    }
+}
+
+/// The desktop's Appearance settings, sent so the companion can match them.
+public struct CompanionTheme: Codable, Sendable, Equatable {
+    public let atmosphere: String
+    public let atmosphereName: String
+    public let colorScheme: String
+    public let accentMode: String
+    public let surfaceStyle: String
+    /// Whether the desktop actually draws the two-colour accent gradient.
+    public let dualTone: Bool
+    public let dark: CompanionThemePalette
+    public let light: CompanionThemePalette
+
+    public init(
+        atmosphere: String,
+        atmosphereName: String,
+        colorScheme: String,
+        accentMode: String,
+        surfaceStyle: String,
+        dualTone: Bool,
+        dark: CompanionThemePalette,
+        light: CompanionThemePalette
+    ) {
+        self.atmosphere = atmosphere
+        self.atmosphereName = atmosphereName
+        self.colorScheme = colorScheme
+        self.accentMode = accentMode
+        self.surfaceStyle = surfaceStyle
+        self.dualTone = dualTone
+        self.dark = dark
+        self.light = light
+    }
+}
+
 public struct CompanionProfileSummary: Codable, Sendable, Identifiable, Equatable {
     public let id: String
     public let name: String
@@ -214,6 +263,8 @@ public struct CompanionStateSnapshot: Codable, Sendable, Equatable {
     public let displays: [CompanionDisplayInfo]
     public let profiles: [CompanionProfileSummary]
     public let recentClips: [CompanionClipSummary]
+    /// Absent from builds that predate theming; phones then keep their default look.
+    public let theme: CompanionTheme?
 
     public init(
         type: String = "state_snapshot",
@@ -241,7 +292,8 @@ public struct CompanionStateSnapshot: Codable, Sendable, Equatable {
         audioApps: [CompanionAudioApp] = [],
         displays: [CompanionDisplayInfo] = [],
         profiles: [CompanionProfileSummary] = [],
-        recentClips: [CompanionClipSummary]
+        recentClips: [CompanionClipSummary],
+        theme: CompanionTheme? = nil
     ) {
         self.type = type
         self.isRecording = isRecording
@@ -269,6 +321,7 @@ public struct CompanionStateSnapshot: Codable, Sendable, Equatable {
         self.displays = displays
         self.profiles = profiles
         self.recentClips = recentClips
+        self.theme = theme
     }
 
     private enum CodingKeys: String, CodingKey {
@@ -278,7 +331,7 @@ public struct CompanionStateSnapshot: Codable, Sendable, Equatable {
         case longBufferEnabled, longBufferDurationSeconds, capturedDisplayName, isUsingFallbackDisplay
         case isMicrophoneEnabled, isMicrophoneMuted, isSystemAudioEnabled, isSystemAudioMuted
         case microphoneVolume, systemAudioVolume, perAppAudioEnabled
-        case audioApps, displays, profiles, recentClips
+        case audioApps, displays, profiles, recentClips, theme
     }
 
     public init(from decoder: Decoder) throws {
@@ -309,6 +362,7 @@ public struct CompanionStateSnapshot: Codable, Sendable, Equatable {
         self.displays = try container.decodeIfPresent([CompanionDisplayInfo].self, forKey: .displays) ?? []
         self.profiles = try container.decodeIfPresent([CompanionProfileSummary].self, forKey: .profiles) ?? []
         self.recentClips = try container.decodeIfPresent([CompanionClipSummary].self, forKey: .recentClips) ?? []
+        self.theme = try? container.decodeIfPresent(CompanionTheme.self, forKey: .theme)
     }
 }
 

@@ -755,7 +755,8 @@ public final class CompanionServer: ObservableObject {
             audioApps: snapshot.audioApps,
             displays: snapshot.displays,
             profiles: snapshot.profiles,
-            recentClips: snapshot.recentClips
+            recentClips: snapshot.recentClips,
+            theme: snapshot.theme
         )
         broadcast(changed)
     }

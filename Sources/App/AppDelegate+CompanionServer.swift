@@ -1,4 +1,5 @@
 import Cocoa
+import Combine
 import Branding
 import Capture
 import CompanionServer
@@ -128,6 +129,8 @@ extension AppDelegate {
             self?.broadcastCompanionSnapshot()
         }
 
+        observeThemeForCompanion()
+
         if AppSettings.companionServerEnabled {
             do {
                 try companionServer.start(port: UInt16(AppSettings.companionServerPort))
@@ -222,8 +225,24 @@ extension AppDelegate {
             audioApps: audioApps,
             displays: displays,
             profiles: profiles,
-            recentClips: clips
+            recentClips: clips,
+            theme: CompanionThemeBuilder.current()
         )
+    }
+
+    /// Re-sends state when Appearance settings or the macOS accent change, so
+    /// the phone recolours live. Debounced so dragging a colour picker doesn't
+    /// flood phones with a snapshot per tick.
+    private func observeThemeForCompanion() {
+        let themeChanged = ThemeController.shared.$revision.dropFirst().map { _ in () }
+        let systemAccentChanged = NotificationCenter.default
+            .publisher(for: NSColor.systemColorsDidChangeNotification)
+            .map { _ in () }
+        companionThemeSubscription = themeChanged.merge(with: systemAccentChanged)
+            .debounce(for: .milliseconds(150), scheduler: RunLoop.main)
+            .sink { [weak self] in
+                self?.broadcastCompanionSnapshot()
+            }
     }
 
     func broadcastCompanionSnapshot(isStateChange: Bool = true) {
