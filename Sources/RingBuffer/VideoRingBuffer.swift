@@ -142,35 +142,39 @@ public final class VideoRingBuffer: @unchecked Sendable {
             guard let oldest = deque.first, let newest = deque.last else { break }
             let duration = presentationTimeStamp(of: newest) - presentationTimeStamp(of: oldest)
             guard duration > maxSeconds else { break }
-            guard keyframeIndices.count >= 2 else { break }
-            evictOldestGOP()
+            guard evictOldestGOP() else { break }
         }
         return max(0, startingBytes - _currentMemoryBytes)
     }
 
+    // Eviction only ever drops whole GOPs so the buffer always starts at a
+    // keyframe. While fewer than two keyframes are buffered (one GOP larger
+    // than the cap, or no keyframe yet) nothing can be evicted, so both loops
+    // stop and let the buffer overshoot until the next keyframe arrives.
+    // Spinning instead would hang the capture thread while holding `lock`.
     private func evictIfNeeded() {
         while true {
             guard let oldest = deque.first, let newest = deque.last else { break }
             let duration = presentationTimeStamp(of: newest) - presentationTimeStamp(of: oldest)
             if duration > _timeCap {
-                evictOldestGOP()
+                guard evictOldestGOP() else { break }
             } else if duration == 0 && deque.count > 1 && _currentMemoryBytes > _memoryCap / 2 {
                 // PTS all equal — fall back to memory-pressure eviction at 50% cap
-                guard keyframeIndices.count >= 2 else { break }
-                evictOldestGOP()
+                guard evictOldestGOP() else { break }
             } else {
                 break
             }
         }
 
         while _currentMemoryBytes > _memoryCap {
-            guard deque.count > 1 else { break }
-            evictOldestGOP()
+            guard deque.count > 1, evictOldestGOP() else { break }
         }
     }
 
-    private func evictOldestGOP() {
-        guard keyframeIndices.count >= 2 else { return }
+    /// Drops everything before the second buffered keyframe.
+    /// Returns false when fewer than two keyframes are buffered and nothing was evicted.
+    private func evictOldestGOP() -> Bool {
+        guard keyframeIndices.count >= 2 else { return false }
         let secondKeyframeIndex = keyframeIndices[1]
 
         var bytesToRemove = 0
@@ -184,6 +188,7 @@ public final class VideoRingBuffer: @unchecked Sendable {
         for i in keyframeIndices.indices {
             keyframeIndices[i] -= secondKeyframeIndex
         }
+        return true
     }
 
     private func isKeyframe(_ sampleBuffer: CMSampleBuffer) -> Bool {

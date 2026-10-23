@@ -517,4 +517,82 @@ final class RingBufferTests: XCTestCase {
         buffer.append(Self.makeSampleBuffer(pts: 10.0, isKeyframe: true, sampleSize: 100))
         XCTAssertLessThanOrEqual(buffer.duration, 2.0, "New timeCap must apply on the next append")
     }
+    // MARK: - Regression: eviction must not spin when no GOP can be dropped
+
+    /// Appends on a background queue so a regression (an eviction loop that
+    /// never makes progress while holding the lock) fails on timeout instead
+    /// of hanging the whole test run.
+    private func appendFinishesPromptly(
+        _ buffer: VideoRingBuffer,
+        _ samples: [CMSampleBuffer],
+        file: StaticString = #filePath,
+        line: UInt = #line
+    ) {
+        let finished = expectation(description: "append returns")
+        DispatchQueue.global(qos: .userInitiated).async {
+            for sample in samples {
+                buffer.append(encodedSample: sample)
+            }
+            finished.fulfill()
+        }
+        wait(for: [finished], timeout: 5)
+    }
+
+    func testVideoRingBufferSingleGOPLargerThanMemoryCapDoesNotHang() {
+        let buffer = VideoRingBuffer(timeCap: 100, memoryCap: 5000)
+        let samples = (0..<20).map { i in
+            Self.makeSampleBuffer(pts: Double(i) / 60.0, isKeyframe: i == 0, sampleSize: 1000)
+        }
+
+        appendFinishesPromptly(buffer, samples)
+
+        // Nothing is evictable without a second keyframe, so the GOP is kept whole.
+        XCTAssertEqual(buffer.totalSampleCount, 20)
+        XCTAssertEqual(buffer.keyframeCount, 1)
+
+        // Once the next keyframe arrives the oversized GOP is dropped.
+        buffer.append(encodedSample: Self.makeSampleBuffer(pts: 1.0, isKeyframe: true, sampleSize: 1000))
+        XCTAssertEqual(buffer.totalSampleCount, 1)
+        XCTAssertLessThanOrEqual(buffer.currentMemoryBytes, 5000)
+    }
+
+    func testVideoRingBufferSingleGOPLongerThanTimeCapDoesNotHang() {
+        let buffer = VideoRingBuffer(timeCap: 1, memoryCap: 1_500_000_000)
+        let samples = (0..<180).map { i in
+            Self.makeSampleBuffer(pts: Double(i) / 60.0, isKeyframe: i == 0)
+        }
+
+        appendFinishesPromptly(buffer, samples)
+
+        XCTAssertEqual(buffer.totalSampleCount, 180)
+        XCTAssertGreaterThan(buffer.duration, 1)
+    }
+
+    func testVideoRingBufferWithoutKeyframesDoesNotHang() {
+        let buffer = VideoRingBuffer(timeCap: 1, memoryCap: 5000)
+        let samples = (0..<180).map { i in
+            Self.makeSampleBuffer(pts: Double(i) / 60.0, isKeyframe: false, sampleSize: 1000)
+        }
+
+        appendFinishesPromptly(buffer, samples)
+
+        XCTAssertEqual(buffer.keyframeCount, 0)
+        XCTAssertEqual(buffer.totalSampleCount, 180)
+    }
+
+    func testVideoRingBufferSetMemoryCapWithSingleGOPDoesNotHang() {
+        let buffer = VideoRingBuffer(timeCap: 100, memoryCap: 1_500_000_000)
+        for i in 0..<20 {
+            buffer.append(encodedSample: Self.makeSampleBuffer(pts: Double(i) / 60.0, isKeyframe: i == 0, sampleSize: 1000))
+        }
+
+        let finished = expectation(description: "setMemoryCap returns")
+        DispatchQueue.global(qos: .userInitiated).async {
+            buffer.setMemoryCap(1000)
+            finished.fulfill()
+        }
+        wait(for: [finished], timeout: 5)
+        XCTAssertEqual(buffer.totalSampleCount, 20)
+    }
 }
+
