@@ -256,20 +256,8 @@ extension AppDelegate {
 
         // Recalculate scaled dimensions from original (unscaled) display sizes
         if isDualMode {
-            let scaled1 = AppSettings.scaledDimensions(
-                displayWidth: originalDualWidth1,
-                displayHeight: originalDualHeight1,
-                pointPixelScale: originalDualPointPixelScale1,
-                maxPixelWidth: originalDualPixelWidth1,
-                maxPixelHeight: originalDualPixelHeight1
-            )
-            let scaled2 = AppSettings.scaledDimensions(
-                displayWidth: originalDualWidth2,
-                displayHeight: originalDualHeight2,
-                pointPixelScale: originalDualPointPixelScale2,
-                maxPixelWidth: originalDualPixelWidth2,
-                maxPixelHeight: originalDualPixelHeight2
-            )
+            let scaled1 = originalDual1.scaledForCaptureResolution()
+            let scaled2 = originalDual2.scaledForCaptureResolution()
             let dualSaveMode = AppSettings.dualCaptureSaveModeEnum
 
             let compositeWidth = scaled1.width + scaled2.width
@@ -308,13 +296,7 @@ extension AppDelegate {
                 captureHDR: captureHDR
             )
         } else {
-            let scaled = AppSettings.scaledDimensions(
-                displayWidth: originalDisplayWidth,
-                displayHeight: originalDisplayHeight,
-                pointPixelScale: originalDisplayPointPixelScale,
-                maxPixelWidth: originalDisplayPixelWidth,
-                maxPixelHeight: originalDisplayPixelHeight
-            )
+            let scaled = originalDisplay.scaledForCaptureResolution()
 
             try await captureManager.updateStreamConfiguration(
                 fps: fps,

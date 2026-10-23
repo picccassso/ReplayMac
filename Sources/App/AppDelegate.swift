@@ -99,23 +99,11 @@ class AppDelegate: NSObject, NSApplicationDelegate, @unchecked Sendable {
     // Current capture dimensions for runtime reconfiguration
     // Stores the original (unscaled) display dimensions so resolution
     // scaling can be re-applied on each pipeline-shape change.
-    var originalDisplayWidth: Int = 0
-    var originalDisplayHeight: Int = 0
-    var originalDisplayPointPixelScale: Double = 1.0
-    var originalDisplayPixelWidth: Int = 0
-    var originalDisplayPixelHeight: Int = 0
+    var originalDisplay = DisplayDimensions()
     var currentFPS: Int = 60
     var isDualMode: Bool = false
-    var originalDualWidth1: Int = 0
-    var originalDualHeight1: Int = 0
-    var originalDualPointPixelScale1: Double = 1.0
-    var originalDualPixelWidth1: Int = 0
-    var originalDualPixelHeight1: Int = 0
-    var originalDualWidth2: Int = 0
-    var originalDualHeight2: Int = 0
-    var originalDualPointPixelScale2: Double = 1.0
-    var originalDualPixelWidth2: Int = 0
-    var originalDualPixelHeight2: Int = 0
+    var originalDual1 = DisplayDimensions()
+    var originalDual2 = DisplayDimensions()
     var lastMicEnabled = false
     var lastMicDeviceID = ""
     var hasNotifiedMicDenied = false
@@ -346,4 +334,35 @@ class AppDelegate: NSObject, NSApplicationDelegate, @unchecked Sendable {
         false
     }
 
+}
+
+/// A display's original (unscaled) capture size, kept so the resolution
+/// setting can be re-applied whenever the pipeline is reconfigured.
+struct DisplayDimensions {
+    var width = 0
+    var height = 0
+    var pointPixelScale = 1.0
+    var pixelWidth = 0
+    var pixelHeight = 0
+
+    init() {}
+
+    init(sourceOf config: CaptureConfig) {
+        width = config.sourceWidth
+        height = config.sourceHeight
+        pointPixelScale = config.sourcePointPixelScale
+        pixelWidth = config.sourcePixelWidth
+        pixelHeight = config.sourcePixelHeight
+    }
+
+    /// The output size for these dimensions under the current resolution setting.
+    func scaledForCaptureResolution() -> (width: Int, height: Int) {
+        AppSettings.scaledDimensions(
+            displayWidth: width,
+            displayHeight: height,
+            pointPixelScale: pointPixelScale,
+            maxPixelWidth: pixelWidth,
+            maxPixelHeight: pixelHeight
+        )
+    }
 }
