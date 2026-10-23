@@ -358,6 +358,13 @@ final class CompanionPairingManagerTests: XCTestCase {
         XCTAssertNil(defaults.object(forKey: CompanionPairingManager.secretsDefaultsKey))
     }
 
+    func testUndecodablePairedDevicesLoadAsEmpty() {
+        let defaults = UserDefaults(suiteName: "CompanionPairingMigration-\(UUID().uuidString)")!
+        defaults.set(Data("not json".utf8), forKey: CompanionPairingManager.userDefaultsKey)
+        let manager = CompanionPairingManager(defaults: defaults, secretStore: InMemoryPairingSecretStore())
+        XCTAssertTrue(manager.pairedDevices.isEmpty)
+    }
+
     private func seedLegacyPairing(in defaults: UserDefaults, id: String, secret: Data) {
         let devices = [PairedDevice(id: id, name: "Phone")]
         defaults.set(try! JSONEncoder().encode(devices), forKey: CompanionPairingManager.userDefaultsKey)

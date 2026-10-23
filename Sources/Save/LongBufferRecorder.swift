@@ -216,7 +216,14 @@ public actor LongBufferRecorder {
         }
 
         if let segmentDirectory {
-            try? FileManager.default.createDirectory(at: segmentDirectory, withIntermediateDirectories: true)
+            do {
+                try FileManager.default.createDirectory(at: segmentDirectory, withIntermediateDirectories: true)
+            } catch {
+                // Every segment writer will fail to open after this, so say why.
+                logger.error(
+                    "Failed to create long-buffer segment directory path=\(segmentDirectory.path, privacy: .public) error=\(Self.describeError(error), privacy: .public)"
+                )
+            }
         }
     }
 

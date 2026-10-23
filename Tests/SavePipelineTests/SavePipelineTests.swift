@@ -53,6 +53,12 @@ final class SavePipelineTests: XCTestCase {
         XCTAssertEqual(clips.first?.fileURL.lastPathComponent, "test.mp4")
     }
 
+    func testScanClipsInMissingDirectoryReturnsEmpty() {
+        let missing = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        XCTAssertTrue(ClipMetadata.scanClips(in: missing).isEmpty)
+    }
+
     func testMakeMetadataItems() {
         let items = ClipMetadata.makeMetadataItems()
         XCTAssertEqual(items.count, 2)

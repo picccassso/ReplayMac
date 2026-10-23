@@ -68,17 +68,24 @@ public final class CompanionPairingManager: ObservableObject {
 
     public func loadDevices() {
         secrets = loadSecrets()
-        guard let data = defaults.data(forKey: Self.userDefaultsKey),
-              let list = try? JSONDecoder().decode([PairedDevice].self, from: data) else {
+        guard let data = defaults.data(forKey: Self.userDefaultsKey) else {
             pairedDevices = []
             return
         }
-        pairedDevices = list
+        do {
+            pairedDevices = try JSONDecoder().decode([PairedDevice].self, from: data)
+        } catch {
+            // Every phone silently looks unpaired, so make it findable in Console.
+            logger.error("Could not decode paired devices: \(error.localizedDescription, privacy: .public)")
+            pairedDevices = []
+        }
     }
 
     private func saveDevices() {
-        if let data = try? JSONEncoder().encode(pairedDevices) {
-            defaults.set(data, forKey: Self.userDefaultsKey)
+        do {
+            defaults.set(try JSONEncoder().encode(pairedDevices), forKey: Self.userDefaultsKey)
+        } catch {
+            logger.error("Could not encode paired devices: \(error.localizedDescription, privacy: .public)")
         }
         saveSecrets()
     }

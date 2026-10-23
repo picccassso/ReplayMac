@@ -1,6 +1,9 @@
 import Branding
 import Foundation
 import AVFoundation
+import os.log
+
+private let logger = Logger(subsystem: "com.replaycap", category: "Save")
 
 public struct ClipInfo: Identifiable, Sendable {
     public let id: UUID
@@ -97,11 +100,19 @@ public enum ClipMetadata {
 
     public static func scanClips(in directory: URL) -> [ClipInfo] {
         let fileManager = FileManager.default
-        guard let urls = try? fileManager.contentsOfDirectory(
-            at: directory,
-            includingPropertiesForKeys: [.creationDateKey, .fileSizeKey],
-            options: .skipsHiddenFiles
-        ) else {
+        let urls: [URL]
+        do {
+            urls = try fileManager.contentsOfDirectory(
+                at: directory,
+                includingPropertiesForKeys: [.creationDateKey, .fileSizeKey],
+                options: .skipsHiddenFiles
+            )
+        } catch CocoaError.fileReadNoSuchFile {
+            // Nothing saved yet.
+            return []
+        } catch {
+            // Otherwise the library just looks empty, e.g. after folder access was lost.
+            logger.error("Could not list clips path=\(directory.path, privacy: .public) error=\(error.localizedDescription, privacy: .public)")
             return []
         }
 

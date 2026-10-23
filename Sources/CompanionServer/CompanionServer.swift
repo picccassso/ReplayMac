@@ -368,8 +368,14 @@ public final class CompanionServer: ObservableObject {
     // MARK: - Message Handling
 
     private func handleIncomingData(_ data: Data, connectionId: UUID, connection: NWConnection) {
-        guard activeConnections[connectionId] != nil,
-              let message = try? JSONDecoder().decode(CompanionClientMessage.self, from: data) else {
+        guard activeConnections[connectionId] != nil else { return }
+        let message: CompanionClientMessage
+        do {
+            message = try JSONDecoder().decode(CompanionClientMessage.self, from: data)
+        } catch {
+            // Dropped either way, but a phone on a mismatched protocol would
+            // otherwise just look unresponsive. The payload is not logged.
+            logger.warning("Ignoring undecodable message bytes=\(data.count, privacy: .public): \(error.localizedDescription, privacy: .public)")
             return
         }
 
@@ -696,7 +702,11 @@ public final class CompanionServer: ObservableObject {
         to connection: NWConnection,
         then completion: (@Sendable () -> Void)? = nil
     ) {
-        guard let data = try? JSONEncoder().encode(message) else {
+        let data: Data
+        do {
+            data = try JSONEncoder().encode(message)
+        } catch {
+            logger.error("Could not encode \(String(describing: T.self), privacy: .public): \(error.localizedDescription, privacy: .public)")
             completion?()
             return
         }
@@ -752,7 +762,13 @@ public final class CompanionServer: ObservableObject {
 
     private func broadcast<T: Encodable>(_ message: T) {
         guard isRunning, !connectionDevices.isEmpty else { return }
-        guard let data = try? JSONEncoder().encode(message) else { return }
+        let data: Data
+        do {
+            data = try JSONEncoder().encode(message)
+        } catch {
+            logger.error("Could not encode broadcast \(String(describing: T.self), privacy: .public): \(error.localizedDescription, privacy: .public)")
+            return
+        }
 
         for (connId, _) in connectionDevices {
             if let connection = activeConnections[connId], connection.state == .ready {
