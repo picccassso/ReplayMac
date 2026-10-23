@@ -8,11 +8,18 @@ import Synchronization
 public final class AudioEncoder: Sendable {
     public typealias OutputHandler = @Sendable (CMSampleBuffer) -> Void
 
-    private let _outputHandler = Mutex<OutputHandler?>(nil)
+    /// The handler must sit inside a struct: a bare function type in
+    /// `Mutex` is reabstracted on every `withLock` inout writeback, so each
+    /// call stacks another thunk layer until the audio thread overflows.
+    private struct State {
+        var outputHandler: OutputHandler?
+    }
+
+    private let state = Mutex(State())
 
     public var outputHandler: OutputHandler? {
-        get { _outputHandler.withLock { $0 } }
-        set { _outputHandler.withLock { $0 = newValue } }
+        get { state.withLock { $0.outputHandler } }
+        set { state.withLock { $0.outputHandler = newValue } }
     }
 
     public init() {}
@@ -20,7 +27,7 @@ public final class AudioEncoder: Sendable {
     public func stop() {}
 
     public func encode(sampleBuffer: CMSampleBuffer) {
-        let handler = _outputHandler.withLock { $0 }
+        let handler = state.withLock { $0.outputHandler }
         handler?(sampleBuffer)
     }
 }

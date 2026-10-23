@@ -1,6 +1,7 @@
 import XCTest
 import CoreMedia
 import CoreVideo
+import Synchronization
 @testable import Encode
 
 final class EncoderTests: XCTestCase {
@@ -60,6 +61,29 @@ final class EncoderTests: XCTestCase {
             encoder.encode(sampleBuffer: try makeFrame(width: 64, height: 64, presentationTime: .zero))
         }
         wait(for: [delivered], timeout: 5)
+    }
+
+    /// Storing the handler closure directly in a `Mutex` made every
+    /// `withLock { $0 }` write back a re-thunked closure, so each audio
+    /// buffer added two stack frames to the next call until the audio
+    /// thread overflowed after ~6,600 buffers.
+    func testAudioEncodeDoesNotGrowHandlerCallDepth() throws {
+        let encoder = AudioEncoder()
+        let depths = Mutex<[Int]>([])
+        encoder.outputHandler = { _ in
+            let depth = Thread.callStackSymbols.count
+            depths.withLock { $0.append(depth) }
+        }
+        let sample = try makeFrame(width: 16, height: 16, presentationTime: .zero)
+
+        for _ in 0..<500 {
+            encoder.encode(sampleBuffer: sample)
+            _ = encoder.outputHandler
+        }
+
+        let recorded = depths.withLock { $0 }
+        XCTAssertEqual(recorded.count, 500)
+        XCTAssertEqual(recorded.first, recorded.last)
     }
 
     private func makeFrame(width: Int, height: Int, presentationTime: CMTime) throws -> CMSampleBuffer {
