@@ -65,6 +65,37 @@ final class ThemeTests: XCTestCase {
     }
 
     @MainActor
+    func testCatppuccinAtmospheresAndSwatches() {
+        XCTAssertEqual(ThemeAtmosphere.allCases.count, 9)
+
+        let mocha = ThemeAtmosphere.catppuccinMocha
+        XCTAssertEqual(mocha.title, "Catppuccin Mocha")
+        XCTAssertEqual(mocha.darkCanvasHex, "#1E1E2E")
+        XCTAssertEqual(mocha.darkCardHex, "#313244")
+        XCTAssertEqual(mocha.lightCanvasHex, "#EFF1F5")
+        XCTAssertEqual(mocha.lightCardHex, "#CCD0DA")
+        XCTAssertEqual(mocha.defaultPrimaryAccentHex, "#CBA6F7")
+        XCTAssertEqual(mocha.defaultSecondaryAccentHex, "#B4BEFE")
+
+        let macchiato = ThemeAtmosphere.catppuccinMacchiato
+        XCTAssertEqual(macchiato.title, "Catppuccin Macchiato")
+        XCTAssertEqual(macchiato.darkCanvasHex, "#24273A")
+        XCTAssertEqual(macchiato.darkCardHex, "#363A4F")
+        XCTAssertEqual(macchiato.defaultPrimaryAccentHex, "#F5BDE6")
+        XCTAssertEqual(macchiato.defaultSecondaryAccentHex, "#C6A0F6")
+
+        let frappe = ThemeAtmosphere.catppuccinFrappe
+        XCTAssertEqual(frappe.title, "Catppuccin Frappé")
+        XCTAssertEqual(frappe.darkCanvasHex, "#303446")
+        XCTAssertEqual(frappe.darkCardHex, "#414559")
+        XCTAssertEqual(frappe.defaultPrimaryAccentHex, "#BABBF1")
+        XCTAssertEqual(frappe.defaultSecondaryAccentHex, "#85C1DC")
+
+        XCTAssertTrue(ThemeSwatch.all.contains(where: { $0.id == "catppuccin_mauve" && $0.primaryHex == "#CBA6F7" }))
+        XCTAssertTrue(ThemeSwatch.all.contains(where: { $0.id == "catppuccin_pink" && $0.primaryHex == "#F5C2E7" }))
+    }
+
+    @MainActor
     func testAppearancePageRoutingInMainWindowState() {
         let suiteName = "ThemeTests.\(UUID().uuidString)"
         let defaults = UserDefaults(suiteName: suiteName)!

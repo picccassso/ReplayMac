@@ -51,6 +51,9 @@ public enum ThemeAtmosphere: String, CaseIterable, Identifiable, Codable, Sendab
     case deepOcean = "deep_ocean"
     case arenaBoost = "arena_boost"
     case nordicFrost = "nordic_frost"
+    case catppuccinMocha = "catppuccin_mocha"
+    case catppuccinMacchiato = "catppuccin_macchiato"
+    case catppuccinFrappe = "catppuccin_frappe"
 
     public var id: String { rawValue }
 
@@ -62,6 +65,9 @@ public enum ThemeAtmosphere: String, CaseIterable, Identifiable, Codable, Sendab
         case .deepOcean: "Deep Ocean"
         case .arenaBoost: "Arena Boost"
         case .nordicFrost: "Nordic Frost"
+        case .catppuccinMocha: "Catppuccin Mocha"
+        case .catppuccinMacchiato: "Catppuccin Macchiato"
+        case .catppuccinFrappe: "Catppuccin Frappé"
         }
     }
 
@@ -73,6 +79,9 @@ public enum ThemeAtmosphere: String, CaseIterable, Identifiable, Codable, Sendab
         case .deepOcean: "Abyssal midnight slate"
         case .arenaBoost: "High-energy twilight"
         case .nordicFrost: "Crisp arctic slate"
+        case .catppuccinMocha: "Cozy dark pastel"
+        case .catppuccinMacchiato: "Velvet mid-tone pastel"
+        case .catppuccinFrappe: "Muted dusk pastel"
         }
     }
 
@@ -84,6 +93,9 @@ public enum ThemeAtmosphere: String, CaseIterable, Identifiable, Codable, Sendab
         case .deepOcean: "#0A101D"
         case .arenaBoost: "#110D1C"
         case .nordicFrost: "#171C24"
+        case .catppuccinMocha: "#1E1E2E"
+        case .catppuccinMacchiato: "#24273A"
+        case .catppuccinFrappe: "#303446"
         }
     }
 
@@ -95,6 +107,9 @@ public enum ThemeAtmosphere: String, CaseIterable, Identifiable, Codable, Sendab
         case .deepOcean: "#121C30"
         case .arenaBoost: "#1B152C"
         case .nordicFrost: "#222936"
+        case .catppuccinMocha: "#313244"
+        case .catppuccinMacchiato: "#363A4F"
+        case .catppuccinFrappe: "#414559"
         }
     }
 
@@ -106,6 +121,7 @@ public enum ThemeAtmosphere: String, CaseIterable, Identifiable, Codable, Sendab
         case .deepOcean: "#EEF4FA"
         case .arenaBoost: "#F6F2FA"
         case .nordicFrost: "#ECEFF4"
+        case .catppuccinMocha, .catppuccinMacchiato, .catppuccinFrappe: "#EFF1F5"
         }
     }
 
@@ -117,6 +133,7 @@ public enum ThemeAtmosphere: String, CaseIterable, Identifiable, Codable, Sendab
         case .deepOcean: "#E1ECF7"
         case .arenaBoost: "#EDE5F6"
         case .nordicFrost: "#E5E9F0"
+        case .catppuccinMocha, .catppuccinMacchiato, .catppuccinFrappe: "#CCD0DA"
         }
     }
 
@@ -128,6 +145,9 @@ public enum ThemeAtmosphere: String, CaseIterable, Identifiable, Codable, Sendab
         case .deepOcean: "#38BDF8"
         case .arenaBoost: "#F43F5E"
         case .nordicFrost: "#88C0D0"
+        case .catppuccinMocha: "#CBA6F7"
+        case .catppuccinMacchiato: "#F5BDE6"
+        case .catppuccinFrappe: "#BABBF1"
         }
     }
 
@@ -139,6 +159,9 @@ public enum ThemeAtmosphere: String, CaseIterable, Identifiable, Codable, Sendab
         case .deepOcean: "#6366F1"
         case .arenaBoost: "#A855F7"
         case .nordicFrost: "#5E81AC"
+        case .catppuccinMocha: "#B4BEFE"
+        case .catppuccinMacchiato: "#C6A0F6"
+        case .catppuccinFrappe: "#85C1DC"
         }
     }
 }
@@ -200,6 +223,8 @@ public struct ThemeSwatch: Identifiable, Equatable, Sendable {
         ThemeSwatch(id: "teal", title: "Electric Teal", primaryHex: "#00E5CC", secondaryHex: "#00A3FF"),
         ThemeSwatch(id: "blue", title: "Cobalt Pulse", primaryHex: "#38BDF8", secondaryHex: "#3B82F6"),
         ThemeSwatch(id: "indigo", title: "Ultraviolet", primaryHex: "#6366F1", secondaryHex: "#A855F7"),
+        ThemeSwatch(id: "catppuccin_mauve", title: "Catppuccin Mauve", primaryHex: "#CBA6F7", secondaryHex: "#B4BEFE"),
+        ThemeSwatch(id: "catppuccin_pink", title: "Catppuccin Rosewater", primaryHex: "#F5C2E7", secondaryHex: "#FAB387"),
         ThemeSwatch(id: "arena", title: "Boost Magenta", primaryHex: "#F43F5E", secondaryHex: "#A855F7"),
         ThemeSwatch(id: "crimson", title: "Apex Crimson", primaryHex: "#EF4444", secondaryHex: "#F97316"),
         ThemeSwatch(id: "ember", title: "Studio Ember", primaryHex: "#FF6B2C", secondaryHex: "#FFB800"),
