@@ -1,6 +1,7 @@
 import Foundation
 @preconcurrency import CoreMedia
 import ScreenCaptureKit
+import os.log
 
 public enum PerAppAudioCaptureError: LocalizedError {
     case noDisplay
@@ -24,6 +25,7 @@ public enum SystemAudioFilterMode: Equatable, Sendable {
 public final class PerAppAudioCapture: @unchecked Sendable {
     private let queue = DispatchQueue(label: "com.replaycap.per-app-audio", qos: .userInitiated)
     private let delegate = PerAppAudioCaptureDelegate()
+    private let logger = Logger(subsystem: "com.replaycap", category: "PerAppAudioCapture")
     private let stateLock = NSLock()
     private var stream: SCStream?
     private var currentMode: SystemAudioFilterMode?
@@ -112,7 +114,11 @@ public final class PerAppAudioCapture: @unchecked Sendable {
             return (currentMode, currentExcludeOwnAppAudio)
         }
         guard let snapshot else { return }
-        try? await start(mode: snapshot.mode, excludeOwnAppAudio: snapshot.excludeOwn)
+        do {
+            try await start(mode: snapshot.mode, excludeOwnAppAudio: snapshot.excludeOwn)
+        } catch {
+            logger.error("Failed to refresh per-app audio filter: \(String(describing: error), privacy: .public)")
+        }
     }
 
     public func stop() async {

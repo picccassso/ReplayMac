@@ -168,12 +168,18 @@ public enum OutputDirectoryAccess {
         }
         scopedURL = url
 
-        if isStale, let fresh = try? url.bookmarkData(
-            options: .withSecurityScope,
-            includingResourceValuesForKeys: nil,
-            relativeTo: nil
-        ) {
-            Defaults[.outputDirectoryBookmark] = fresh
+        if isStale {
+            do {
+                Defaults[.outputDirectoryBookmark] = try url.bookmarkData(
+                    options: .withSecurityScope,
+                    includingResourceValuesForKeys: nil,
+                    relativeTo: nil
+                )
+            } catch {
+                // Access works for this launch, but the stale bookmark may not
+                // resolve next time, which would ask the user to pick again.
+                logger.error("Failed to refresh stale output folder bookmark: \(String(describing: error), privacy: .public)")
+            }
         }
 
         // Follow the folder if it was moved or renamed since last launch.

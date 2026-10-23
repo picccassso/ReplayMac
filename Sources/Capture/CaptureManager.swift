@@ -210,10 +210,18 @@ public actor CaptureManager {
 
             delegate1.setAcceptsAudio(captureAudio)
             if captureAudio && !hasAudioStreamOutput {
-                try? activeStream1.addStreamOutput(delegate1, type: .audio, sampleHandlerQueue: audioQueue)
+                do {
+                    try activeStream1.addStreamOutput(delegate1, type: .audio, sampleHandlerQueue: audioQueue)
+                } catch {
+                    logger.error("Failed to add audio stream output: \(String(describing: error), privacy: .public)")
+                }
                 hasAudioStreamOutput = true
             } else if !captureAudio && hasAudioStreamOutput {
-                try? activeStream1.removeStreamOutput(delegate1, type: .audio)
+                do {
+                    try activeStream1.removeStreamOutput(delegate1, type: .audio)
+                } catch {
+                    logger.error("Failed to remove audio stream output: \(String(describing: error), privacy: .public)")
+                }
                 hasAudioStreamOutput = false
             }
 
@@ -263,10 +271,18 @@ public actor CaptureManager {
 
             delegate.setAcceptsAudio(captureAudio)
             if captureAudio && !hasAudioStreamOutput {
-                try? activeStream.addStreamOutput(delegate, type: .audio, sampleHandlerQueue: audioQueue)
+                do {
+                    try activeStream.addStreamOutput(delegate, type: .audio, sampleHandlerQueue: audioQueue)
+                } catch {
+                    logger.error("Failed to add audio stream output: \(String(describing: error), privacy: .public)")
+                }
                 hasAudioStreamOutput = true
             } else if !captureAudio && hasAudioStreamOutput {
-                try? activeStream.removeStreamOutput(delegate, type: .audio)
+                do {
+                    try activeStream.removeStreamOutput(delegate, type: .audio)
+                } catch {
+                    logger.error("Failed to remove audio stream output: \(String(describing: error), privacy: .public)")
+                }
                 hasAudioStreamOutput = false
             }
 
