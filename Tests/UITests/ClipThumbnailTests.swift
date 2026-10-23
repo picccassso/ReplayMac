@@ -19,6 +19,21 @@ final class ClipThumbnailTests: XCTestCase {
         XCTAssertNil(ClipThumbnailPanelController.autoHideDelay(seconds: 0))
     }
 
+    func testDurationSliderMapsLastStopToUntilDismissed() {
+        typealias Panel = ClipThumbnailPanelController
+        XCTAssertEqual(Panel.storedSeconds(forSliderValue: 1), 1)
+        XCTAssertEqual(Panel.storedSeconds(forSliderValue: 10), 10)
+        XCTAssertEqual(Panel.storedSeconds(forSliderValue: Panel.sliderRange.upperBound), 0)
+
+        XCTAssertEqual(Panel.sliderValue(forStoredSeconds: 6), 6)
+        XCTAssertEqual(Panel.sliderValue(forStoredSeconds: 0), Panel.sliderRange.upperBound)
+        XCTAssertEqual(Panel.sliderValue(forStoredSeconds: 30), 10)
+
+        XCTAssertEqual(Panel.durationLabel(forStoredSeconds: 1), "1 second")
+        XCTAssertEqual(Panel.durationLabel(forStoredSeconds: 6), "6 seconds")
+        XCTAssertEqual(Panel.durationLabel(forStoredSeconds: 0), "Until dismissed")
+    }
+
     func testResolveLastClipReturnsRecordedClipWithoutTouchingPasteboard() throws {
         let tempDir = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
         try FileManager.default.createDirectory(at: tempDir, withIntermediateDirectories: true)

@@ -39,11 +39,16 @@ extension SettingsView {
                 Toggle("Play audio cue on save", isOn: $playAudioCueOnSave)
                 Toggle("Show notification on save", isOn: $showNotificationOnSave)
                 Toggle("Show clip thumbnail after saving", isOn: $showClipThumbnailAfterSave)
-                Picker("Thumbnail stays for", selection: $clipThumbnailDurationSeconds) {
-                    Text("4 seconds").tag(4)
-                    Text("6 seconds").tag(6)
-                    Text("10 seconds").tag(10)
-                    Text("Until dismissed").tag(0)
+                VStack(alignment: .leading, spacing: 8) {
+                    HStack {
+                        Text("Thumbnail stays for")
+                        Spacer()
+                        Text(ClipThumbnailPanelController.durationLabel(forStoredSeconds: clipThumbnailDurationSeconds))
+                            .foregroundStyle(AppTheme.accent)
+                            .fontWeight(.semibold)
+                    }
+                    Slider(value: clipThumbnailSliderValue, in: ClipThumbnailPanelController.sliderRange, step: 1)
+                        .tint(AppTheme.accent)
                 }
                 Label("The thumbnail appears in the bottom-left corner after replay saves, with Trim, Copy, and Show in Finder. It never takes focus from your game. You can also show it any time with the Edit last clip hotkey.", systemImage: "info.circle")
                     .foregroundStyle(AppTheme.textSecondary)
@@ -53,6 +58,13 @@ extension SettingsView {
             }
         }
         .formStyle(.grouped)
+    }
+
+    var clipThumbnailSliderValue: Binding<Double> {
+        Binding(
+            get: { ClipThumbnailPanelController.sliderValue(forStoredSeconds: clipThumbnailDurationSeconds) },
+            set: { clipThumbnailDurationSeconds = ClipThumbnailPanelController.storedSeconds(forSliderValue: $0) }
+        )
     }
 
     var memoryCapLabel: String {

@@ -75,6 +75,28 @@ public final class ClipThumbnailPanelController {
         seconds > 0 ? .seconds(seconds) : nil
     }
 
+    /// The Settings slider runs 1–10 seconds, with one extra stop past the end
+    /// for "Until dismissed", which is stored as 0.
+    static let maxTimedSeconds = 10
+    static let sliderRange = 1...Double(maxTimedSeconds + 1)
+
+    static func sliderValue(forStoredSeconds seconds: Int) -> Double {
+        seconds > 0 ? Double(min(seconds, maxTimedSeconds)) : sliderRange.upperBound
+    }
+
+    static func storedSeconds(forSliderValue value: Double) -> Int {
+        let seconds = Int(value.rounded())
+        return seconds > maxTimedSeconds ? 0 : max(seconds, 1)
+    }
+
+    static func durationLabel(forStoredSeconds seconds: Int) -> String {
+        switch seconds {
+        case ...0: "Until dismissed"
+        case 1: "1 second"
+        default: "\(seconds) seconds"
+        }
+    }
+
     private func makePanel() -> ClipThumbnailPanel {
         let panel = ClipThumbnailPanel(contentRect: CGRect(origin: .zero, size: Self.cardSize))
         let view = SavedClipCard(
