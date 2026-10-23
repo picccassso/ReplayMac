@@ -139,97 +139,104 @@ public actor ClipSaver {
         let fileURL = try ClipMetadata.generateUniqueFileURL(in: outputDirectory, baseName: baseName, suffix: fileNameSuffix)
 
         let writer = try AVAssetWriter(outputURL: fileURL, fileType: .mp4)
-        writer.metadata = ClipMetadata.makeMetadataItems()
+        // Anything that fails from here on may already have created the file,
+        // so clean it up rather than leave an unplayable clip in the library.
+        do {
+            writer.metadata = ClipMetadata.makeMetadataItems()
 
-        // Video input
-        let videoInput = AVAssetWriterInput(
-            mediaType: .video,
-            outputSettings: nil,
-            sourceFormatHint: videoFormatDescription
-        )
-        videoInput.expectsMediaDataInRealTime = false
+            // Video input
+            let videoInput = AVAssetWriterInput(
+                mediaType: .video,
+                outputSettings: nil,
+                sourceFormatHint: videoFormatDescription
+            )
+            videoInput.expectsMediaDataInRealTime = false
 
-        guard writer.canAdd(videoInput) else {
-            throw ClipSaveError.cannotAddInput
-        }
-        writer.add(videoInput)
-
-        let systemAudioStartPTS = systemAudioSamples.first.map { CMSampleBufferGetPresentationTimeStamp($0) }
-        let micAudioStartPTS = micAudioSamples.first.map { CMSampleBufferGetPresentationTimeStamp($0) }
-        let offset = Self.timelineOffset(
-            videoStartPTS: videoStartPTS,
-            systemAudioStartPTS: systemAudioStartPTS,
-            micAudioStartPTS: micAudioStartPTS
-        )
-
-        let retimedVideo = videoSamples.compactMap { retimeSample($0, offset: offset) }
-        let retimedSystemAudio = systemAudioSamples
-            .compactMap { retimeSample($0, offset: offset) }
-            .filter { CMSampleBufferGetPresentationTimeStamp($0).seconds >= 0 }
-        let retimedMicAudio = micAudioSamples
-            .compactMap { retimeSample($0, offset: offset) }
-            .filter { CMSampleBufferGetPresentationTimeStamp($0).seconds >= 0 }
-
-        logger.info("Saving clip: video=\(retimedVideo.count) audio=\(retimedSystemAudio.count) mic=\(retimedMicAudio.count)")
-        if let audioStart = [systemAudioStartPTS, micAudioStartPTS].compactMap({ $0 }).filter(\.isValid).min(by: { $0 < $1 }) {
-            let delta = audioStart.seconds - videoStartPTS.seconds
-            if delta > 0.05 {
-                logger.warning("Audio capture started \(delta, format: .fixed(precision: 3))s after video start; lead-in will be padded with silence")
+            guard writer.canAdd(videoInput) else {
+                throw ClipSaveError.cannotAddInput
             }
-        }
-        let earliestTrackStart = [videoStartPTS, systemAudioStartPTS, micAudioStartPTS]
-            .compactMap { $0 }
-            .filter(\.isValid)
-            .min(by: { $0 < $1 }) ?? videoStartPTS
-        print("[SAVE] offset(videoStart)=\(offset.seconds) earliestTrackStart=\(earliestTrackStart.seconds) retimed video=\(retimedVideo.count) sysAudio=\(retimedSystemAudio.count) mic=\(retimedMicAudio.count)")
-        if let firstV = retimedVideo.first, let lastV = retimedVideo.last {
-            print("[SAVE] retimed video PTS: \(CMSampleBufferGetPresentationTimeStamp(firstV).seconds) ... \(CMSampleBufferGetPresentationTimeStamp(lastV).seconds)")
-        }
-        if let firstA = retimedSystemAudio.first, let lastA = retimedSystemAudio.last {
-            print("[SAVE] retimed sysAudio PTS: \(CMSampleBufferGetPresentationTimeStamp(firstA).seconds) ... \(CMSampleBufferGetPresentationTimeStamp(lastA).seconds)")
-        }
-        if let firstM = retimedMicAudio.first, let lastM = retimedMicAudio.last {
-            print("[SAVE] retimed mic PTS: \(CMSampleBufferGetPresentationTimeStamp(firstM).seconds) ... \(CMSampleBufferGetPresentationTimeStamp(lastM).seconds)")
-        }
+            writer.add(videoInput)
 
-        let audioPlans = try makeAudioAppendPlans(
-            systemAudioSamples: retimedSystemAudio,
-            micAudioSamples: retimedMicAudio,
-            mergeAudioTracks: mergeAudioTracks
-        )
-        var audioJobs: [TrackAppendJob] = []
-        for plan in audioPlans {
-            let input = try makeAudioInput(for: plan.samples, writer: writer)
-            audioJobs.append(TrackAppendJob(label: plan.label, samples: plan.samples, input: input, writer: writer))
-        }
+            let systemAudioStartPTS = systemAudioSamples.first.map { CMSampleBufferGetPresentationTimeStamp($0) }
+            let micAudioStartPTS = micAudioSamples.first.map { CMSampleBufferGetPresentationTimeStamp($0) }
+            let offset = Self.timelineOffset(
+                videoStartPTS: videoStartPTS,
+                systemAudioStartPTS: systemAudioStartPTS,
+                micAudioStartPTS: micAudioStartPTS
+            )
 
-        guard writer.startWriting() else {
-            throw ClipSaveError.cannotStartWriting
-        }
+            let retimedVideo = videoSamples.compactMap { retimeSample($0, offset: offset) }
+            let retimedSystemAudio = systemAudioSamples
+                .compactMap { retimeSample($0, offset: offset) }
+                .filter { CMSampleBufferGetPresentationTimeStamp($0).seconds >= 0 }
+            let retimedMicAudio = micAudioSamples
+                .compactMap { retimeSample($0, offset: offset) }
+                .filter { CMSampleBufferGetPresentationTimeStamp($0).seconds >= 0 }
 
-        writer.startSession(atSourceTime: .zero)
-
-        // Append all tracks concurrently. AVAssetWriter stalls one input if
-        // another input's timeline falls too far behind, so a purely sequential
-        // per-track append deadlocks as soon as video runs past the first audio
-        // frame (which has been added but not yet fed).
-        print("[SAVE] appending concurrently: video=\(retimedVideo.count) sysAudio=\(retimedSystemAudio.count) mic=\(retimedMicAudio.count)")
-        var tracks: [TrackAppendJob] = [
-            TrackAppendJob(label: "video", samples: retimedVideo, input: videoInput, writer: writer)
-        ]
-        tracks.append(contentsOf: audioJobs)
-        try await withThrowingTaskGroup(of: Void.self) { group in
-            for track in tracks {
-                group.addTask {
-                    try await Self.runTrack(track)
+            logger.info("Saving clip: video=\(retimedVideo.count) audio=\(retimedSystemAudio.count) mic=\(retimedMicAudio.count)")
+            if let audioStart = [systemAudioStartPTS, micAudioStartPTS].compactMap({ $0 }).filter(\.isValid).min(by: { $0 < $1 }) {
+                let delta = audioStart.seconds - videoStartPTS.seconds
+                if delta > 0.05 {
+                    logger.warning("Audio capture started \(delta, format: .fixed(precision: 3))s after video start; lead-in will be padded with silence")
                 }
             }
-            try await group.waitForAll()
-        }
+            let earliestTrackStart = [videoStartPTS, systemAudioStartPTS, micAudioStartPTS]
+                .compactMap { $0 }
+                .filter(\.isValid)
+                .min(by: { $0 < $1 }) ?? videoStartPTS
+            print("[SAVE] offset(videoStart)=\(offset.seconds) earliestTrackStart=\(earliestTrackStart.seconds) retimed video=\(retimedVideo.count) sysAudio=\(retimedSystemAudio.count) mic=\(retimedMicAudio.count)")
+            if let firstV = retimedVideo.first, let lastV = retimedVideo.last {
+                print("[SAVE] retimed video PTS: \(CMSampleBufferGetPresentationTimeStamp(firstV).seconds) ... \(CMSampleBufferGetPresentationTimeStamp(lastV).seconds)")
+            }
+            if let firstA = retimedSystemAudio.first, let lastA = retimedSystemAudio.last {
+                print("[SAVE] retimed sysAudio PTS: \(CMSampleBufferGetPresentationTimeStamp(firstA).seconds) ... \(CMSampleBufferGetPresentationTimeStamp(lastA).seconds)")
+            }
+            if let firstM = retimedMicAudio.first, let lastM = retimedMicAudio.last {
+                print("[SAVE] retimed mic PTS: \(CMSampleBufferGetPresentationTimeStamp(firstM).seconds) ... \(CMSampleBufferGetPresentationTimeStamp(lastM).seconds)")
+            }
 
-        print("[SAVE] calling finishWriting...")
-        try await finishWriting(writer)
-        print("[SAVE] finishWriting returned")
+            let audioPlans = try makeAudioAppendPlans(
+                systemAudioSamples: retimedSystemAudio,
+                micAudioSamples: retimedMicAudio,
+                mergeAudioTracks: mergeAudioTracks
+            )
+            var audioJobs: [TrackAppendJob] = []
+            for plan in audioPlans {
+                let input = try makeAudioInput(for: plan.samples, writer: writer)
+                audioJobs.append(TrackAppendJob(label: plan.label, samples: plan.samples, input: input, writer: writer))
+            }
+
+            guard writer.startWriting() else {
+                throw ClipSaveError.cannotStartWriting
+            }
+
+            writer.startSession(atSourceTime: .zero)
+
+            // Append all tracks concurrently. AVAssetWriter stalls one input if
+            // another input's timeline falls too far behind, so a purely sequential
+            // per-track append deadlocks as soon as video runs past the first audio
+            // frame (which has been added but not yet fed).
+            print("[SAVE] appending concurrently: video=\(retimedVideo.count) sysAudio=\(retimedSystemAudio.count) mic=\(retimedMicAudio.count)")
+            var tracks: [TrackAppendJob] = [
+                TrackAppendJob(label: "video", samples: retimedVideo, input: videoInput, writer: writer)
+            ]
+            tracks.append(contentsOf: audioJobs)
+            try await withThrowingTaskGroup(of: Void.self) { group in
+                for track in tracks {
+                    group.addTask {
+                        try await Self.runTrack(track)
+                    }
+                }
+                try await group.waitForAll()
+            }
+
+            print("[SAVE] calling finishWriting...")
+            try await finishWriting(writer)
+            print("[SAVE] finishWriting returned")
+        } catch {
+            Self.discardPartialClip(writer: writer, at: fileURL)
+            throw error
+        }
 
         NotificationCenter.default.post(name: .replayCapClipSaved, object: fileURL)
 
@@ -490,6 +497,15 @@ public actor ClipSaver {
                 print("[SAVE] \(label) appended \(index + 1)/\(samples.count)")
             }
         }
+    }
+
+    /// Stops a writer that did not finish and deletes whatever it wrote.
+    private static func discardPartialClip(writer: AVAssetWriter, at fileURL: URL) {
+        if writer.status == .writing {
+            writer.cancelWriting()
+        }
+        // Best effort: the file may never have been created.
+        try? FileManager.default.removeItem(at: fileURL)
     }
 
     private final class WriterBox: @unchecked Sendable {
