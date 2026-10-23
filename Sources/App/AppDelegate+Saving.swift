@@ -106,6 +106,9 @@ extension AppDelegate {
             statusItemController.setLastClip(finalURLs.first)
             mainWindowState.recordSavedClips(finalURLs, kind: .replay)
             statusItemController.refreshPresentation()
+            if AppSettings.showClipThumbnailAfterSave {
+                clipThumbnailController.show(url: finalURLs[0])
+            }
 
             if AppSettings.playAudioCueOnSave {
                 AudioCue.playSaveSuccess()

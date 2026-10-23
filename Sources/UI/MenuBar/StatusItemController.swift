@@ -73,6 +73,16 @@ public final class StatusItemController: NSObject, NSMenuDelegate, @unchecked Se
     /// general pasteboard so it can be pasted directly into apps like Discord or Messages.
     @discardableResult
     public func copyLastClipToPasteboard() -> URL? {
+        guard let clipURL = resolveLastClipURL() else {
+            return nil
+        }
+        Self.copyToPasteboard(clipURL)
+        return clipURL
+    }
+
+    /// The most recently saved clip, falling back to the newest video file in
+    /// the configured output directory when the recorded one no longer exists.
+    public func resolveLastClipURL() -> URL? {
         if let url = lastClipURL, !FileManager.default.fileExists(atPath: url.path) {
             lastClipURL = nil
         }
@@ -86,11 +96,14 @@ public final class StatusItemController: NSObject, NSMenuDelegate, @unchecked Se
             lastClipURL = clipURL
             refreshMenuItems()
         }
+        return clipURL
+    }
 
+    /// Writes `url` as a file object so it pastes as the clip itself.
+    public static func copyToPasteboard(_ url: URL) {
         let pasteboard = NSPasteboard.general
         pasteboard.clearContents()
-        pasteboard.writeObjects([clipURL as NSURL])
-        return clipURL
+        pasteboard.writeObjects([url as NSURL])
     }
 
     internal static func mostRecentSavedClipURL(in directoryURL: URL?) -> URL? {

@@ -187,6 +187,8 @@ public enum AppSettings {
     public static var mergeAudioTracks: Bool { Defaults[.mergeAudioTracks] }
     public static var playAudioCueOnSave: Bool { Defaults[.playAudioCueOnSave] }
     public static var showNotificationOnSave: Bool { Defaults[.showNotificationOnSave] }
+    public static var showClipThumbnailAfterSave: Bool { Defaults[.showClipThumbnailAfterSave] }
+    public static var clipThumbnailDurationSeconds: Int { Defaults[.clipThumbnailDurationSeconds] }
     public static var clipFilenameTemplate: String { Defaults[.clipFilenameTemplate] }
     public static var clipDateFormat: String { Defaults[.clipDateFormat] }
     public static var clipTimeFormat: String { Defaults[.clipTimeFormat] }
@@ -712,6 +714,10 @@ public extension Defaults.Keys {
     static let queueDepth = Key<Int>("queueDepth", default: 5)
     static let playAudioCueOnSave = Key<Bool>("playAudioCueOnSave", default: true)
     static let showNotificationOnSave = Key<Bool>("showNotificationOnSave", default: true)
+    // Off by default: a card after every save would get in the way while playing.
+    static let showClipThumbnailAfterSave = Key<Bool>("showClipThumbnailAfterSave", default: false)
+    /// Seconds the clip thumbnail stays on screen; 0 keeps it until dismissed.
+    static let clipThumbnailDurationSeconds = Key<Int>("clipThumbnailDurationSeconds", default: 6)
     static let clipFilenameTemplate = Key<String>("clipFilenameTemplate", default: FilenameTemplate.default)
     static let clipDateFormat = Key<String>("clipDateFormat", default: FilenameTemplate.defaultDateFormat)
     static let clipTimeFormat = Key<String>("clipTimeFormat", default: FilenameTemplate.defaultTimeFormat)

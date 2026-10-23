@@ -61,6 +61,13 @@ extension SettingsView {
             Section {
                 KeyboardShortcuts.Recorder("Copy last saved clip", name: .copyLastClip)
                 KeyboardShortcuts.Recorder("Show or hide clip library", name: .openClipLibrary)
+                KeyboardShortcuts.Recorder("Edit last clip", name: .editLastClip)
+                Label(
+                    "Edit last clip shows a thumbnail of your most recent clip with Trim, Copy, and Show in Finder. It won't take focus from your game. To show it after every replay save, turn it on in Settings → Advanced.",
+                    systemImage: "info.circle"
+                )
+                .foregroundStyle(AppTheme.textSecondary)
+                .font(.system(size: 12, design: .rounded))
             } header: {
                 Text("Library")
             }

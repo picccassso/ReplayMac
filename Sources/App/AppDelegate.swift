@@ -57,6 +57,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, @unchecked Sendable {
     let menuBarState = MenuBarState()
     let statusItemController = StatusItemController()
     let hotkeyManager = HotkeyManager()
+    let clipThumbnailController = ClipThumbnailPanelController()
     let gameActivityMonitor = GameActivityMonitor()
 
     /// True while the current recording was started automatically because a game
@@ -226,6 +227,9 @@ class AppDelegate: NSObject, NSApplicationDelegate, @unchecked Sendable {
         statusItemController.setup(state: menuBarState)
         checkForAvailableUpdate()
         configureHotkeys()
+        clipThumbnailController.onTrim = { [weak self] url in
+            self?.openClipEditor(url)
+        }
         Task {
             await captureManager.activateDelegateCallbacks()
             await captureManager.setInterruptionHandler { [weak self] interruption in

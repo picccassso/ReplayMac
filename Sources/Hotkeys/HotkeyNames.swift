@@ -12,4 +12,5 @@ public extension KeyboardShortcuts.Name {
     static let pushToMuteMicrophone = Self("pushToMuteMicrophone")
     static let toggleSystemAudioMute = Self("toggleSystemAudioMute")
     static let copyLastClip = Self("copyLastClip")
+    static let editLastClip = Self("editLastClip")
 }

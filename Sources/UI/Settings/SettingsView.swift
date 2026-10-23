@@ -46,6 +46,8 @@ public struct SettingsView: View {
     @Default(.queueDepth) var queueDepth
     @Default(.playAudioCueOnSave) var playAudioCueOnSave
     @Default(.showNotificationOnSave) var showNotificationOnSave
+    @Default(.showClipThumbnailAfterSave) var showClipThumbnailAfterSave
+    @Default(.clipThumbnailDurationSeconds) var clipThumbnailDurationSeconds
     @Default(.clipFilenameTemplate) var clipFilenameTemplate
     @Default(.clipDateFormat) var clipDateFormat
     @Default(.clipTimeFormat) var clipTimeFormat

@@ -38,6 +38,16 @@ extension SettingsView {
             Section {
                 Toggle("Play audio cue on save", isOn: $playAudioCueOnSave)
                 Toggle("Show notification on save", isOn: $showNotificationOnSave)
+                Toggle("Show clip thumbnail after saving", isOn: $showClipThumbnailAfterSave)
+                Picker("Thumbnail stays for", selection: $clipThumbnailDurationSeconds) {
+                    Text("4 seconds").tag(4)
+                    Text("6 seconds").tag(6)
+                    Text("10 seconds").tag(10)
+                    Text("Until dismissed").tag(0)
+                }
+                Label("The thumbnail appears in the bottom-left corner after replay saves, with Trim, Copy, and Show in Finder. It never takes focus from your game. You can also show it any time with the Edit last clip hotkey.", systemImage: "info.circle")
+                    .foregroundStyle(AppTheme.textSecondary)
+                    .font(.system(size: 12, design: .rounded))
             } header: {
                 Text("Feedback")
             }

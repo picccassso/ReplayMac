@@ -1,3 +1,4 @@
+import AppKit
 import Defaults
 import Feedback
 import Hotkeys
@@ -38,6 +39,9 @@ extension AppDelegate {
         }
         hotkeyManager.onCopyLastClip = { [weak self] in
             self?.copyLastClipFromUI()
+        }
+        hotkeyManager.onEditLastClip = { [weak self] in
+            self?.editLastClipFromUI()
         }
         hotkeyManager.start()
     }
@@ -105,6 +109,25 @@ extension AppDelegate {
                 AudioCue.playUnmute()
             }
         }
+    }
+
+    func editLastClipFromUI() {
+        guard let url = statusItemController.resolveLastClipURL() else {
+            NotificationManager.shared.showOperationalNotification(
+                title: "No Saved Clip Found",
+                body: "Save a clip first, then press Edit last clip to trim it."
+            )
+            return
+        }
+        clipThumbnailController.show(url: url)
+    }
+
+    /// Brings ReplayMac forward and opens the Trim & Export window, even when
+    /// the app is running from the menu bar with no window open.
+    func openClipEditor(_ url: URL) {
+        NSApp.setActivationPolicy(.regular)
+        NSApp.activate(ignoringOtherApps: true)
+        mainWindowState.openEditor(url)
     }
 
     func copyLastClipFromUI() {

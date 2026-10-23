@@ -14,6 +14,7 @@ public final class HotkeyManager: @unchecked Sendable {
     public var onPushToMuteMicrophoneChanged: ((Bool) -> Void)?
     public var onToggleSystemAudioMute: (() -> Void)?
     public var onCopyLastClip: (() -> Void)?
+    public var onEditLastClip: (() -> Void)?
 
     private var isStarted = false
 
@@ -34,6 +35,7 @@ public final class HotkeyManager: @unchecked Sendable {
             KeyboardShortcuts.removeHandler(for: .pushToMuteMicrophone)
             KeyboardShortcuts.removeHandler(for: .toggleSystemAudioMute)
             KeyboardShortcuts.removeHandler(for: .copyLastClip)
+            KeyboardShortcuts.removeHandler(for: .editLastClip)
         }
     }
 
@@ -78,6 +80,9 @@ public final class HotkeyManager: @unchecked Sendable {
         }
         KeyboardShortcuts.onKeyUp(for: .copyLastClip) { [weak self] in
             self?.onCopyLastClip?()
+        }
+        KeyboardShortcuts.onKeyUp(for: .editLastClip) { [weak self] in
+            self?.onEditLastClip?()
         }
     }
 }

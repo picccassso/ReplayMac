@@ -49,9 +49,7 @@ extension AppDelegate {
                       $0.id.uuidString.caseInsensitiveCompare(clipId) == .orderedSame || $0.id.uuidString == clipId
                   }),
                   FileManager.default.fileExists(atPath: clip.url.path) else { return }
-            NSApp.setActivationPolicy(.regular)
-            NSApp.activate(ignoringOtherApps: true)
-            self.mainWindowState.openEditor(clip.url)
+            self.openClipEditor(clip.url)
         }
         companionServer.onCopyClip = { [weak self] clipId in
             guard let self,
