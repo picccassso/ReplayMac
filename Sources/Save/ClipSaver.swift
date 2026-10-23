@@ -36,7 +36,8 @@ public actor ClipSaver {
     private let dualDisplay2VideoRingBuffer: VideoRingBuffer?
     private let systemAudioRingBuffer: AudioRingBuffer?
     private let micRingBuffer: AudioRingBuffer?
-    private let logger = Logger(subsystem: "com.replaycap", category: "Save")
+    private static let logger = Logger(subsystem: "com.replaycap", category: "Save")
+    private var logger: Logger { Self.logger }
 
     public init(
         videoRingBuffer: VideoRingBuffer,
@@ -123,18 +124,9 @@ public actor ClipSaver {
 
         let systemAudioSamples = systemAudioRingBuffer?.samples(between: audioRange.startPTS, and: audioRange.endPTS) ?? []
         let micAudioSamples = micRingBuffer?.samples(between: audioRange.startPTS, and: audioRange.endPTS) ?? []
-        let firstAudioTimingCount = systemAudioSamples.first.flatMap { try? $0.sampleTimingInfos().count } ?? -1
-        print("[SAVE] video=\(videoSamples.count) sysAudio=\(systemAudioSamples.count) mic=\(micAudioSamples.count)")
-        print("[SAVE] first audio timing count: \(firstAudioTimingCount)")
-        if let firstVideo = videoSamples.first, let lastVideo = videoSamples.last {
-            print("[SAVE] video PTS range: \(CMSampleBufferGetPresentationTimeStamp(firstVideo).seconds) ... \(CMSampleBufferGetPresentationTimeStamp(lastVideo).seconds)")
-        }
-        if let firstSystem = systemAudioSamples.first, let lastSystem = systemAudioSamples.last {
-            print("[SAVE] sysAudio PTS range: \(CMSampleBufferGetPresentationTimeStamp(firstSystem).seconds) ... \(CMSampleBufferGetPresentationTimeStamp(lastSystem).seconds)")
-        }
-        if let firstMic = micAudioSamples.first, let lastMic = micAudioSamples.last {
-            print("[SAVE] mic PTS range: \(CMSampleBufferGetPresentationTimeStamp(firstMic).seconds) ... \(CMSampleBufferGetPresentationTimeStamp(lastMic).seconds)")
-        }
+        logger.debug(
+            "Selected samples video=\(videoSamples.count, privacy: .public) \(Self.ptsRange(videoSamples), privacy: .public) sysAudio=\(systemAudioSamples.count, privacy: .public) \(Self.ptsRange(systemAudioSamples), privacy: .public) mic=\(micAudioSamples.count, privacy: .public) \(Self.ptsRange(micAudioSamples), privacy: .public)"
+        )
 
         let fileURL = try ClipMetadata.generateUniqueFileURL(in: outputDirectory, baseName: baseName, suffix: fileNameSuffix)
 
@@ -184,16 +176,9 @@ public actor ClipSaver {
                 .compactMap { $0 }
                 .filter(\.isValid)
                 .min(by: { $0 < $1 }) ?? videoStartPTS
-            print("[SAVE] offset(videoStart)=\(offset.seconds) earliestTrackStart=\(earliestTrackStart.seconds) retimed video=\(retimedVideo.count) sysAudio=\(retimedSystemAudio.count) mic=\(retimedMicAudio.count)")
-            if let firstV = retimedVideo.first, let lastV = retimedVideo.last {
-                print("[SAVE] retimed video PTS: \(CMSampleBufferGetPresentationTimeStamp(firstV).seconds) ... \(CMSampleBufferGetPresentationTimeStamp(lastV).seconds)")
-            }
-            if let firstA = retimedSystemAudio.first, let lastA = retimedSystemAudio.last {
-                print("[SAVE] retimed sysAudio PTS: \(CMSampleBufferGetPresentationTimeStamp(firstA).seconds) ... \(CMSampleBufferGetPresentationTimeStamp(lastA).seconds)")
-            }
-            if let firstM = retimedMicAudio.first, let lastM = retimedMicAudio.last {
-                print("[SAVE] retimed mic PTS: \(CMSampleBufferGetPresentationTimeStamp(firstM).seconds) ... \(CMSampleBufferGetPresentationTimeStamp(lastM).seconds)")
-            }
+            logger.debug(
+                "Retimed offset=\(offset.seconds, privacy: .public) earliestTrackStart=\(earliestTrackStart.seconds, privacy: .public) video \(Self.ptsRange(retimedVideo), privacy: .public) sysAudio \(Self.ptsRange(retimedSystemAudio), privacy: .public) mic \(Self.ptsRange(retimedMicAudio), privacy: .public)"
+            )
 
             let audioPlans = try makeAudioAppendPlans(
                 systemAudioSamples: retimedSystemAudio,
@@ -216,7 +201,6 @@ public actor ClipSaver {
             // another input's timeline falls too far behind, so a purely sequential
             // per-track append deadlocks as soon as video runs past the first audio
             // frame (which has been added but not yet fed).
-            print("[SAVE] appending concurrently: video=\(retimedVideo.count) sysAudio=\(retimedSystemAudio.count) mic=\(retimedMicAudio.count)")
             var tracks: [TrackAppendJob] = [
                 TrackAppendJob(label: "video", samples: retimedVideo, input: videoInput, writer: writer)
             ]
@@ -230,13 +214,15 @@ public actor ClipSaver {
                 try await group.waitForAll()
             }
 
-            print("[SAVE] calling finishWriting...")
             try await finishWriting(writer)
-            print("[SAVE] finishWriting returned")
         } catch {
+            logger.error(
+                "Clip save failed file=\(fileURL.lastPathComponent, privacy: .public) error=\(error.localizedDescription, privacy: .public)"
+            )
             Self.discardPartialClip(writer: writer, at: fileURL)
             throw error
         }
+        logger.info("Saved clip path=\(fileURL.path, privacy: .public)")
 
         NotificationCenter.default.post(name: .replayCapClipSaved, object: fileURL)
 
@@ -467,7 +453,7 @@ public actor ClipSaver {
     private static func runTrack(_ job: TrackAppendJob) async throws {
         try await appendSamples(job.samples, to: job.input, writer: job.writer, label: job.label)
         job.input.markAsFinished()
-        print("[SAVE] \(job.label) markAsFinished; writer.status=\(job.writer.status.rawValue)")
+        logger.debug("Finished appending track=\(job.label, privacy: .public) samples=\(job.samples.count, privacy: .public)")
     }
 
     private static func appendSamples(
@@ -476,27 +462,31 @@ public actor ClipSaver {
         writer: AVAssetWriter,
         label: String
     ) async throws {
-        var waitIterations = 0
         for (index, sample) in samples.enumerated() {
             while !input.isReadyForMoreMediaData {
-                waitIterations += 1
-                if waitIterations == 1 || waitIterations % 500 == 0 {
-                    print("[SAVE] \(label) waiting for readiness at sample \(index)/\(samples.count); waitIter=\(waitIterations) writer.status=\(writer.status.rawValue)")
-                }
                 try await Task.sleep(nanoseconds: 1_000_000)
                 guard writer.status == .writing else {
-                    print("[SAVE] \(label) writer left .writing during wait: status=\(writer.status.rawValue) error=\(String(describing: writer.error))")
+                    logger.error(
+                        "Writer stopped while track=\(label, privacy: .public) waited at sample \(index, privacy: .public)/\(samples.count, privacy: .public) status=\(writer.status.rawValue, privacy: .public) error=\(writer.error?.localizedDescription ?? "none", privacy: .public)"
+                    )
                     throw ClipSaveError.writerFailed(writer.error)
                 }
             }
             guard input.append(sample) else {
-                print("[SAVE] \(label) append failed at sample \(index)/\(samples.count); writer.status=\(writer.status.rawValue) error=\(String(describing: writer.error))")
+                logger.error(
+                    "Append failed track=\(label, privacy: .public) sample=\(index, privacy: .public)/\(samples.count, privacy: .public) status=\(writer.status.rawValue, privacy: .public) error=\(writer.error?.localizedDescription ?? "none", privacy: .public)"
+                )
                 throw ClipSaveError.appendFailed(writer.error)
             }
-            if index == 0 || (index + 1) % 200 == 0 || index == samples.count - 1 {
-                print("[SAVE] \(label) appended \(index + 1)/\(samples.count)")
-            }
         }
+    }
+
+    /// "first...last" PTS in seconds, for debug logging.
+    private static func ptsRange(_ samples: [CMSampleBuffer]) -> String {
+        guard let first = samples.first, let last = samples.last else { return "empty" }
+        let start = CMSampleBufferGetPresentationTimeStamp(first).seconds
+        let end = CMSampleBufferGetPresentationTimeStamp(last).seconds
+        return String(format: "%.3f...%.3f", start, end)
     }
 
     /// Stops a writer that did not finish and deletes whatever it wrote.

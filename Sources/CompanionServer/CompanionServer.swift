@@ -1,5 +1,6 @@
 import Foundation
 import Network
+import os.log
 import AppKit
 import Branding
 
@@ -16,6 +17,9 @@ public enum CompanionServerError: Error, LocalizedError {
         }
     }
 }
+
+// File scope so the nonisolated send path can log without hopping to the main actor.
+private let logger = Logger(subsystem: "com.replaycap", category: "CompanionServer")
 
 @MainActor
 public final class CompanionServer: ObservableObject {
@@ -196,7 +200,7 @@ public final class CompanionServer: ObservableObject {
                 listeningPort = actualPort
             }
         case .failed(let error):
-            print("CompanionServer failed: \(error)")
+            logger.error("Listener failed: \(error.localizedDescription, privacy: .public)")
             stop()
             lastError = Self.describe(error, port: listeningPort)
         case .cancelled:
@@ -700,7 +704,7 @@ public final class CompanionServer: ObservableObject {
         let context = NWConnection.ContentContext(identifier: "text", metadata: [metadata])
         connection.send(content: data, contentContext: context, isComplete: true, completion: .contentProcessed { error in
             if let error {
-                print("CompanionServer: failed to send message: \(error)")
+                logger.error("Failed to send message: \(error.localizedDescription, privacy: .public)")
             }
             completion?()
         })
