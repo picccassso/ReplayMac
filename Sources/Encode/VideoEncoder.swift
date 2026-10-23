@@ -40,7 +40,7 @@ private func compressionOutputCallback(
 public final class VideoEncoder: @unchecked Sendable {
     public typealias OutputHandler = @Sendable (CMSampleBuffer) -> Void
 
-    private let logger = Logger(subsystem: "com.replaycap", category: "VideoEncoder")
+    private static let logger = Logger(subsystem: "com.replaycap", category: "VideoEncoder")
     private var compressionSession: VTCompressionSession?
     private let stateLock = NSLock()
     private var _outputHandler: OutputHandler?
@@ -95,7 +95,7 @@ public final class VideoEncoder: @unchecked Sendable {
             codecType = kCMVideoCodecType_H264
         }
 
-        print("[ENCODE] Starting \(codec) encoder: \(width)x\(height) @ \(fps) fps, bitrate=\(bitrate) bps")
+        Self.logger.info("Starting \(String(describing: codec), privacy: .public) encoder: \(width)x\(height) @ \(fps) fps, bitrate=\(bitrate) bps")
 
         var encoderSpecification: CFDictionary?
         if codec == .h264 {
@@ -218,7 +218,7 @@ public final class VideoEncoder: @unchecked Sendable {
             let format = CVPixelBufferGetPixelFormatType(pixelBuffer)
             let width = CVPixelBufferGetWidth(pixelBuffer)
             let height = CVPixelBufferGetHeight(pixelBuffer)
-            logger.notice("First input frame: \(width, privacy: .public)x\(height, privacy: .public), pixelFormat=\(format, privacy: .public)")
+            Self.logger.notice("First input frame: \(width, privacy: .public)x\(height, privacy: .public), pixelFormat=\(format, privacy: .public)")
         }
 
         let frameProperties: CFDictionary? = forcesKeyframe
@@ -242,7 +242,7 @@ public final class VideoEncoder: @unchecked Sendable {
             // rode along with it has to carry over to the next one.
             forcesKeyframeOnNextFrame = forcesKeyframeOnNextFrame || forcesKeyframe
             stateLock.unlock()
-            print("Encoder: VTCompressionSessionEncodeFrame failed with status \(status)")
+            Self.logger.error("VTCompressionSessionEncodeFrame failed with status \(status)")
         }
     }
 
@@ -264,7 +264,7 @@ public final class VideoEncoder: @unchecked Sendable {
     fileprivate func handleEncodedFrame(status: OSStatus, sampleBuffer: CMSampleBuffer?) {
         guard status == noErr, let sampleBuffer else {
             if status != noErr {
-                print("Encoder: Output callback error \(status)")
+                Self.logger.error("Output callback error \(status)")
             }
             return
         }
@@ -282,7 +282,7 @@ public final class VideoEncoder: @unchecked Sendable {
 
             if !ptsMatches {
                 if encodeCount <= 5 || encodeCount % 300 == 0 {
-                    print("Encoder: PTS mismatch — input=\(expectedPTS.seconds) output=\(outputPTS.seconds) (valid=\(outputPTS.isValid)) — retiming")
+                    Self.logger.debug("PTS mismatch — input=\(expectedPTS.seconds) output=\(outputPTS.seconds) (valid=\(outputPTS.isValid)) — retiming")
                 }
                 if let retimed = Self.retimeSampleBuffer(sampleBuffer, newPTS: expectedPTS) {
                     handler?(retimed)
@@ -291,7 +291,7 @@ public final class VideoEncoder: @unchecked Sendable {
             }
         } else if !outputPTS.isValid || outputPTS.seconds == 0 {
             if encodeCount <= 5 || encodeCount % 300 == 0 {
-                print("Encoder: output PTS invalid/zero (\(outputPTS.seconds)) and no expected PTS to fix with")
+                Self.logger.debug("Output PTS invalid/zero (\(outputPTS.seconds)) and no expected PTS to fix with")
             }
         }
 
@@ -315,7 +315,7 @@ public final class VideoEncoder: @unchecked Sendable {
             sampleBufferOut: &retimed
         )
         if status != noErr {
-            print("Encoder: CMSampleBufferCreateCopyWithNewTiming failed with status \(status)")
+            Self.logger.error("CMSampleBufferCreateCopyWithNewTiming failed with status \(status)")
             return nil
         }
         return retimed

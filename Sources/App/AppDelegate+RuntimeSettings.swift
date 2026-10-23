@@ -5,7 +5,10 @@ import Capture
 import Defaults
 import Encode
 import Feedback
+import os
 import UI
+
+private let runtimeSettingsLogger = Logger(subsystem: "com.replaycap", category: "RuntimeSettings")
 
 @MainActor
 extension AppDelegate {
@@ -223,7 +226,7 @@ extension AppDelegate {
                 await configureLongBufferForCurrentSettings()
             }
         } catch {
-            print("Failed to apply runtime settings: \(error)")
+            runtimeSettingsLogger.error("Failed to apply runtime settings: \(String(describing: error), privacy: .public)")
             NotificationManager.shared.showOperationalNotification(
                 title: "Capture Settings Failed",
                 body: "\(AppBranding.name) could not apply the new capture settings cleanly. Recording is restarting."
@@ -465,7 +468,7 @@ extension AppDelegate {
             )
             isCapturingMainSystemAudio = true
         } catch {
-            print("Warning: Failed to update main stream audio capture: \(error)")
+            runtimeSettingsLogger.error("Failed to update main stream audio capture: \(String(describing: error), privacy: .public)")
         }
     }
 
@@ -485,7 +488,7 @@ extension AppDelegate {
                     lastMicEnabled = true
                     lastMicDeviceID = selectedMicDeviceID
                 } catch {
-                    print("Warning: Failed to restart mic capture: \(error)")
+                    runtimeSettingsLogger.error("Failed to restart mic capture: \(String(describing: error), privacy: .public)")
                     NotificationManager.shared.showOperationalNotification(
                         title: "Microphone Unavailable",
                         body: error.localizedDescription

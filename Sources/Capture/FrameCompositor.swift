@@ -2,6 +2,7 @@ import Foundation
 import CoreMedia
 import CoreVideo
 import CoreImage
+import os.log
 
 public final class FrameCompositor: @unchecked Sendable {
     public typealias OutputHandler = @Sendable (CMSampleBuffer) -> Void
@@ -17,6 +18,7 @@ public final class FrameCompositor: @unchecked Sendable {
         let height: Int
     }
 
+    private let logger = Logger(subsystem: "com.replaycap", category: "FrameCompositor")
     private let lock = NSLock()
     private var primaryFrame: DisplayFrame?
     private var secondaryFrame: DisplayFrame?
@@ -143,7 +145,7 @@ public final class FrameCompositor: @unchecked Sendable {
             let secondaryFrame = secondary!
             compositeFrameCount += 1
             if compositeFrameCount <= 5 || compositeFrameCount % 60 == 0 {
-                print("FrameCompositor: composite #\(compositeFrameCount) PTS=\(pts.seconds) valid=\(pts.isValid)")
+                logger.debug("Composite #\(self.compositeFrameCount) PTS=\(pts.seconds) valid=\(pts.isValid)")
             }
             lock.unlock()
 
@@ -182,7 +184,7 @@ public final class FrameCompositor: @unchecked Sendable {
                 )
                 if compositeFrameCount <= 5 {
                     let pts = compositeBuffer.map { CMSampleBufferGetPresentationTimeStamp($0) }
-                    print("FrameCompositor: stale single-display composite PTS=\(pts?.seconds ?? -1) valid=\(pts?.isValid ?? false)")
+                    logger.debug("Stale single-display composite PTS=\(pts?.seconds ?? -1) valid=\(pts?.isValid ?? false)")
                 }
                 if let buffer = compositeBuffer {
                     handler(buffer)

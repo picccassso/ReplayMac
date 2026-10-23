@@ -1,7 +1,10 @@
 import Foundation
+import os
 import Save
 import UI
 import Feedback
+
+private let sessionRecordingLogger = Logger(subsystem: "com.replaycap", category: "SessionRecording")
 
 @MainActor
 extension AppDelegate {
@@ -191,7 +194,7 @@ extension AppDelegate {
                     clipDuration: recordedSeconds
                 )
             }
-            print("Session recording saved: \(savedURL.path)")
+            sessionRecordingLogger.info("Session recording saved: \(savedURL.path)")
             return savedURL
         } catch LongBufferRecorderError.longBufferExportAlreadyInProgress {
             await discardSessionRecording()
@@ -209,7 +212,7 @@ extension AppDelegate {
             isSessionFinalizeInProgress = false
             statusItemController.refreshPresentation()
             NotificationManager.shared.showSaveFailedNotification(error: error.localizedDescription)
-            print("Failed to save session recording: \(error)")
+            sessionRecordingLogger.error("Failed to save session recording: \(String(describing: error), privacy: .public)")
             return nil
         }
     }

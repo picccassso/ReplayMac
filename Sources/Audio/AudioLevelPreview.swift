@@ -2,6 +2,9 @@ import Foundation
 @preconcurrency import AVFoundation
 @preconcurrency import CoreMedia
 import ScreenCaptureKit
+import os.log
+
+private let levelPreviewLogger = Logger(subsystem: "com.replaycap", category: "AudioLevelPreview")
 
 /// Drives the live audio level meters while the capture pipeline is idle.
 ///
@@ -168,7 +171,7 @@ public final class AudioLevelPreview {
             isMicrophoneRunning = true
             runningMicrophoneDeviceID = target.microphoneDeviceID
         } catch {
-            print("[LEVELS] Microphone level preview unavailable: \(error)")
+            levelPreviewLogger.error("Microphone level preview unavailable: \(String(describing: error), privacy: .public)")
         }
     }
 
@@ -203,7 +206,7 @@ public final class AudioLevelPreview {
             runningExcludedAudioBundleIDs = target.excludedAudioBundleIDs
             runningExcludesOwnAppAudio = target.excludeOwnAppAudio
         } catch {
-            print("[LEVELS] System audio level preview unavailable: \(error)")
+            levelPreviewLogger.error("System audio level preview unavailable: \(String(describing: error), privacy: .public)")
         }
     }
 

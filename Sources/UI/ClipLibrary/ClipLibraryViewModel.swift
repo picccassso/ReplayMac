@@ -177,7 +177,7 @@ final class ClipLibraryViewModel: ObservableObject {
             persistMetadata()
             updateStorageSummary()
         } catch {
-            print("Failed to delete clip: \(error)")
+            ClipLibraryMetadataStore.logger.error("Failed to delete clip: \(String(describing: error), privacy: .public)")
         }
     }
 
@@ -189,7 +189,7 @@ final class ClipLibraryViewModel: ObservableObject {
                 try FileManager.default.trashItem(at: row.info.fileURL, resultingItemURL: nil)
                 metadataByPath.removeValue(forKey: ClipLibraryMetadataStore.key(for: row.info.fileURL))
             } catch {
-                print("Failed to delete clip: \(error)")
+                ClipLibraryMetadataStore.logger.error("Failed to delete clip: \(String(describing: error), privacy: .public)")
             }
         }
         rows.removeAll { ids.contains($0.id) }
@@ -274,7 +274,7 @@ final class ClipLibraryViewModel: ObservableObject {
             Task { await reload() }
             return newURL.path(percentEncoded: false)
         } catch {
-            print("Failed to rename clip: \(error)")
+            ClipLibraryMetadataStore.logger.error("Failed to rename clip: \(String(describing: error), privacy: .public)")
             return nil
         }
     }

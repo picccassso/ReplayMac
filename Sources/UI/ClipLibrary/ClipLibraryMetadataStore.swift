@@ -1,4 +1,5 @@
 import Foundation
+import os
 
 struct ClipUserMetadata: Codable, Equatable {
     var displayName: String
@@ -16,6 +17,7 @@ struct ClipLibraryStorageSummary: Equatable {
 }
 
 enum ClipLibraryMetadataStore {
+    static let logger = Logger(subsystem: "com.replaycap", category: "ClipLibrary")
     private static let metadataFileName = ".ReplayCapClipLibrary.json"
     private static let legacyMetadataFileName = ".ReplayMacClipLibrary.json"
 
@@ -47,7 +49,7 @@ enum ClipLibraryMetadataStore {
             let data = try JSONEncoder.prettyReplayCap.encode(metadata)
             try data.write(to: metadataURL(in: directory), options: .atomic)
         } catch {
-            print("Failed to save clip library metadata: \(error)")
+            logger.error("Failed to save clip library metadata: \(String(describing: error), privacy: .public)")
         }
     }
 

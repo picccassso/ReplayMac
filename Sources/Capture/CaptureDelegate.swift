@@ -1,6 +1,7 @@
 import ScreenCaptureKit
 import CoreMedia
 import CoreVideo
+import os.log
 
 public struct CaptureStats: Sendable {
     public let videoSampleCount: Int
@@ -11,6 +12,7 @@ public struct CaptureStats: Sendable {
 }
 
 public final class CaptureDelegate: NSObject, SCStreamOutput, SCStreamDelegate, @unchecked Sendable {
+    private let logger = Logger(subsystem: "com.replaycap", category: "CaptureDelegate")
     private let lock = NSLock()
     private var videoHandler: ((CMSampleBuffer) -> Void)?
     private var audioHandler: ((CMSampleBuffer) -> Void)?
@@ -90,7 +92,7 @@ public final class CaptureDelegate: NSObject, SCStreamOutput, SCStreamDelegate, 
                 let width = CVPixelBufferGetWidth(pixelBuffer)
                 let height = CVPixelBufferGetHeight(pixelBuffer)
                 if currentFrameCount % 300 == 0 {
-                    print("Frame #\(currentFrameCount) | PTS: \(pts.seconds) | Size: \(width)x\(height)")
+                    logger.debug("Frame #\(currentFrameCount) | PTS: \(pts.seconds) | Size: \(width)x\(height)")
                 }
             }
             handler?(sampleBuffer)
@@ -108,7 +110,7 @@ public final class CaptureDelegate: NSObject, SCStreamOutput, SCStreamDelegate, 
                 let n = invalidAudioSampleCount
                 lock.unlock()
                 if n == 1 || n % 100 == 1 {
-                    print("[AUDIO] invalid sample #\(n)")
+                    logger.debug("Invalid audio sample #\(n)")
                 }
                 return
             }
@@ -119,7 +121,7 @@ public final class CaptureDelegate: NSObject, SCStreamOutput, SCStreamDelegate, 
             lock.unlock()
             if n == 1 || n == 2 || n == 5 || n == 10 || n % 100 == 1 {
                 let pts = CMSampleBufferGetPresentationTimeStamp(sampleBuffer)
-                print("[AUDIO] sample #\(n) PTS: \(pts.seconds)")
+                logger.debug("Audio sample #\(n) PTS: \(pts.seconds)")
             }
             handler?(sampleBuffer)
 
@@ -142,9 +144,9 @@ public final class CaptureDelegate: NSObject, SCStreamOutput, SCStreamDelegate, 
     public func stream(_ stream: SCStream, didStopWithError error: Error) {
         let nsError = error as NSError
         if nsError.code == -3821 {
-            print("Warning: Stream stopped with error -3821")
+            logger.warning("Stream stopped with error -3821")
         } else {
-            print("Stream stopped with error: \(error)")
+            logger.error("Stream stopped with error: \(String(describing: error), privacy: .public)")
         }
 
         lock.lock()

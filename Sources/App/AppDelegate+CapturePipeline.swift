@@ -11,6 +11,7 @@ import Save
 import UI
 
 let captureRecoveryLogger = Logger(subsystem: "com.replaycap", category: "CaptureRecovery")
+private let capturePipelineLogger = Logger(subsystem: "com.replaycap", category: "CapturePipeline")
 
 @MainActor
 extension AppDelegate {
@@ -171,7 +172,7 @@ extension AppDelegate {
                         )
                     } catch CaptureError.notEnoughDisplays {
                         dualConfigs = nil
-                        print("Dual capture unavailable; falling back to single display capture.")
+                        capturePipelineLogger.warning("Dual capture unavailable; falling back to single display capture.")
                         try await startSingleDisplayCapture(
                             userInitiated: userInitiated,
                             fps: fps,
@@ -247,7 +248,7 @@ extension AppDelegate {
                         isDualMode = true
                         syncMemoryCapsToSettings()
 
-                        print("Dual capture started: Display1=\(originalDualWidth1)x\(originalDualHeight1) @\(originalDualPointPixelScale1)x -> \(scaled1.width)x\(scaled1.height), Display2=\(originalDualWidth2)x\(originalDualHeight2) @\(originalDualPointPixelScale2)x -> \(scaled2.width)x\(scaled2.height), Composite=\(compositeWidth)x\(compositeHeight)")
+                        capturePipelineLogger.info("Dual capture started: Display1=\(self.originalDualWidth1)x\(self.originalDualHeight1) @\(Double(self.originalDualPointPixelScale1))x -> \(scaled1.width)x\(scaled1.height), Display2=\(self.originalDualWidth2)x\(self.originalDualHeight2) @\(Double(self.originalDualPointPixelScale2))x -> \(scaled2.width)x\(scaled2.height), Composite=\(compositeWidth)x\(compositeHeight)")
                     }
                 } else {
                     try await startSingleDisplayCapture(
@@ -270,7 +271,7 @@ extension AppDelegate {
                         try micAudioCapture.start(deviceID: AppSettings.microphoneID)
                         lastMicDeviceID = AppSettings.microphoneID
                     } catch {
-                        print("Warning: Failed to start mic capture: \(error)")
+                        capturePipelineLogger.error("Failed to start mic capture: \(String(describing: error), privacy: .public)")
                         NotificationManager.shared.showOperationalNotification(
                             title: "Microphone Unavailable",
                             body: error.localizedDescription
@@ -315,7 +316,7 @@ extension AppDelegate {
             if showFailureNotification {
                 NotificationManager.shared.showOperationalNotification(title: message.title, body: message.body)
             }
-            print("Failed to start capture: \(error)")
+            capturePipelineLogger.error("Failed to start capture: \(String(describing: error), privacy: .public)")
         }
     }
 
@@ -397,7 +398,7 @@ extension AppDelegate {
         isDualMode = false
         syncMemoryCapsToSettings()
 
-        print("Single capture started: Display=\(originalDisplayWidth)x\(originalDisplayHeight) @\(originalDisplayPointPixelScale)x -> \(scaled.width)x\(scaled.height)")
+        capturePipelineLogger.info("Single capture started: Display=\(self.originalDisplayWidth)x\(self.originalDisplayHeight) @\(Double(self.originalDisplayPointPixelScale))x -> \(scaled.width)x\(scaled.height)")
     }
 
     func stopCapturePipeline() {
@@ -583,7 +584,7 @@ extension AppDelegate {
                 NotificationManager.shared.showOperationalNotification(title: message.title, body: message.body)
             }
             if case .stopped(let reason) = interruption {
-                print("Capture stopped: \(reason)")
+                capturePipelineLogger.info("Capture stopped: \(reason, privacy: .public)")
             }
             stopCapturePipeline()
         }

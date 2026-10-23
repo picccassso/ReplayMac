@@ -1,5 +1,8 @@
 import Foundation
+import os
 import UI
+
+private let updateLogger = Logger(subsystem: "com.replaycap", category: "UpdateCheck")
 
 @MainActor
 extension AppDelegate {
@@ -9,7 +12,7 @@ extension AppDelegate {
         // menuBarState.availableUpdate.
         #if !APPSTORE
         guard let currentVersion = UpdateChecker.currentAppVersion else {
-            print("Skipping update check: app version is unavailable.")
+            updateLogger.warning("Skipping update check: app version is unavailable.")
             return
         }
 
@@ -19,7 +22,7 @@ extension AppDelegate {
                 menuBarState.setAvailableUpdate(update)
                 statusItemController.refreshPresentation()
             } catch {
-                print("Update check failed: \(error.localizedDescription)")
+                updateLogger.error("Update check failed: \(error.localizedDescription, privacy: .public)")
             }
         }
         #endif

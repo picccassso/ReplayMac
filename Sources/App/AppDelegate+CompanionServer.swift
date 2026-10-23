@@ -4,6 +4,9 @@ import Capture
 import CompanionServer
 import UI
 import Defaults
+import os
+
+private let companionLogger = Logger(subsystem: "com.replaycap", category: "CompanionServer")
 
 @MainActor
 extension AppDelegate {
@@ -123,7 +126,7 @@ extension AppDelegate {
             do {
                 try companionServer.start(port: UInt16(AppSettings.companionServerPort))
             } catch {
-                print("Failed to start companion server: \(error)")
+                companionLogger.error("Failed to start companion server: \(String(describing: error), privacy: .public)")
             }
         }
     }
