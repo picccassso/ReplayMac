@@ -291,8 +291,13 @@ final class ClipLibraryViewModel: ObservableObject {
         }
 
         for row in candidates where !isProtected(row.info.fileURL) {
-            try? FileManager.default.trashItem(at: row.info.fileURL, resultingItemURL: nil)
-            metadataByPath.removeValue(forKey: ClipLibraryMetadataStore.key(for: row.info.fileURL))
+            do {
+                try FileManager.default.trashItem(at: row.info.fileURL, resultingItemURL: nil)
+                metadataByPath.removeValue(forKey: ClipLibraryMetadataStore.key(for: row.info.fileURL))
+            } catch {
+                // The clip is still in the library, so its tags and notes stay too.
+                ClipLibraryMetadataStore.logger.error("Failed to trash clip during cleanup: \(String(describing: error), privacy: .public)")
+            }
         }
 
         persistMetadata()

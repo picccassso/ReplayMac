@@ -418,6 +418,32 @@ final class MainWindowStateTests: XCTestCase {
     }
 
     @MainActor
+    func testCleanupKeepsMetadataForClipsThatCouldNotBeTrashed() async throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+
+        let source = directory.appendingPathComponent("stuck.mp4")
+        try Data("clip".utf8).write(to: source)
+        // An immutable file can't be moved to the Trash.
+        try FileManager.default.setAttributes([.immutable: true], ofItemAtPath: source.path)
+        defer { try? FileManager.default.setAttributes([.immutable: false], ofItemAtPath: source.path) }
+
+        let model = ClipLibraryViewModel(outputDirectory: { directory })
+        await model.reload()
+        let row = try XCTUnwrap(model.rows.first)
+        let metadata = ClipUserMetadata(displayName: "Keep me", isFavorite: false, tags: ["notes"], notes: "Still here")
+        model.updateMetadata(for: row, metadata: metadata)
+
+        await model.cleanup(.allNonFavorites)
+
+        XCTAssertTrue(FileManager.default.fileExists(atPath: source.path))
+        let stored = ClipLibraryMetadataStore.load(in: directory)
+        XCTAssertEqual(stored[ClipLibraryMetadataStore.key(for: source)], metadata)
+        XCTAssertEqual(model.rows.first?.userMetadata, metadata)
+    }
+
+    @MainActor
     func testRenamePersistsUnifiedMetadataAndNewFilename() async throws {
         let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
