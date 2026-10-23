@@ -9,7 +9,9 @@ private let notificationLogger = Logger(subsystem: "com.replaycap", category: "N
 public final class NotificationManager: NSObject, UNUserNotificationCenterDelegate, @unchecked Sendable {
     public static let shared = NotificationManager()
 
-    private var center: UNUserNotificationCenter?
+    // @unchecked: the only stored state is this constant, and
+    // UNUserNotificationCenter is safe to call from any thread.
+    private let center: UNUserNotificationCenter?
 
     private enum Category {
         static let clipSaved = "CLIP_SAVED"
@@ -21,12 +23,12 @@ public final class NotificationManager: NSObject, UNUserNotificationCenterDelega
     }
 
     private override init() {
-        super.init()
         // UNUserNotificationCenter crashes if called outside a proper .app bundle.
         // Only set up when running inside an app bundle.
-        if Bundle.main.bundlePath.hasSuffix(".app") {
-            self.center = UNUserNotificationCenter.current()
-            self.center?.delegate = self
+        center = Bundle.main.bundlePath.hasSuffix(".app") ? UNUserNotificationCenter.current() : nil
+        super.init()
+        if let center {
+            center.delegate = self
             registerCategories()
         }
     }
