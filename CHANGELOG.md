@@ -1,5 +1,35 @@
 # Changelog
 
+## 2.2.0
+
+### Appearance
+
+- Add Settings > Appearance for theming ReplayMac. Choose an atmosphere that sets the window canvas and card colours: Native, Pitch Black, Carbon Studio, Deep Ocean, Arena Boost, Nordic Frost, or Catppuccin Mocha, Macchiato and Frappé. Pitch Black and Carbon Studio are made for dark-room gaming on a second display
+- Pick Light, Dark or System mode, and a surface style: Liquid Glass, Tinted Glass (translucent panels tinted by your atmosphere and accent) or Solid Matte (opaque, with no wallpaper showing through). A live preview shows the result as you change settings
+- Choose the accent colour from the atmosphere, from macOS, or set your own from studio presets or a colour picker, with an optional two-colour gradient
+- Capture profiles can save the current appearance theme, so switching profile switches the look too
+- The Companion app on iPhone and Android now matches the Mac's theme and follows changes live. Older phones keep their default look
+
+### Clip Library
+
+- Add a grid view next to the list, switched from the toolbar. Hover over a clip to skim through it, and scrolling stays smooth with large libraries
+- Simplify the bottom bar. Clip details now open in an expandable drawer
+
+### Clip card
+
+- Add an optional floating clip card that appears in the bottom-left corner after saving a replay, with the clip's thumbnail and Trim, Copy and Show in Finder buttons. Drag the card into other apps to share the clip. It never takes focus, so a full-screen game keeps the keyboard and mouse
+- Turn it on with "Show clip thumbnail after saving" in Settings > Advanced, or press the new Edit last clip hotkey to show it for the most recent clip. A slider sets how long it stays, from 1 to 10 seconds or until dismissed, and hovering pauses the timer
+
+### Reliability and privacy
+
+- Store Companion pairing keys in the macOS Keychain instead of the app's preferences. Phones that are already paired keep working; their keys move over automatically on launch
+- Fix a hang that could happen when the replay buffer reached its time or memory limit with very few keyframes buffered
+- Delete the half-written file when saving a clip fails or is cancelled, instead of leaving a broken .mp4 in the clips folder
+- Keep a backup of the clip library's metadata if it can't be read, instead of replacing every favourite, tag and note with nothing
+- Show an error in Settings > Profiles when saved capture profiles can't be read, instead of showing an empty list that the next save would overwrite
+- Keep a clip's tags and notes when storage cleanup can't move it to the Trash, and keep a clip listed on the phone when deleting it from the Companion app fails
+- Fix several data races in capture, frame compositing and the replay buffer, and log errors that were previously ignored
+
 ## 2.1.0
 
 ### Companion app
