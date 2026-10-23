@@ -28,7 +28,7 @@ final class CompanionUITests: XCTestCase {
         let defaults = UserDefaults(suiteName: name)!
         defer { defaults.removePersistentDomain(forName: name) }
 
-        let pairing = CompanionPairingManager(defaults: defaults)
+        let pairing = CompanionPairingManager(defaults: defaults, secretStore: InMemoryPairingSecretStore())
         let server = CompanionServer(pairingManager: pairing, defaults: defaults)
 
         XCTAssertEqual(server.connectedClientsCount, 0)
@@ -42,7 +42,7 @@ final class CompanionUITests: XCTestCase {
         let defaults = UserDefaults(suiteName: name)!
         defer { defaults.removePersistentDomain(forName: name) }
 
-        let pairing = CompanionPairingManager(defaults: defaults)
+        let pairing = CompanionPairingManager(defaults: defaults, secretStore: InMemoryPairingSecretStore())
         pairing.approveDevice(id: "phone-1", name: "Alex's iPhone")
 
         let device = pairing.device(for: "phone-1")
