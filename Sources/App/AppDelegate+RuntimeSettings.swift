@@ -34,7 +34,11 @@ extension AppDelegate {
         settingsObservations.append(Defaults.observe(.companionServerEnabled) { [weak self] change in
             guard let self else { return }
             if change.newValue {
-                try? self.companionServer.start(port: UInt16(AppSettings.companionServerPort))
+                do {
+                    try self.companionServer.start(port: UInt16(AppSettings.companionServerPort))
+                } catch {
+                    runtimeSettingsLogger.error("Failed to start companion server: \(String(describing: error), privacy: .public)")
+                }
             } else {
                 self.companionServer.stop()
             }
@@ -42,7 +46,11 @@ extension AppDelegate {
         settingsObservations.append(Defaults.observe(.companionServerPort) { [weak self] change in
             guard let self, self.companionServer.isRunning else { return }
             self.companionServer.stop()
-            try? self.companionServer.start(port: UInt16(change.newValue))
+            do {
+                try self.companionServer.start(port: UInt16(change.newValue))
+            } catch {
+                runtimeSettingsLogger.error("Failed to restart companion server on port \(change.newValue): \(String(describing: error), privacy: .public)")
+            }
         })
         settingsObservations.append(Defaults.observe(.systemAudioVolume) { [weak self] _ in
             self?.applyEffectiveAudioVolumes()
@@ -378,20 +386,14 @@ extension AppDelegate {
         if !captureSystemAudio {
             isCapturingMainSystemAudio = false
             await perAppAudioCapture.stop()
-            try? await captureManager.updateAudioCapture(
-                captureAudio: false,
-                excludeOwnAppAudio: excludeOwn
-            )
+            await updateMainStreamAudioCapture(false, excludeOwnAppAudio: excludeOwn)
             AudioLevelMonitor.shared.resetSystemAudio()
             return
         }
 
         if perAppEnabled && !perAppBundleID.isEmpty {
             isCapturingMainSystemAudio = false
-            try? await captureManager.updateAudioCapture(
-                captureAudio: false,
-                excludeOwnAppAudio: excludeOwn
-            )
+            await updateMainStreamAudioCapture(false, excludeOwnAppAudio: excludeOwn)
             do {
                 try await perAppAudioCapture.start(
                     mode: .includeOnly(bundleID: perAppBundleID),
@@ -409,10 +411,7 @@ extension AppDelegate {
 
         if !perAppEnabled && !mutedBundleIDs.isEmpty {
             isCapturingMainSystemAudio = false
-            try? await captureManager.updateAudioCapture(
-                captureAudio: false,
-                excludeOwnAppAudio: excludeOwn
-            )
+            await updateMainStreamAudioCapture(false, excludeOwnAppAudio: excludeOwn)
             do {
                 try await perAppAudioCapture.start(
                     mode: .exclude(bundleIDs: mutedBundleIDs),
@@ -420,10 +419,7 @@ extension AppDelegate {
                 )
             } catch {
                 await perAppAudioCapture.stop()
-                try? await captureManager.updateAudioCapture(
-                    captureAudio: true,
-                    excludeOwnAppAudio: excludeOwn
-                )
+                await updateMainStreamAudioCapture(true, excludeOwnAppAudio: excludeOwn)
                 isCapturingMainSystemAudio = true
             }
             return
@@ -449,6 +445,19 @@ extension AppDelegate {
                 excludeOwnAppAudio: excludeOwn
             )
             isCapturingMainSystemAudio = true
+        } catch {
+            runtimeSettingsLogger.error("Failed to update main stream audio capture: \(String(describing: error), privacy: .public)")
+        }
+    }
+
+    /// Toggles audio on the main capture stream where a failure has no
+    /// better fallback than carrying on with the stream as it was.
+    private func updateMainStreamAudioCapture(_ captureAudio: Bool, excludeOwnAppAudio: Bool) async {
+        do {
+            try await captureManager.updateAudioCapture(
+                captureAudio: captureAudio,
+                excludeOwnAppAudio: excludeOwnAppAudio
+            )
         } catch {
             runtimeSettingsLogger.error("Failed to update main stream audio capture: \(String(describing: error), privacy: .public)")
         }
