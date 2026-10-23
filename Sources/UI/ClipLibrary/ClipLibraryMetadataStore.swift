@@ -32,15 +32,55 @@ enum ClipLibraryMetadataStore {
             ? currentURL
             : legacyURL
 
-        guard let data = try? Data(contentsOf: sourceURL),
-              let metadata = try? JSONDecoder().decode([String: ClipUserMetadata].self, from: data) else {
+        guard FileManager.default.fileExists(atPath: sourceURL.path) else {
+            return [:]
+        }
+
+        let data: Data
+        do {
+            data = try Data(contentsOf: sourceURL)
+        } catch {
+            logger.error("Failed to read clip library metadata: \(String(describing: error), privacy: .public)")
+            return [:]
+        }
+
+        let metadata: [String: ClipUserMetadata]
+        do {
+            metadata = try JSONDecoder().decode([String: ClipUserMetadata].self, from: data)
+        } catch {
+            logger.error("Clip library metadata could not be decoded: \(String(describing: error), privacy: .public)")
+            // The library rewrites this file on the next reload, which would
+            // silently replace every favorite, tag, and note with nothing.
+            // Keep the unreadable copy so it can still be recovered by hand.
+            preserveUnreadableFile(at: sourceURL)
             return [:]
         }
 
         if sourceURL == legacyURL {
-            try? data.write(to: currentURL, options: .atomic)
+            do {
+                try data.write(to: currentURL, options: .atomic)
+            } catch {
+                logger.error("Failed to migrate legacy clip library metadata: \(String(describing: error), privacy: .public)")
+            }
         }
         return metadata
+    }
+
+    static func unreadableBackupURL(for url: URL) -> URL {
+        url.deletingLastPathComponent()
+            .appendingPathComponent(url.lastPathComponent + ".unreadable", isDirectory: false)
+    }
+
+    private static func preserveUnreadableFile(at url: URL) {
+        let backupURL = unreadableBackupURL(for: url)
+        do {
+            if FileManager.default.fileExists(atPath: backupURL.path) {
+                try FileManager.default.removeItem(at: backupURL)
+            }
+            try FileManager.default.copyItem(at: url, to: backupURL)
+        } catch {
+            logger.error("Failed to back up unreadable clip library metadata: \(String(describing: error), privacy: .public)")
+        }
     }
 
     static func save(_ metadata: [String: ClipUserMetadata], in directory: URL) {
