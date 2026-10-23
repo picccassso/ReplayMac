@@ -4,7 +4,7 @@ import SwiftUI
 import KeyboardShortcuts
 
 @MainActor
-public final class StatusItemController: NSObject, NSMenuDelegate, @unchecked Sendable {
+public final class StatusItemController: NSObject, NSMenuDelegate {
     private var statusItem: NSStatusItem?
     private var hostingView: NSHostingView<StatusBadgeView>?
     private var state = MenuBarState()

@@ -2,7 +2,7 @@ import Foundation
 import KeyboardShortcuts
 
 @MainActor
-public final class HotkeyManager: @unchecked Sendable {
+public final class HotkeyManager {
     public var onSaveClip: (() -> Void)?
     public var onToggleRecording: (() -> Void)?
     public var onSaveLast15Seconds: (() -> Void)?

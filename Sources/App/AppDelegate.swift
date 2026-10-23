@@ -12,7 +12,7 @@ import Defaults
 import CompanionServer
 
 @MainActor
-class AppDelegate: NSObject, NSApplicationDelegate, @unchecked Sendable {
+class AppDelegate: NSObject, NSApplicationDelegate {
     let companionServer = CompanionServer.shared
     let captureManager = CaptureManager()
     let frameCompositor = FrameCompositor()
