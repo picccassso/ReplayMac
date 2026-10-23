@@ -8,18 +8,41 @@ public final class VideoRingBuffer: @unchecked Sendable {
     private var keyframeIndices: [Int] = []
     private var _currentMemoryBytes: Int = 0
 
-    public var timeCap: TimeInterval
-    public private(set) var memoryCap: Int
+    // Caps are only touched under `lock`: the main actor updates them from
+    // settings while capture threads read them during append/eviction.
+    private var _timeCap: TimeInterval
+    private var _memoryCap: Int
+
+    /// Maximum buffered duration. Setting it does not evict on its own; the
+    /// next append (or an explicit `trimToDuration`) applies the new cap.
+    public var timeCap: TimeInterval {
+        get {
+            lock.lock()
+            defer { lock.unlock() }
+            return _timeCap
+        }
+        set {
+            lock.lock()
+            defer { lock.unlock() }
+            _timeCap = newValue
+        }
+    }
+
+    public var memoryCap: Int {
+        lock.lock()
+        defer { lock.unlock() }
+        return _memoryCap
+    }
 
     public init(timeCap: TimeInterval = 30.0, memoryCap: Int = 1_500_000_000) {
-        self.timeCap = timeCap
-        self.memoryCap = memoryCap
+        self._timeCap = timeCap
+        self._memoryCap = memoryCap
     }
 
     public func setMemoryCap(_ bytes: Int) {
         lock.lock()
         defer { lock.unlock() }
-        memoryCap = max(bytes, 0)
+        _memoryCap = max(bytes, 0)
         evictIfNeeded()
     }
 
@@ -129,9 +152,9 @@ public final class VideoRingBuffer: @unchecked Sendable {
         while true {
             guard let oldest = deque.first, let newest = deque.last else { break }
             let duration = presentationTimeStamp(of: newest) - presentationTimeStamp(of: oldest)
-            if duration > timeCap {
+            if duration > _timeCap {
                 evictOldestGOP()
-            } else if duration == 0 && deque.count > 1 && _currentMemoryBytes > memoryCap / 2 {
+            } else if duration == 0 && deque.count > 1 && _currentMemoryBytes > _memoryCap / 2 {
                 // PTS all equal — fall back to memory-pressure eviction at 50% cap
                 guard keyframeIndices.count >= 2 else { break }
                 evictOldestGOP()
@@ -140,7 +163,7 @@ public final class VideoRingBuffer: @unchecked Sendable {
             }
         }
 
-        while _currentMemoryBytes > memoryCap {
+        while _currentMemoryBytes > _memoryCap {
             guard deque.count > 1 else { break }
             evictOldestGOP()
         }

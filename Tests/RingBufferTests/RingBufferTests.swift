@@ -462,4 +462,59 @@ final class RingBufferTests: XCTestCase {
 
         XCTAssertLessThanOrEqual(buffer.currentMemoryBytes, 5000)
     }
+
+    // MARK: - Regression: timeCap is written on the main actor while capture appends
+
+    /// Run with `swift test --sanitize=thread` to catch a regression: the caps
+    /// used to be plain vars, so a settings change racing a capture-thread
+    /// append was a data race.
+    func testVideoRingBufferTimeCapConcurrentSetAndAppend() {
+        let buffer = VideoRingBuffer(timeCap: 30, memoryCap: 1_500_000_000)
+        let samples = (0..<600).map { i in
+            Self.makeSampleBuffer(pts: Double(i) / 60.0, isKeyframe: i % 60 == 0)
+        }
+
+        DispatchQueue.concurrentPerform(iterations: 2) { worker in
+            if worker == 0 {
+                for sample in samples {
+                    buffer.append(encodedSample: sample)
+                }
+            } else {
+                for i in 0..<600 {
+                    buffer.timeCap = i.isMultiple(of: 2) ? 2 : 30
+                    _ = buffer.timeCap
+                }
+            }
+        }
+
+        buffer.timeCap = 2
+        XCTAssertEqual(buffer.timeCap, 2)
+        buffer.append(encodedSample: Self.makeSampleBuffer(pts: 10.0, isKeyframe: true))
+        XCTAssertLessThanOrEqual(buffer.duration, 3.0, "New timeCap must apply on the next append")
+    }
+
+    func testAudioRingBufferTimeCapConcurrentSetAndAppend() {
+        let buffer = AudioRingBuffer(timeCap: 30, memoryCap: 50_000_000)
+        let samples = (0..<600).map { i in
+            Self.makeSampleBuffer(pts: Double(i) / 60.0, isKeyframe: true, sampleSize: 100)
+        }
+
+        DispatchQueue.concurrentPerform(iterations: 2) { worker in
+            if worker == 0 {
+                for sample in samples {
+                    buffer.append(sample)
+                }
+            } else {
+                for i in 0..<600 {
+                    buffer.timeCap = i.isMultiple(of: 2) ? 2 : 30
+                    _ = buffer.timeCap
+                }
+            }
+        }
+
+        buffer.timeCap = 2
+        XCTAssertEqual(buffer.timeCap, 2)
+        buffer.append(Self.makeSampleBuffer(pts: 10.0, isKeyframe: true, sampleSize: 100))
+        XCTAssertLessThanOrEqual(buffer.duration, 2.0, "New timeCap must apply on the next append")
+    }
 }

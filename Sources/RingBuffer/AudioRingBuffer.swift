@@ -9,18 +9,41 @@ public final class AudioRingBuffer: @unchecked Sendable {
     private var deque = Deque<CMSampleBuffer>()
     private var _currentMemoryBytes: Int = 0
 
-    public var timeCap: TimeInterval
-    public private(set) var memoryCap: Int
+    // Caps are only touched under `lock`: the main actor updates them from
+    // settings while capture threads read them during append/eviction.
+    private var _timeCap: TimeInterval
+    private var _memoryCap: Int
+
+    /// Maximum buffered duration. Setting it does not evict on its own; the
+    /// next append (or an explicit `trimToDuration`) applies the new cap.
+    public var timeCap: TimeInterval {
+        get {
+            lock.lock()
+            defer { lock.unlock() }
+            return _timeCap
+        }
+        set {
+            lock.lock()
+            defer { lock.unlock() }
+            _timeCap = newValue
+        }
+    }
+
+    public var memoryCap: Int {
+        lock.lock()
+        defer { lock.unlock() }
+        return _memoryCap
+    }
 
     public init(timeCap: TimeInterval = 30.0, memoryCap: Int = 50_000_000) {
-        self.timeCap = timeCap
-        self.memoryCap = memoryCap
+        self._timeCap = timeCap
+        self._memoryCap = memoryCap
     }
 
     public func setMemoryCap(_ bytes: Int) {
         lock.lock()
         defer { lock.unlock() }
-        memoryCap = max(bytes, 0)
+        _memoryCap = max(bytes, 0)
         evictIfNeeded()
     }
 
@@ -125,14 +148,14 @@ public final class AudioRingBuffer: @unchecked Sendable {
         while true {
             guard let oldest = deque.first, let newest = deque.last else { break }
             let duration = presentationTimeStamp(of: newest) - presentationTimeStamp(of: oldest)
-            if duration > timeCap {
+            if duration > _timeCap {
                 evictOldest()
             } else {
                 break
             }
         }
 
-        while _currentMemoryBytes > memoryCap {
+        while _currentMemoryBytes > _memoryCap {
             guard deque.count > 1 else { break }
             evictOldest()
         }
