@@ -68,7 +68,7 @@ final class CompanionConnectionTests: XCTestCase {
     override func setUp() async throws {
         try await super.setUp()
         defaults = makeTestDefaults()
-        pairing = CompanionPairingManager(defaults: defaults)
+        pairing = CompanionPairingManager(defaults: defaults, secretStore: InMemoryPairingSecretStore())
         secret = pairing.approveDevice(id: "phone-1", name: "Galaxy S23")
     }
 

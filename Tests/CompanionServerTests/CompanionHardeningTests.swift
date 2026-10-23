@@ -10,7 +10,7 @@ final class CompanionHardeningTests: XCTestCase {
     override func setUp() async throws {
         try await super.setUp()
         defaults = makeTestDefaults()
-        pairing = CompanionPairingManager(defaults: defaults)
+        pairing = CompanionPairingManager(defaults: defaults, secretStore: InMemoryPairingSecretStore())
     }
 
     override func tearDown() async throws {

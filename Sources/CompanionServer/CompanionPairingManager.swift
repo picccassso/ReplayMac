@@ -1,5 +1,6 @@
 import Foundation
 import AppKit
+import os.log
 
 public struct PairedDevice: Codable, Identifiable, Equatable, Hashable, Sendable {
     public let id: String
@@ -28,6 +29,8 @@ public enum PairingPromptResult: Sendable, Equatable {
 public final class CompanionPairingManager: ObservableObject {
     public static let shared = CompanionPairingManager()
     public static let userDefaultsKey = "pairedCompanionDevices"
+    /// Where secrets lived before they moved to the Keychain. Only read to
+    /// migrate, or written as a fallback when the Keychain refuses a save.
     static let secretsDefaultsKey = "pairedCompanionDeviceSecrets"
     public static let defaultPromptTimeout: TimeInterval = 60
 
@@ -44,14 +47,27 @@ public final class CompanionPairingManager: ObservableObject {
     private var secrets: [String: String] = [:]
     private var activePrompt: ActivePrompt?
     private let defaults: UserDefaults
+    let secretStore: PairingSecretStore
+    private let logger = Logger(subsystem: "com.replaycap", category: "CompanionPairing")
 
-    public init(defaults: UserDefaults = .standard) {
+    public init(defaults: UserDefaults, secretStore: PairingSecretStore) {
         self.defaults = defaults
+        self.secretStore = secretStore
         loadDevices()
     }
 
+    /// The app's own defaults pair with the Keychain. Any other suite is a
+    /// test or preview, so its secrets stay in memory: a single Keychain item
+    /// holds every secret, and a test must never overwrite the real one.
+    public convenience init(defaults: UserDefaults = .standard) {
+        let store: PairingSecretStore = defaults === UserDefaults.standard
+            ? KeychainPairingSecretStore()
+            : InMemoryPairingSecretStore()
+        self.init(defaults: defaults, secretStore: store)
+    }
+
     public func loadDevices() {
-        secrets = defaults.dictionary(forKey: Self.secretsDefaultsKey) as? [String: String] ?? [:]
+        secrets = loadSecrets()
         guard let data = defaults.data(forKey: Self.userDefaultsKey),
               let list = try? JSONDecoder().decode([PairedDevice].self, from: data) else {
             pairedDevices = []
@@ -64,7 +80,44 @@ public final class CompanionPairingManager: ObservableObject {
         if let data = try? JSONEncoder().encode(pairedDevices) {
             defaults.set(data, forKey: Self.userDefaultsKey)
         }
-        defaults.set(secrets, forKey: Self.secretsDefaultsKey)
+        saveSecrets()
+    }
+
+    /// Secrets still in UserDefaults are newer than the store's copy: either
+    /// they predate the Keychain, or a Keychain save failed and fell back to
+    /// UserDefaults. Move them over, and only drop the old key once the store
+    /// has them, so paired phones keep working whatever happens.
+    private func loadSecrets() -> [String: String] {
+        if let legacy = defaults.dictionary(forKey: Self.secretsDefaultsKey) as? [String: String] {
+            do {
+                try secretStore.saveSecrets(legacy)
+                defaults.removeObject(forKey: Self.secretsDefaultsKey)
+                logger.info("Moved \(legacy.count, privacy: .public) pairing secrets to the Keychain")
+            } catch {
+                logger.error("Could not move pairing secrets to the Keychain, keeping them in UserDefaults: \(error.localizedDescription, privacy: .public)")
+            }
+            return legacy
+        }
+
+        do {
+            return try secretStore.loadSecrets() ?? [:]
+        } catch {
+            // Paired phones will be asked to pair again.
+            logger.error("Could not read pairing secrets from the Keychain: \(error.localizedDescription, privacy: .public)")
+            return [:]
+        }
+    }
+
+    private func saveSecrets() {
+        do {
+            try secretStore.saveSecrets(secrets)
+            defaults.removeObject(forKey: Self.secretsDefaultsKey)
+        } catch {
+            // Losing the secrets would unpair every phone on the next launch,
+            // so keep them in UserDefaults until the Keychain takes them.
+            logger.error("Could not save pairing secrets to the Keychain, falling back to UserDefaults: \(error.localizedDescription, privacy: .public)")
+            defaults.set(secrets, forKey: Self.secretsDefaultsKey)
+        }
     }
 
     public func isDeviceApproved(id: String) -> Bool {

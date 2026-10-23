@@ -197,11 +197,13 @@ final class CompanionServerProtocolTests: XCTestCase {
 final class CompanionPairingManagerTests: XCTestCase {
     var userDefaults: UserDefaults!
     var pairingManager: CompanionPairingManager!
+    var secretStore: InMemoryPairingSecretStore!
 
     override func setUp() async throws {
         try await super.setUp()
         userDefaults = UserDefaults(suiteName: "CompanionPairingTests-\(UUID().uuidString)")!
-        pairingManager = CompanionPairingManager(defaults: userDefaults)
+        secretStore = InMemoryPairingSecretStore()
+        pairingManager = CompanionPairingManager(defaults: userDefaults, secretStore: secretStore)
     }
 
     override func tearDown() async throws {
@@ -287,11 +289,79 @@ final class CompanionPairingManagerTests: XCTestCase {
 
     func testSecretsSurviveRelaunchAndRevokeRemovesThem() {
         let secret = pairingManager.approveDevice(id: "dev-1", name: "Phone")
-        XCTAssertEqual(CompanionPairingManager(defaults: userDefaults).secret(for: "dev-1"), secret)
+        XCTAssertEqual(CompanionPairingManager(defaults: userDefaults, secretStore: secretStore).secret(for: "dev-1"), secret)
 
         pairingManager.revokeDevice(id: "dev-1")
         XCTAssertNil(pairingManager.secret(for: "dev-1"))
-        XCTAssertNil(CompanionPairingManager(defaults: userDefaults).secret(for: "dev-1"))
+        XCTAssertNil(CompanionPairingManager(defaults: userDefaults, secretStore: secretStore).secret(for: "dev-1"))
+    }
+
+    // MARK: - Keychain migration
+
+    private struct StoreFailure: Error {}
+
+    func testSecretsAreSavedToTheStoreNotUserDefaults() {
+        let secret = pairingManager.approveDevice(id: "dev-1", name: "Phone")
+        XCTAssertEqual(secretStore.storedSecrets?["dev-1"], secret.base64EncodedString())
+        XCTAssertNil(userDefaults.object(forKey: CompanionPairingManager.secretsDefaultsKey))
+    }
+
+    func testLegacySecretsMoveToStoreAndOldKeyIsRemoved() {
+        let defaults = UserDefaults(suiteName: "CompanionPairingMigration-\(UUID().uuidString)")!
+        let secret = Data(repeating: 7, count: 32)
+        seedLegacyPairing(in: defaults, id: "dev-1", secret: secret)
+
+        let store = InMemoryPairingSecretStore()
+        let manager = CompanionPairingManager(defaults: defaults, secretStore: store)
+
+        XCTAssertEqual(manager.secret(for: "dev-1"), secret, "Phones paired before the move keep working")
+        XCTAssertEqual(store.storedSecrets?["dev-1"], secret.base64EncodedString())
+        XCTAssertNil(defaults.object(forKey: CompanionPairingManager.secretsDefaultsKey))
+    }
+
+    func testFailedStoreWriteKeepsLegacySecrets() {
+        let defaults = UserDefaults(suiteName: "CompanionPairingMigration-\(UUID().uuidString)")!
+        let secret = Data(repeating: 9, count: 32)
+        seedLegacyPairing(in: defaults, id: "dev-1", secret: secret)
+
+        let store = InMemoryPairingSecretStore()
+        store.saveError = StoreFailure()
+        let manager = CompanionPairingManager(defaults: defaults, secretStore: store)
+
+        XCTAssertEqual(manager.secret(for: "dev-1"), secret)
+        XCTAssertNil(store.storedSecrets)
+        XCTAssertEqual(
+            defaults.dictionary(forKey: CompanionPairingManager.secretsDefaultsKey) as? [String: String],
+            ["dev-1": secret.base64EncodedString()],
+            "The old key must survive until the store has the secrets"
+        )
+
+        // A later save that also fails still keeps every secret recoverable.
+        let second = manager.approveDevice(id: "dev-2", name: "Tablet")
+        let fallback = defaults.dictionary(forKey: CompanionPairingManager.secretsDefaultsKey) as? [String: String]
+        XCTAssertEqual(fallback?["dev-2"], second.base64EncodedString())
+
+        // Once the store works again the next launch moves everything over.
+        store.saveError = nil
+        let relaunched = CompanionPairingManager(defaults: defaults, secretStore: store)
+        XCTAssertEqual(relaunched.secret(for: "dev-1"), secret)
+        XCTAssertEqual(relaunched.secret(for: "dev-2"), second)
+        XCTAssertNil(defaults.object(forKey: CompanionPairingManager.secretsDefaultsKey))
+    }
+
+    func testCustomDefaultsNeverUseTheKeychain() {
+        let defaults = UserDefaults(suiteName: "CompanionPairingMigration-\(UUID().uuidString)")!
+        let manager = CompanionPairingManager(defaults: defaults)
+        XCTAssertTrue(manager.secretStore is InMemoryPairingSecretStore)
+        let secret = manager.approveDevice(id: "dev-1", name: "Phone")
+        XCTAssertEqual(manager.secret(for: "dev-1"), secret)
+        XCTAssertNil(defaults.object(forKey: CompanionPairingManager.secretsDefaultsKey))
+    }
+
+    private func seedLegacyPairing(in defaults: UserDefaults, id: String, secret: Data) {
+        let devices = [PairedDevice(id: id, name: "Phone")]
+        defaults.set(try! JSONEncoder().encode(devices), forKey: CompanionPairingManager.userDefaultsKey)
+        defaults.set([id: secret.base64EncodedString()], forKey: CompanionPairingManager.secretsDefaultsKey)
     }
 
     func testPromptHandlerReceivesCodeAndDecides() async {
@@ -367,7 +437,7 @@ final class CompanionServerLifecycleTests: XCTestCase {
     override func setUp() async throws {
         try await super.setUp()
         defaults = makeTestDefaults()
-        pairing = CompanionPairingManager(defaults: defaults)
+        pairing = CompanionPairingManager(defaults: defaults, secretStore: InMemoryPairingSecretStore())
     }
 
     override func tearDown() async throws {
@@ -391,7 +461,7 @@ final class CompanionServerLifecycleTests: XCTestCase {
         let first = try await startTestServer(pairing: pairing, defaults: defaults)
         defer { first.stop() }
 
-        let second = CompanionServer(pairingManager: CompanionPairingManager(defaults: makeTestDefaults()), defaults: makeTestDefaults())
+        let second = CompanionServer(pairingManager: CompanionPairingManager(defaults: makeTestDefaults(), secretStore: InMemoryPairingSecretStore()), defaults: makeTestDefaults())
         try? second.start(port: first.listeningPort)
         try await waitUntil { second.lastError != nil }
         XCTAssertFalse(second.isRunning)
