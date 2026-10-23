@@ -462,6 +462,13 @@ public actor ClipSaver {
         writer: AVAssetWriter,
         label: String
     ) async throws {
+        // Polling (a 1 ms suspending sleep, not a blocked thread) is deliberate.
+        // requestMediaDataWhenReady only re-invokes its block when the input
+        // becomes ready again, so a writer that fails while every input is
+        // stalled would leave the continuation hanging unless a separate
+        // status watchdog polled anyway. The SDK also deprecates both it and
+        // isReadyForMoreMediaData in favour of the async append on macOS 27;
+        // that is the API to move to once the deployment target allows it.
         for (index, sample) in samples.enumerated() {
             while !input.isReadyForMoreMediaData {
                 try await Task.sleep(nanoseconds: 1_000_000)
