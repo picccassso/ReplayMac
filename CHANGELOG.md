@@ -1,5 +1,9 @@
 # Changelog
 
+## 2.2.1
+
+- Fix a crash about two minutes after starting the replay buffer. Every audio buffer made the next one slightly more expensive to hand off, until the audio thread ran out of stack space and ReplayMac quit
+
 ## 2.2.0
 
 ### Appearance
