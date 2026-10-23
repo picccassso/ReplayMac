@@ -123,8 +123,18 @@ extension SettingsView {
     }
 
     func loadCaptureProfiles() {
-        guard let data = captureProfilesJSON.data(using: .utf8),
-              let profiles = try? JSONDecoder().decode([CaptureProfile].self, from: data) else {
+        let profiles: [CaptureProfile]
+        do {
+            guard let data = captureProfilesJSON.data(using: .utf8) else {
+                captureProfiles = []
+                return
+            }
+            profiles = try JSONDecoder().decode([CaptureProfile].self, from: data)
+        } catch {
+            AppSettings.logger.error("Saved capture profiles could not be decoded: \(String(describing: error), privacy: .public)")
+            // Without this the tab just looks empty, and saving a new profile
+            // would quietly replace the ones that failed to load.
+            profileErrorMessage = "Could not read saved profiles: \(error.localizedDescription)"
             captureProfiles = []
             return
         }
