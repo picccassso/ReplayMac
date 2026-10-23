@@ -18,6 +18,13 @@ public final class FrameCompositor: @unchecked Sendable {
         let height: Int
     }
 
+    /// The output size, copied out of the lock along with the pool so drawing
+    /// never reads dimensions that `configure` may be changing.
+    private struct Canvas {
+        let width: Int
+        let height: Int
+    }
+
     private let logger = Logger(subsystem: "com.replaycap", category: "FrameCompositor")
     private let lock = NSLock()
     private var primaryFrame: DisplayFrame?
@@ -131,6 +138,7 @@ public final class FrameCompositor: @unchecked Sendable {
         }
 
         let handler = _outputHandler
+        let canvas = Canvas(width: compositeWidth, height: compositeHeight)
 
         let primary = primaryFrame
         let secondary = secondaryFrame
@@ -153,7 +161,8 @@ public final class FrameCompositor: @unchecked Sendable {
                 primary: primaryFrame,
                 secondary: secondaryFrame,
                 presentationTimeStamp: pts,
-                pool: pool
+                pool: pool,
+                canvas: canvas
             )
             if let buffer = compositeBuffer {
                 handler?(buffer)
@@ -171,6 +180,7 @@ public final class FrameCompositor: @unchecked Sendable {
             guard shouldEmitFrame(preferred: frame.sampleBuffer) else { return nil }
             return reserveOutputPTS(preferred: frame.sampleBuffer)
         }
+        let logsStaleComposite = compositeFrameCount <= 5
 
         lock.unlock()
 
@@ -180,9 +190,10 @@ public final class FrameCompositor: @unchecked Sendable {
                     frame: frame,
                     isPrimary: primary != nil,
                     presentationTimeStamp: pts,
-                    pool: pool
+                    pool: pool,
+                    canvas: canvas
                 )
-                if compositeFrameCount <= 5 {
+                if logsStaleComposite {
                     let pts = compositeBuffer.map { CMSampleBufferGetPresentationTimeStamp($0) }
                     logger.debug("Stale single-display composite PTS=\(pts?.seconds ?? -1) valid=\(pts?.isValid ?? false)")
                 }
@@ -197,15 +208,16 @@ public final class FrameCompositor: @unchecked Sendable {
         primary: DisplayFrame,
         secondary: DisplayFrame,
         presentationTimeStamp pts: CMTime,
-        pool: CVPixelBufferPool
+        pool: CVPixelBufferPool,
+        canvas: Canvas
     ) -> CMSampleBuffer? {
         var outputPixelBuffer: CVPixelBuffer?
         let status = CVPixelBufferPoolCreatePixelBuffer(kCFAllocatorDefault, pool, &outputPixelBuffer)
         guard status == kCVReturnSuccess, let outBuffer = outputPixelBuffer else { return nil }
 
-        clear(outBuffer)
-        drawPixelBuffer(primary.sampleBuffer, into: outBuffer, atX: 0, width: primary.width, height: primary.height)
-        drawPixelBuffer(secondary.sampleBuffer, into: outBuffer, atX: primary.width, width: secondary.width, height: secondary.height)
+        clear(outBuffer, canvas: canvas)
+        drawPixelBuffer(primary.sampleBuffer, into: outBuffer, canvas: canvas, atX: 0, width: primary.width, height: primary.height)
+        drawPixelBuffer(secondary.sampleBuffer, into: outBuffer, canvas: canvas, atX: primary.width, width: secondary.width, height: secondary.height)
 
         let sourceDuration = CMSampleBufferGetDuration(primary.sampleBuffer)
         let duration = sourceDuration.isValid ? sourceDuration : CMTime(value: 1, timescale: 60)
@@ -241,15 +253,16 @@ public final class FrameCompositor: @unchecked Sendable {
         frame: DisplayFrame,
         isPrimary: Bool,
         presentationTimeStamp pts: CMTime,
-        pool: CVPixelBufferPool
+        pool: CVPixelBufferPool,
+        canvas: Canvas
     ) -> CMSampleBuffer? {
         var outputPixelBuffer: CVPixelBuffer?
         let status = CVPixelBufferPoolCreatePixelBuffer(kCFAllocatorDefault, pool, &outputPixelBuffer)
         guard status == kCVReturnSuccess, let outBuffer = outputPixelBuffer else { return nil }
 
-        clear(outBuffer)
+        clear(outBuffer, canvas: canvas)
         let xOffset = isPrimary ? 0 : frame.width
-        drawPixelBuffer(frame.sampleBuffer, into: outBuffer, atX: xOffset, width: frame.width, height: frame.height)
+        drawPixelBuffer(frame.sampleBuffer, into: outBuffer, canvas: canvas, atX: xOffset, width: frame.width, height: frame.height)
 
         let sourceDuration = CMSampleBufferGetDuration(frame.sampleBuffer)
         let duration = sourceDuration.isValid ? sourceDuration : CMTime(value: 1, timescale: 60)
@@ -281,8 +294,8 @@ public final class FrameCompositor: @unchecked Sendable {
         return sampleBuffer
     }
 
-    private func clear(_ pixelBuffer: CVPixelBuffer) {
-        let bounds = CGRect(x: 0, y: 0, width: compositeWidth, height: compositeHeight)
+    private func clear(_ pixelBuffer: CVPixelBuffer, canvas: Canvas) {
+        let bounds = CGRect(x: 0, y: 0, width: canvas.width, height: canvas.height)
         let image = CIImage(color: .black).cropped(to: bounds)
         ciContext.render(image, to: pixelBuffer, bounds: bounds, colorSpace: colorSpace)
     }
@@ -290,13 +303,14 @@ public final class FrameCompositor: @unchecked Sendable {
     private func drawPixelBuffer(
         _ sampleBuffer: CMSampleBuffer,
         into outputBuffer: CVPixelBuffer,
+        canvas: Canvas,
         atX x: Int,
         width: Int,
         height: Int
     ) {
         guard let pixelBuffer = CMSampleBufferGetImageBuffer(sampleBuffer) else { return }
 
-        let yOffset = (compositeHeight - height) / 2
+        let yOffset = (canvas.height - height) / 2
         let bounds = CGRect(x: CGFloat(x), y: CGFloat(yOffset), width: CGFloat(width), height: CGFloat(height))
         let ciImage = CIImage(cvPixelBuffer: pixelBuffer)
             .transformed(by: CGAffineTransform(translationX: bounds.minX, y: bounds.minY))
