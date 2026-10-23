@@ -272,6 +272,9 @@ public final class VideoEncoder: @unchecked Sendable {
         stateLock.lock()
         let handler = _outputHandler
         let expectedPTS = expectedPTSQueue.isEmpty ? nil : expectedPTSQueue.removeFirst()
+        // Read here: this callback runs on a VideoToolbox thread while
+        // `encode` keeps incrementing the count on the capture thread.
+        let encodeCount = self.encodeCount
         stateLock.unlock()
 
         let outputPTS = CMSampleBufferGetPresentationTimeStamp(sampleBuffer)
