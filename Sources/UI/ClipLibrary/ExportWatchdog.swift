@@ -25,6 +25,7 @@ enum TrimExportError: LocalizedError {
 /// Carries an export session to the stall watchdog, which deliberately runs
 /// off the main actor so it still fires if the main actor is starved.
 private final class ExportSessionBox: @unchecked Sendable {
+    // @unchecked: the watchdog only reads `progress` and calls `cancelExport()`, which AVFoundation allows from any thread.
     let session: AVAssetExportSession
     init(_ session: AVAssetExportSession) { self.session = session }
 }

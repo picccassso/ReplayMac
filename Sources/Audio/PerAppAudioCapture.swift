@@ -23,6 +23,7 @@ public enum SystemAudioFilterMode: Equatable, Sendable {
 }
 
 public final class PerAppAudioCapture: @unchecked Sendable {
+    // @unchecked: stream state is only touched inside `stateLock`.
     private let queue = DispatchQueue(label: "com.replaycap.per-app-audio", qos: .userInitiated)
     private let delegate = PerAppAudioCaptureDelegate()
     private let logger = Logger(subsystem: "com.replaycap", category: "PerAppAudioCapture")
@@ -177,6 +178,7 @@ public final class PerAppAudioCapture: @unchecked Sendable {
 }
 
 private final class PerAppAudioCaptureDelegate: NSObject, SCStreamOutput, SCStreamDelegate, @unchecked Sendable {
+    // @unchecked: both handlers are only touched inside `lock`.
     private let lock = NSLock()
     private var handler: (@Sendable (CMSampleBuffer) -> Void)?
     private var streamStoppedHandler: (@Sendable () -> Void)?

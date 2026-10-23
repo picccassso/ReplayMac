@@ -552,6 +552,7 @@ public enum AppSettings {
         return nil
     }
 
+    // NSCache is documented as thread-safe, but the SDK doesn't mark it Sendable.
     nonisolated(unsafe) private static let appIconBase64Cache = NSCache<NSString, NSString>()
 
     public static func appIconBase64(for bundleID: String, dimension: Int = 64) -> String? {

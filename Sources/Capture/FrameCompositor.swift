@@ -5,6 +5,7 @@ import CoreImage
 import os.log
 
 public final class FrameCompositor: @unchecked Sendable {
+    // @unchecked: mutable state is only touched inside `lock`; drawing works on copies taken under it.
     public typealias OutputHandler = @Sendable (CMSampleBuffer) -> Void
 
     private enum DisplayIndex: Int {

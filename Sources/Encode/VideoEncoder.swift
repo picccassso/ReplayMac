@@ -38,6 +38,7 @@ private func compressionOutputCallback(
 }
 
 public final class VideoEncoder: @unchecked Sendable {
+    // @unchecked: mutable state is only touched inside `stateLock` (deinit aside, which has the object to itself).
     public typealias OutputHandler = @Sendable (CMSampleBuffer) -> Void
 
     private static let logger = Logger(subsystem: "com.replaycap", category: "VideoEncoder")

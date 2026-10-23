@@ -4,6 +4,7 @@ import AVFoundation
 
 public enum AudioCue {
     private static let lock = NSLock()
+    // Only read and written inside `lock`.
     nonisolated(unsafe) private static var activePlayer: AVAudioPlayer?
     private static let muteWavData = makeTwoToneWavData(firstHz: 660, secondHz: 440)
     private static let unmuteWavData = makeTwoToneWavData(firstHz: 440, secondHz: 660)

@@ -380,6 +380,7 @@ final class ClipSkimmer: ObservableObject {
 /// Carries a decoded frame from the image generator's callback queue back to
 /// the main actor.
 private final class SkimFrameBox: @unchecked Sendable {
+    // @unchecked: immutable, and CGImage is immutable too; older SDKs just don't mark it Sendable.
     let image: CGImage?
     init(image: CGImage?) { self.image = image }
 }

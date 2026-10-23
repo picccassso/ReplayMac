@@ -12,6 +12,7 @@ public struct CaptureStats: Sendable {
 }
 
 public final class CaptureDelegate: NSObject, SCStreamOutput, SCStreamDelegate, @unchecked Sendable {
+    // @unchecked: every mutable property is only touched inside `lock`.
     private let logger = Logger(subsystem: "com.replaycap", category: "CaptureDelegate")
     private let lock = NSLock()
     private var videoHandler: ((CMSampleBuffer) -> Void)?

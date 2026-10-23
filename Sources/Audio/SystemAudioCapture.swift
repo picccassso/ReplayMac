@@ -5,6 +5,7 @@ import Foundation
 /// and forwards them to a handler. Detects gaps in the audio stream
 /// and emits silence buffers to maintain sync when the output device changes.
 public final class SystemAudioCapture: @unchecked Sendable {
+    // @unchecked: every mutable property is only touched inside `lock`.
     /// Longest delivery gap that is worth papering over with silence.
     static let maximumGapFillSeconds: TimeInterval = 5
 

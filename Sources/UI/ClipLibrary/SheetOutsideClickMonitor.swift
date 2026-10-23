@@ -17,6 +17,7 @@ struct SheetOutsideClickMonitor: NSViewRepresentable {
 
 final class OutsideClickMonitorView: NSView {
     var onOutsideClick: (() -> Void)?
+    // Only touched on the main thread; nonisolated(unsafe) just lets deinit remove it.
     nonisolated(unsafe) private var monitor: Any?
 
     override func viewDidMoveToWindow() {

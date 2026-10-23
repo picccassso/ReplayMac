@@ -37,6 +37,7 @@ enum TrimVideoTranscodeError: LocalizedError {
 /// presets choose their own bitrate, so a reader/writer pipeline is required
 /// for meaningful Compact/Balanced/High quality controls and size estimates.
 final class TrimVideoTranscoder: @unchecked Sendable {
+    // @unchecked: the active reader/writer and `cancelled` are only touched inside `stateLock`.
     private let stateLock = NSLock()
     private var activeReader: AVAssetReader?
     private var activeWriter: AVAssetWriter?
@@ -310,6 +311,7 @@ final class TrimVideoTranscoder: @unchecked Sendable {
     }
 
     private final class TrackPipe: @unchecked Sendable {
+        // @unchecked: immutable, and each pipe is drained by exactly one task.
         let label: String
         let output: AVAssetReaderOutput
         let input: AVAssetWriterInput
@@ -322,6 +324,7 @@ final class TrimVideoTranscoder: @unchecked Sendable {
     }
 
     private final class WriterBox: @unchecked Sendable {
+        // @unchecked: immutable; drain tasks only read the writer's status, and it finishes after they end.
         let writer: AVAssetWriter
         init(_ writer: AVAssetWriter) { self.writer = writer }
     }

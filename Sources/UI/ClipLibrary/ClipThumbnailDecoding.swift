@@ -6,6 +6,7 @@ import AppKit
 /// Carries a pre-decoded `CGImage` across task boundaries so the main thread
 /// never has to decompress a JPEG/PNG when a grid card scrolls into view.
 final class PredecodedThumbnailBox: @unchecked Sendable {
+    // @unchecked: immutable, and CGImage is immutable too; older SDKs just don't mark it Sendable.
     let image: CGImage?
     init(image: CGImage?) { self.image = image }
 }
