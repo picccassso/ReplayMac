@@ -16,7 +16,10 @@ extension AppDelegate {
             self?.handleGameActivityStopped()
         }
 
-        settingsObservations.append(Defaults.observe(.autoRecordGamesEnabled) { [weak self] _ in
+        // No `.initial` fire: the toggle handler can start capture, which at
+        // launch would bypass the deferred auto-start (and run during onboarding).
+        // The sync below applies the launch state instead.
+        settingsObservations.append(Defaults.observe(.autoRecordGamesEnabled, options: []) { [weak self] _ in
             self?.handleGameAutoRecordSettingToggled()
         })
         settingsObservations.append(Defaults.observe(.autoRecordGameBundleIDs) { [weak self] _ in

@@ -1,3 +1,4 @@
+import Capture
 import Defaults
 import Foundation
 
@@ -212,5 +213,89 @@ public enum ExperiencePreset: String, CaseIterable, Identifiable, Sendable, Defa
             return .full
         }
         return .custom
+    }
+}
+
+/// What the running app has to do after the enabled module set changes.
+///
+/// Turning a module on or off only matters at runtime when it hides a stored
+/// setting that differs from the baseline, so toggling a UI-only module (or one
+/// whose settings are already at their defaults) never touches capture.
+public struct FeatureModuleChange: Equatable, Sendable {
+    /// The user's own stored values that a disabled module masks.
+    public struct StoredSettings: Equatable, Sendable {
+        public var autoRecordGamesEnabled = false
+        public var longBufferEnabled = false
+        public var queueDepth = Defaults.Keys.queueDepth.defaultValue
+        public var captureMode = CaptureMode.single.rawValue
+        public var captureHDR = false
+        public var videoCodec = VideoCodec.hevc.rawValue
+        public var captureResolution = CaptureResolution.native.rawValue
+
+        public init() {}
+
+        public static var current: StoredSettings {
+            var stored = StoredSettings()
+            stored.autoRecordGamesEnabled = Defaults[.autoRecordGamesEnabled]
+            stored.longBufferEnabled = Defaults[.longBufferEnabled]
+            stored.queueDepth = Defaults[.queueDepth]
+            stored.captureMode = Defaults[.captureMode]
+            stored.captureHDR = Defaults[.captureHDR] && CaptureManager.supportsHDRCapture
+            stored.videoCodec = Defaults[.videoCodec]
+            stored.captureResolution = Defaults[.captureResolution]
+            return stored
+        }
+    }
+
+    public var reconcileCompanionServer = false
+    public var reconcileGameAutoRecord = false
+    /// Auto-record games was masked off while the user had it on, so normal
+    /// auto-start behaviour should take over again.
+    public var resumeAlwaysOnRecording = false
+    public var refreshAudio = false
+    public var syncMemoryCaps = false
+    public var reconcileCapture = false
+    public var needsVideoReset = false
+    public var needsFullRestart = false
+
+    public init(from old: Set<FeatureModule>, to new: Set<FeatureModule>, stored: StoredSettings = .current) {
+        let toggled = old.symmetricDifference(new)
+
+        if toggled.contains(.companion) {
+            reconcileCompanionServer = true
+        }
+
+        if toggled.contains(.autoRecordGames), stored.autoRecordGamesEnabled {
+            reconcileGameAutoRecord = true
+            resumeAlwaysOnRecording = !new.contains(.autoRecordGames)
+        }
+
+        if toggled.contains(.audioMixing) {
+            refreshAudio = true
+            reconcileCapture = true
+        }
+
+        if toggled.contains(.systemAndFileTuning) {
+            syncMemoryCaps = true
+            if stored.queueDepth != Defaults.Keys.queueDepth.defaultValue {
+                reconcileCapture = true
+                needsVideoReset = true
+            }
+        }
+
+        if toggled.contains(.extendedReplay), stored.longBufferEnabled {
+            reconcileCapture = true
+        }
+
+        if toggled.contains(.proVideo) {
+            if stored.captureMode != CaptureMode.single.rawValue || stored.captureHDR {
+                reconcileCapture = true
+                needsFullRestart = true
+            } else if stored.videoCodec != VideoCodec.hevc.rawValue
+                || stored.captureResolution == CaptureResolution.custom.rawValue {
+                reconcileCapture = true
+                needsVideoReset = true
+            }
+        }
     }
 }

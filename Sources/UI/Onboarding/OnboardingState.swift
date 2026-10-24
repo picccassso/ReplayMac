@@ -28,11 +28,15 @@ public enum OnboardingState {
                     hasLegacyPreferences: containsLegacyPreference(in: Set(domain.keys)),
                     hasSavedClips: fileManager.fileExists(atPath: outputDirectory.path(percentEncoded: false))
                 )
-            if isExisting {
-                defaults.set(Array(ExperiencePreset.full.modules.map(\.rawValue)), forKey: "enabledFeatureModules")
-            } else {
-                defaults.set(Array(ExperiencePreset.simple.modules.map(\.rawValue)), forKey: "enabledFeatureModules")
-            }
+            // Write through Defaults so the stored format matches what
+            // `Defaults[.enabledFeatureModules]` decodes; raw strings written
+            // with `defaults.set` read back as an empty set.
+            let modulesKey = Defaults.Key<Set<FeatureModule>>(
+                Defaults.Keys.enabledFeatureModules.name,
+                default: Defaults.Keys.enabledFeatureModules.defaultValue,
+                suite: defaults
+            )
+            Defaults[modulesKey] = isExisting ? ExperiencePreset.full.modules : ExperiencePreset.simple.modules
             defaults.set(true, forKey: "didInitializeExperiencePreset")
         }
 

@@ -166,34 +166,57 @@ extension AppDelegate {
             self?.broadcastCompanionSnapshot()
             self?.scheduleRuntimeSettingsReconcile(needsFullRestart: true)
         })
-        settingsObservations.append(Defaults.observe(.enabledFeatureModules) { [weak self] _ in
-            guard let self else { return }
+        // No `.initial` fire: launch already applies the current modules, and
+        // starting capture here would bypass the deferred launch auto-start.
+        settingsObservations.append(Defaults.observe(.enabledFeatureModules, options: []) { [weak self] change in
+            self?.applyFeatureModuleChange(FeatureModuleChange(from: change.oldValue, to: change.newValue))
+        })
+    }
+
+    /// Applies only what the toggled modules actually affect, so switching a
+    /// UI-only module never restarts capture or resumes a stopped buffer.
+    func applyFeatureModuleChange(_ change: FeatureModuleChange) {
+        if change.reconcileCompanionServer {
             if AppSettings.companionServerEnabled {
-                if !self.companionServer.isRunning {
+                if !companionServer.isRunning {
                     do {
-                        try self.companionServer.start(port: UInt16(AppSettings.companionServerPort))
+                        try companionServer.start(port: UInt16(AppSettings.companionServerPort))
                     } catch {
                         runtimeSettingsLogger.error("Failed to start companion server: \(String(describing: error), privacy: .public)")
                     }
                 }
-            } else if self.companionServer.isRunning {
-                self.companionServer.stop()
+            } else if companionServer.isRunning {
+                companionServer.stop()
             }
+        }
 
-            self.syncGameAutoRecordMonitoringState()
-            if !AppSettings.autoRecordGamesEnabled,
-               AppSettings.autoStartRecordingOnLaunch,
-               !self.isCaptureRunning {
-                self.startCapturePipeline(userInitiated: false)
-            }
+        if change.reconcileGameAutoRecord {
+            syncGameAutoRecordMonitoringState()
+        }
+        if change.resumeAlwaysOnRecording,
+           Defaults[.hasCompletedOnboarding],
+           AppSettings.autoStartRecordingOnLaunch,
+           !isCaptureRunning {
+            startCapturePipeline(userInitiated: false)
+        }
 
-            self.applyEffectiveAudioVolumes()
-            self.syncAudioMuteStateToUI()
-            self.syncMemoryCapsToSettings()
-            self.statusItemController.refreshPresentation()
-            self.broadcastCompanionSnapshot()
-            self.scheduleRuntimeSettingsReconcile(needsFullRestart: true)
-        })
+        if change.refreshAudio {
+            applyEffectiveAudioVolumes()
+            syncAudioMuteStateToUI()
+        }
+        if change.syncMemoryCaps {
+            syncMemoryCapsToSettings()
+        }
+
+        statusItemController.refreshPresentation()
+        broadcastCompanionSnapshot()
+
+        if change.reconcileCapture {
+            scheduleRuntimeSettingsReconcile(
+                needsVideoReset: change.needsVideoReset,
+                needsFullRestart: change.needsFullRestart
+            )
+        }
     }
 
     // MARK: - Runtime settings reconciler handlers

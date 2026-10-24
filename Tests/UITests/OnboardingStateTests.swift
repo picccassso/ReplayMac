@@ -1,3 +1,4 @@
+import Defaults
 import XCTest
 @testable import UI
 
@@ -124,8 +125,7 @@ final class OnboardingStateTests: XCTestCase {
                 .appendingPathComponent(UUID().uuidString, isDirectory: true)
         )
 
-        let modules = (defaults.stringArray(forKey: "enabledFeatureModules") ?? [])
-        XCTAssertEqual(Set(modules.compactMap(FeatureModule.init)), ExperiencePreset.full.modules)
+        XCTAssertEqual(storedModules(in: defaults), ExperiencePreset.full.modules)
         XCTAssertEqual(defaults.bool(forKey: "didInitializeExperiencePreset"), true)
     }
 
@@ -140,9 +140,34 @@ final class OnboardingStateTests: XCTestCase {
                 .appendingPathComponent(UUID().uuidString, isDirectory: true)
         )
 
-        let modules = (defaults.stringArray(forKey: "enabledFeatureModules") ?? [])
-        XCTAssertEqual(Set(modules.compactMap(FeatureModule.init)), ExperiencePreset.simple.modules)
+        XCTAssertEqual(storedModules(in: defaults), ExperiencePreset.simple.modules)
         XCTAssertEqual(defaults.bool(forKey: "didInitializeExperiencePreset"), true)
+    }
+
+    @MainActor
+    func testPreOnboardingInstallationKeepsEveryFeature() throws {
+        let (defaults, suiteName) = try makeDefaults()
+        defaults.set(30, forKey: "bufferDurationSeconds")
+
+        OnboardingState.migrateExistingInstallationIfNeeded(
+            defaults: defaults,
+            bundleIdentifier: suiteName,
+            outputDirectory: FileManager.default.temporaryDirectory
+                .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        )
+
+        XCTAssertEqual(storedModules(in: defaults), ExperiencePreset.full.modules)
+    }
+
+    /// Reads the modules back the way the app does, through Defaults, so a
+    /// format mismatch shows up as a wrong set rather than passing silently.
+    private func storedModules(in defaults: UserDefaults) -> Set<FeatureModule> {
+        let key = Defaults.Key<Set<FeatureModule>>(
+            Defaults.Keys.enabledFeatureModules.name,
+            default: [],
+            suite: defaults
+        )
+        return Defaults[key]
     }
 
     private func makeDefaults() throws -> (UserDefaults, String) {
