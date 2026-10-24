@@ -399,9 +399,11 @@ extension View {
 
     /// Pins content to the bottom edge. On macOS 26 content scrolls beneath it
     /// with the system scroll edge effect; earlier systems inset the content.
+    /// Pass `scrollEdgeEffect: false` where that dimmed band behind the bar
+    /// looks wrong, such as over a grid of thumbnails.
     @ViewBuilder
-    func floatingBottomBar<Bar: View>(@ViewBuilder _ bar: () -> Bar) -> some View {
-        if #available(macOS 26, *) {
+    func floatingBottomBar<Bar: View>(scrollEdgeEffect: Bool = true, @ViewBuilder _ bar: () -> Bar) -> some View {
+        if #available(macOS 26, *), scrollEdgeEffect {
             self.safeAreaBar(edge: .bottom, spacing: 0) { bar() }
         } else {
             self.safeAreaInset(edge: .bottom, spacing: 0) { bar() }
