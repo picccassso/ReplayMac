@@ -60,9 +60,13 @@ public final class SystemAudioCapture: @unchecked Sendable {
         if let nextExpected = nextExpectedPTS {
             if pts < nextExpected {
                 let rewindSeconds = CMTimeGetSeconds(CMTimeSubtract(nextExpected, pts))
-                if rewindSeconds < Self.maximumGapFillSeconds {
-                    // Drop any overlapping sample when handing off between the main stream
-                    // and a filtered per-app audio stream so timestamps remain monotonic.
+                let isMostlyRepeated = rewindSeconds >= CMTimeGetSeconds(duration) / 2
+                if isMostlyRepeated && rewindSeconds < Self.maximumGapFillSeconds {
+                    // Drop a buffer that mostly repeats audio already written, which happens
+                    // when handing off between the main stream and a filtered per-app stream.
+                    // Smaller overlaps are timestamp jitter: SCK stamps audio with host time,
+                    // so a buffer can start a few microseconds before the last one ended.
+                    // Dropping those cost a whole buffer and left a silent hole in its place.
                     return
                 }
             } else if pts > nextExpected {
