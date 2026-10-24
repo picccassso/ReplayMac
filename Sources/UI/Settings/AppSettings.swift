@@ -150,6 +150,33 @@ public enum AppSettings {
         }
     }
 
+    public static var enabledFeatureModules: Set<FeatureModule> {
+        Defaults[.enabledFeatureModules]
+    }
+
+    public static var experiencePreset: ExperiencePreset {
+        ExperiencePreset.resolve(from: enabledFeatureModules)
+    }
+
+    public static func isFeatureEnabled(_ module: FeatureModule) -> Bool {
+        Defaults[.enabledFeatureModules].contains(module)
+    }
+
+    public static func setFeatureEnabled(_ module: FeatureModule, _ enabled: Bool) {
+        var current = Defaults[.enabledFeatureModules]
+        if enabled {
+            current.insert(module)
+        } else {
+            current.remove(module)
+        }
+        Defaults[.enabledFeatureModules] = current
+    }
+
+    public static func applyExperiencePreset(_ preset: ExperiencePreset) {
+        guard preset != .custom else { return }
+        Defaults[.enabledFeatureModules] = preset.modules
+    }
+
     public static var bufferDurationSeconds: Int { Defaults[.bufferDurationSeconds] }
 
     /// Extra seconds retained in the ring buffers beyond the user-facing replay
@@ -181,32 +208,46 @@ public enum AppSettings {
 
     public static var autoStartRecordingOnLaunch: Bool { Defaults[.autoStartRecordingOnLaunch] }
     public static var resumeRecordingAfterWake: Bool { Defaults[.resumeRecordingAfterWake] }
-    public static var autoRecordGamesEnabled: Bool { Defaults[.autoRecordGamesEnabled] }
+    public static var autoRecordGamesEnabled: Bool {
+        isFeatureEnabled(.autoRecordGames) && Defaults[.autoRecordGamesEnabled]
+    }
     public static var autoRecordStopWhenGameCloses: Bool { Defaults[.autoRecordStopWhenGameCloses] }
     public static var autoRecordGameBundleIDs: [String] { Defaults[.autoRecordGameBundleIDs] }
     public static var autoRecordExcludedBundleIDs: [String] { Defaults[.autoRecordExcludedBundleIDs] }
     public static var captureSystemAudio: Bool { Defaults[.captureSystemAudio] }
     public static var captureMicrophone: Bool { Defaults[.captureMicrophone] }
-    public static var mergeAudioTracks: Bool { Defaults[.mergeAudioTracks] }
+    public static var mergeAudioTracks: Bool {
+        isFeatureEnabled(.audioMixing) ? Defaults[.mergeAudioTracks] : true
+    }
     public static var playAudioCueOnSave: Bool { Defaults[.playAudioCueOnSave] }
     public static var showNotificationOnSave: Bool { Defaults[.showNotificationOnSave] }
-    public static var showClipThumbnailAfterSave: Bool { Defaults[.showClipThumbnailAfterSave] }
+    public static var showClipThumbnailAfterSave: Bool {
+        isFeatureEnabled(.quickSaveAndThumbnail) && Defaults[.showClipThumbnailAfterSave]
+    }
     public static var clipThumbnailDurationSeconds: Int { Defaults[.clipThumbnailDurationSeconds] }
-    public static var clipFilenameTemplate: String { Defaults[.clipFilenameTemplate] }
-    public static var clipDateFormat: String { Defaults[.clipDateFormat] }
-    public static var clipTimeFormat: String { Defaults[.clipTimeFormat] }
-    public static var memoryCapMB: Double { Defaults[.memoryCapMB] }
+    public static var clipFilenameTemplate: String {
+        isFeatureEnabled(.systemAndFileTuning) ? Defaults[.clipFilenameTemplate] : FilenameTemplate.default
+    }
+    public static var clipDateFormat: String {
+        isFeatureEnabled(.systemAndFileTuning) ? Defaults[.clipDateFormat] : FilenameTemplate.defaultDateFormat
+    }
+    public static var clipTimeFormat: String {
+        isFeatureEnabled(.systemAndFileTuning) ? Defaults[.clipTimeFormat] : FilenameTemplate.defaultTimeFormat
+    }
+    public static var memoryCapMB: Double {
+        isFeatureEnabled(.systemAndFileTuning) ? Defaults[.memoryCapMB] : Defaults.Keys.memoryCapMB.defaultValue
+    }
 
     public static var frameRate: Int {
         Defaults[.frameRate]
     }
 
     public static var queueDepth: Int {
-        Defaults[.queueDepth]
+        isFeatureEnabled(.systemAndFileTuning) ? Defaults[.queueDepth] : Defaults.Keys.queueDepth.defaultValue
     }
 
     public static var captureMode: String {
-        Defaults[.captureMode]
+        isFeatureEnabled(.proVideo) ? Defaults[.captureMode] : CaptureMode.single.rawValue
     }
 
     public static var captureDisplayID: String {
@@ -437,23 +478,40 @@ public enum AppSettings {
         (isMuted || isPushToMuteActive) ? 0.0 : volume
     }
 
-    public static var captureHDR: Bool { Defaults[.captureHDR] }
+    public static var captureHDR: Bool {
+        isFeatureEnabled(.proVideo) && Defaults[.captureHDR]
+    }
     public static var isHDRCaptureActive: Bool {
         captureHDR && CaptureManager.supportsHDRCapture
             && (captureMode != CaptureMode.dualSideBySide.rawValue || dualCaptureSaveModeEnum == .separateFiles)
     }
     public static var effectiveVideoCodec: String { isHDRCaptureActive ? "hevc" : videoCodec }
 
-    public static var videoCodec: String { Defaults[.videoCodec] }
+    public static var videoCodec: String {
+        isFeatureEnabled(.proVideo) ? Defaults[.videoCodec] : VideoCodec.hevc.rawValue
+    }
     public static var bitrateMbps: Double { Defaults[.bitrateMbps] }
-    public static var captureResolution: String { Defaults[.captureResolution] }
+    public static var captureResolution: String {
+        if !isFeatureEnabled(.proVideo) && Defaults[.captureResolution] == CaptureResolution.custom.rawValue {
+            return CaptureResolution.native.rawValue
+        }
+        return Defaults[.captureResolution]
+    }
     public static var customCaptureWidth: Int { Defaults[.customCaptureWidth] }
     public static var customCaptureHeight: Int { Defaults[.customCaptureHeight] }
-    public static var excludeOwnAppAudio: Bool { Defaults[.excludeOwnAppAudio] }
-    public static var microphoneID: String { Defaults[.microphoneID] }
-    public static var perAppAudioEnabled: Bool { Defaults[.perAppAudioEnabled] }
+    public static var excludeOwnAppAudio: Bool {
+        isFeatureEnabled(.audioMixing) ? Defaults[.excludeOwnAppAudio] : true
+    }
+    public static var microphoneID: String {
+        isFeatureEnabled(.audioMixing) ? Defaults[.microphoneID] : ""
+    }
+    public static var perAppAudioEnabled: Bool {
+        isFeatureEnabled(.audioMixing) && Defaults[.perAppAudioEnabled]
+    }
     public static var perAppAudioBundleID: String { Defaults[.perAppAudioBundleID] }
-    public static var mutedAudioAppBundleIDs: [String] { Defaults[.mutedAudioAppBundleIDs] }
+    public static var mutedAudioAppBundleIDs: [String] {
+        isFeatureEnabled(.audioMixing) ? Defaults[.mutedAudioAppBundleIDs] : []
+    }
 
     public static func isAppAudioMuted(_ bundleID: String) -> Bool {
         let trimmed = bundleID.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -597,12 +655,16 @@ public enum AppSettings {
         return encoded
     }
 
-    public static var longBufferEnabled: Bool { Defaults[.longBufferEnabled] }
+    public static var longBufferEnabled: Bool {
+        isFeatureEnabled(.extendedReplay) && Defaults[.longBufferEnabled]
+    }
     public static var longBufferDurationMinutes: Int { Defaults[.longBufferDurationMinutes] }
     public static var longBufferDurationSeconds: Int {
         LongBufferDuration(rawValue: longBufferDurationMinutes)?.seconds ?? LongBufferDuration.fiveMinutes.seconds
     }
-    public static var companionServerEnabled: Bool { Defaults[.companionServerEnabled] }
+    public static var companionServerEnabled: Bool {
+        isFeatureEnabled(.companion) && Defaults[.companionServerEnabled]
+    }
     public static var companionServerPort: Int { Defaults[.companionServerPort] }
     public static var companionCustomServerName: String { Defaults[.companionCustomServerName] }
 
@@ -749,6 +811,8 @@ public extension Defaults.Keys {
     static let companionCustomServerName = Key<String>("companionCustomServerName", default: "")
 
     static let hasCompletedOnboarding = Key<Bool>("hasCompletedOnboarding", default: false)
+    static let enabledFeatureModules = Key<Set<FeatureModule>>("enabledFeatureModules", default: ExperiencePreset.full.modules)
+    static let didInitializeExperiencePreset = Key<Bool>("didInitializeExperiencePreset", default: false)
 
     static let themeColorScheme = Key<ThemeColorScheme>("themeColorScheme", default: .system)
     static let themeAtmosphere = Key<ThemeAtmosphere>("themeAtmosphere", default: .native)

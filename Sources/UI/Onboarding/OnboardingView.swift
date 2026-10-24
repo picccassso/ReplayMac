@@ -14,6 +14,7 @@ import ServiceManagement
 public struct OnboardingView: View {
     private enum Step: Int, CaseIterable {
         case welcome
+        case experience
         case storage
         case capture
         case hotkeys
@@ -32,6 +33,7 @@ public struct OnboardingView: View {
     @State private var step: Step = .welcome
     @State private var launchAtLoginError: String?
     @State private var hasSelectedOutputDirectory = false
+    @State private var isPresentingCustomiser = false
 
     private let onFinish: () -> Void
 
@@ -63,6 +65,8 @@ public struct OnboardingView: View {
         switch step {
         case .welcome:
             welcomeStep
+        case .experience:
+            experienceStep
         case .storage:
             storageStep
         case .capture:
@@ -106,6 +110,19 @@ public struct OnboardingView: View {
                 )
             }
             .padding(.top, 8)
+        }
+    }
+
+    private var experienceStep: some View {
+        stepLayout(
+            icon: "slider.horizontal.2.square",
+            title: "Choose your experience",
+            subtitle: "Start simple with just basic clipping, or turn on extra tools. You can change or customise this any time."
+        ) {
+            ExperiencePresetCardsView(isPresentingCustomiser: $isPresentingCustomiser, showsHeader: false)
+                .sheet(isPresented: $isPresentingCustomiser) {
+                    FeatureCustomiserSheet()
+                }
         }
     }
 

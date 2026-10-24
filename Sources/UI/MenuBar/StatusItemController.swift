@@ -306,6 +306,7 @@ public final class StatusItemController: NSObject, NSMenuDelegate {
 
         toggleSessionRecordingItem?.title = ReplayControlLabels.session(isRecording: state.isSessionRecording).title
         toggleSessionRecordingItem?.isEnabled = !state.isSaveInProgress
+        toggleSessionRecordingItem?.isHidden = !AppSettings.isFeatureEnabled(.sessionRecording) && !state.isSessionRecording
 
         toggleRecordingItem?.title = ReplayControlLabels.replayBuffer(isRecording: state.isRecording).title
 
@@ -321,7 +322,10 @@ public final class StatusItemController: NSObject, NSMenuDelegate {
         toggleSystemAudioMuteItem?.image = NSImage(systemSymbolName: systemAudio.symbol,
                                                    accessibilityDescription: systemAudio.accessibilityDescription)
 
-        refreshMuteAppsSubmenu()
+        muteAppsItem?.isHidden = !AppSettings.isFeatureEnabled(.audioMixing)
+        if AppSettings.isFeatureEnabled(.audioMixing) {
+            refreshMuteAppsSubmenu()
+        }
 
         // Drop the reference if the clip has since been moved, renamed, or deleted.
         if let url = lastClipURL, !FileManager.default.fileExists(atPath: url.path) {

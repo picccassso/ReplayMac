@@ -3,8 +3,7 @@
 
 # Swift Package Manager build artifacts
 .build/
-.build-user/
-.build-uid-*/
+.build-*/
 .swiftpm/
 
 # Xcode user/build files
@@ -30,6 +29,7 @@ scripts/*
 
 # Local agent and editor workspaces
 .agents/
+.claude/
 .obsidian/
 
 # App Store screenshots (local only)

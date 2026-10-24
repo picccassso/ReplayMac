@@ -33,6 +33,9 @@ public struct MainWindowView: View {
                 .toolbar { detailToolbar }
         }
         .themedWindowRoot()
+        .sheet(isPresented: $state.isPresentingFeatureCustomiser) {
+            FeatureCustomiserSheet()
+        }
     }
 
     // MARK: Sidebar
@@ -71,13 +74,14 @@ public struct MainWindowView: View {
                 .padding(.top, 24)
                 .padding(.bottom, 8)
                 .accessibilityAddTraits(.isHeader)
-            ForEach(MainWindowPage.allCases.filter { $0 != .home && $0 != .library }) { page in
+            ForEach(state.visibleSettingsPages) { page in
                 let isCompanionConnected = page == .companion && companionServer.connectedClientsCount > 0
                 sidebarRow(page.title, icon: page.icon,
                            isIndicatorActive: isCompanionConnected,
                            isSelected: state.page == page) { state.select(page) }
             }
             Spacer(minLength: 0)
+            sidebarFooter
         }
         .padding(.horizontal, 10)
         .frame(maxWidth: .infinity, alignment: .leading)
@@ -98,6 +102,48 @@ public struct MainWindowView: View {
                 ? .clear
                 : AppTheme.backgroundPrimary.opacity(0.45)
         }
+    }
+
+    private var sidebarFooter: some View {
+        Button {
+            state.isPresentingFeatureCustomiser = true
+        } label: {
+            HStack(spacing: 8) {
+                Image(systemName: AppSettings.experiencePreset.icon)
+                    .font(.system(size: 13, weight: .semibold))
+                    .foregroundStyle(AppTheme.accent)
+                    .frame(width: 18)
+
+                VStack(alignment: .leading, spacing: 1) {
+                    Text("\(AppSettings.experiencePreset.title) Mode")
+                        .font(.system(size: 11, weight: .semibold, design: .rounded))
+                        .foregroundStyle(AppTheme.textPrimary)
+                    Text("Customise…")
+                        .font(.system(size: 9, design: .rounded))
+                        .foregroundStyle(.secondary)
+                }
+
+                Spacer(minLength: 0)
+
+                Image(systemName: "chevron.up.chevron.down")
+                    .font(.system(size: 9, weight: .semibold))
+                    .foregroundStyle(.secondary)
+            }
+            .padding(.horizontal, 10)
+            .padding(.vertical, 7)
+            .background(
+                RoundedRectangle(cornerRadius: 8, style: .continuous)
+                    .fill(AppTheme.accent.opacity(0.08))
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: 8, style: .continuous)
+                    .stroke(AppTheme.accent.opacity(0.18), lineWidth: 0.5)
+            )
+        }
+        .buttonStyle(.plain)
+        .padding(.bottom, 12)
+        .help("Choose experience preset or customise feature modules")
+        .accessibilityLabel("App experience: \(AppSettings.experiencePreset.title) Mode, click to customise")
     }
 
     private func sidebarRow(_ title: String, detail: String? = nil, icon: String,
@@ -159,6 +205,7 @@ public struct MainWindowView: View {
             }
             if state.hasVisitedSettings {
                 SettingsView(selectedTab: $state.settingsTab,
+                             isPresentingCustomiser: $state.isPresentingFeatureCustomiser,
                              isVisible: state.isSettingsPage && state.isWindowVisible)
                     .opacity(state.isSettingsPage ? 1 : 0)
                     .allowsHitTesting(state.isSettingsPage)

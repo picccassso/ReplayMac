@@ -5,19 +5,19 @@ import SwiftUI
 
 public enum AppTheme {
     public static var colorScheme: ThemeColorScheme {
-        Defaults[.themeColorScheme]
+        AppSettings.isFeatureEnabled(.appearance) ? Defaults[.themeColorScheme] : .system
     }
 
     public static var atmosphere: ThemeAtmosphere {
-        Defaults[.themeAtmosphere]
+        AppSettings.isFeatureEnabled(.appearance) ? Defaults[.themeAtmosphere] : .native
     }
 
     public static var accentMode: ThemeAccentMode {
-        Defaults[.themeAccentMode]
+        AppSettings.isFeatureEnabled(.appearance) ? Defaults[.themeAccentMode] : .atmosphere
     }
 
     public static var surfaceStyle: ThemeSurfaceStyle {
-        Defaults[.themeSurfaceStyle]
+        AppSettings.isFeatureEnabled(.appearance) ? Defaults[.themeSurfaceStyle] : .glass
     }
 
     public static var useDualToneAccent: Bool {
@@ -219,6 +219,9 @@ public final class ThemeController: ObservableObject {
                 Task { @MainActor in self?.handleThemeChanged() }
             },
             Defaults.observe(.themeSurfaceStyle, options: []) { [weak self] _ in
+                Task { @MainActor in self?.handleThemeChanged() }
+            },
+            Defaults.observe(.enabledFeatureModules, options: []) { [weak self] _ in
                 Task { @MainActor in self?.handleThemeChanged() }
             }
         ]

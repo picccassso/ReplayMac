@@ -78,12 +78,18 @@ public struct SettingsView: View {
     @State var bitrateSliderValue = Defaults[.bitrateMbps]
     @State var bitrateSliderIsEditing = false
     @State var isApplyingQualityPreset = false
+    @Binding var isPresentingCustomiser: Bool
     @State private var pageWidth: CGFloat = 0
     @Binding var selectedTab: SettingsTab
     var isVisible: Bool
 
-    public init(selectedTab: Binding<SettingsTab>, isVisible: Bool = true) {
+    public init(
+        selectedTab: Binding<SettingsTab>,
+        isPresentingCustomiser: Binding<Bool> = .constant(false),
+        isVisible: Bool = true
+    ) {
         self._selectedTab = selectedTab
+        self._isPresentingCustomiser = isPresentingCustomiser
         self.isVisible = isVisible
     }
 

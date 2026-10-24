@@ -21,6 +21,21 @@ public enum OnboardingState {
         guard let bundleIdentifier else { return }
 
         let domain = defaults.persistentDomain(forName: bundleIdentifier) ?? [:]
+
+        if domain["didInitializeExperiencePreset"] == nil {
+            let isExisting = (domain[completionKey] as? Bool == true)
+                || shouldTreatAsExistingInstallation(
+                    hasLegacyPreferences: containsLegacyPreference(in: Set(domain.keys)),
+                    hasSavedClips: fileManager.fileExists(atPath: outputDirectory.path(percentEncoded: false))
+                )
+            if isExisting {
+                defaults.set(Array(ExperiencePreset.full.modules.map(\.rawValue)), forKey: "enabledFeatureModules")
+            } else {
+                defaults.set(Array(ExperiencePreset.simple.modules.map(\.rawValue)), forKey: "enabledFeatureModules")
+            }
+            defaults.set(true, forKey: "didInitializeExperiencePreset")
+        }
+
         guard domain[completionKey] == nil else { return }
         // A fresh installation may be restarted while onboarding is still in
         // progress (for example, after changing Screen Recording permission).
@@ -54,6 +69,8 @@ public enum OnboardingState {
         keys.contains { key in
             key != "hasCompletedOnboarding"
                 && key != "didEvaluateLegacyOnboardingMigration"
+                && key != "didInitializeExperiencePreset"
+                && key != "enabledFeatureModules"
                 && !key.hasPrefix("NS")
                 && !key.hasPrefix("com_apple_")
         }

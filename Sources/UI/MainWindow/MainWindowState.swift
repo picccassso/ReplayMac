@@ -1,5 +1,6 @@
 import AppKit
 import Combine
+import Defaults
 import Save
 import SwiftUI
 
@@ -97,6 +98,7 @@ public final class MainWindowState: ObservableObject {
     @Published public var isFullScreen = false
     @Published var hasVisitedSettings: Bool
     @Published var settingsTab: SettingsTab = .general
+    @Published public var isPresentingFeatureCustomiser = false
     public let exports = ClipExportCoordinator()
     /// Capture actions for the Home page, wired by the app delegate.
     public var controls = ReplayControls()
@@ -110,6 +112,7 @@ public final class MainWindowState: ObservableObject {
     var presentEditor: ((ClipEditorSession) -> Void)?
     private let defaults: UserDefaults
     private var subscriptions = Set<AnyCancellable>()
+    private var defaultsObservations: [Defaults.Observation] = []
 
     public init(defaults: UserDefaults = .standard) {
         self.defaults = defaults
@@ -133,6 +136,34 @@ public final class MainWindowState: ObservableObject {
             guard let self else { return }
             ClipEditorWindowController.show(session: session, state: self)
         }
+        defaultsObservations.append(Defaults.observe(.enabledFeatureModules) { [weak self] _ in
+            Task { @MainActor in
+                guard let self else { return }
+                self.objectWillChange.send()
+                if self.isSettingsPage && !self.visibleSettingsPages.contains(self.page) {
+                    self.select(.general)
+                }
+            }
+        })
+    }
+
+    public var visibleSettingsPages: [MainWindowPage] {
+        var pages: [MainWindowPage] = [.general]
+        if AppSettings.isFeatureEnabled(.appearance) {
+            pages.append(.appearance)
+        }
+        pages.append(contentsOf: [.video, .audio])
+        if AppSettings.isFeatureEnabled(.captureProfiles) {
+            pages.append(.profiles)
+        }
+        pages.append(.hotkeys)
+        if AppSettings.isFeatureEnabled(.companion) {
+            pages.append(.companion)
+        }
+        if AppSettings.isFeatureEnabled(.systemAndFileTuning) {
+            pages.append(.advanced)
+        }
+        return pages
     }
 
     public var isLibraryFrontmost: Bool { page == .library }

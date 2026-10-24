@@ -20,6 +20,7 @@ struct HomeView: View {
     @Default(.captureSystemAudio) private var captureSystemAudio
     @Default(.perAppAudioEnabled) private var perAppAudioEnabled
     @Default(.mutedAudioAppBundleIDs) private var mutedAudioAppBundleIDs
+    @Default(.enabledFeatureModules) private var enabledFeatureModules
     /// Read when the page appears; returning from Hotkeys rebuilds this view.
     @State private var shortcuts: [KeyboardShortcuts.Name: String] = [:]
     /// Natural width of "Stop Buffer", so the button can grow from a circle to a pill.
@@ -92,7 +93,7 @@ struct HomeView: View {
                         bufferedSeconds: menuBar.bufferedSeconds, capSeconds: replaySeconds)
                     meter("Quick replay", available: quickAvailable, capSeconds: replaySeconds,
                           detail: "\(menuBar.formattedBufferMemory) in memory")
-                    if longBufferEnabled {
+                    if AppSettings.isFeatureEnabled(.extendedReplay) && longBufferEnabled {
                         meter("Extended replay",
                               available: min(menuBar.extendedBufferElapsedSeconds, TimeInterval(longBufferSeconds)),
                               capSeconds: longBufferSeconds, detail: "Kept on disk")
@@ -138,7 +139,7 @@ struct HomeView: View {
     }
 
     private var companionConnectionLabel: String? {
-        guard companionServer.connectedClientsCount > 0 else { return nil }
+        guard AppSettings.isFeatureEnabled(.companion), companionServer.connectedClientsCount > 0 else { return nil }
         if companionServer.connectedClientsCount == 1,
            let firstId = companionServer.connectedDeviceIds.first,
            let device = pairingManager.device(for: firstId),
@@ -324,7 +325,7 @@ struct HomeView: View {
                                                          bufferedSeconds: menuBar.bufferedSeconds,
                                                          saveInProgress: menuBar.isSaveInProgress),
              action: controls.saveReplay)
-        if longBufferEnabled {
+        if AppSettings.isFeatureEnabled(.extendedReplay) && longBufferEnabled {
             tile(ReplayControlLabels.saveExtendedReplay(seconds: longBufferSeconds), shortcut: .saveLongBuffer,
                  isEnabled: SavePreflight.canSaveLongReplay(isRecording: menuBar.isRecording,
                                                             saveInProgress: menuBar.isSaveInProgress),
@@ -332,14 +333,18 @@ struct HomeView: View {
         }
         tile(ReplayControlLabels.replayBuffer(isRecording: menuBar.isRecording), shortcut: .toggleRecording,
              action: controls.toggleBuffer)
-        tile(ReplayControlLabels.session(isRecording: menuBar.isSessionRecording), shortcut: .toggleSessionRecording,
-             isActive: menuBar.isSessionRecording, isEnabled: !menuBar.isSaveInProgress,
-             action: controls.toggleSession)
+        if AppSettings.isFeatureEnabled(.sessionRecording) || menuBar.isSessionRecording {
+            tile(ReplayControlLabels.session(isRecording: menuBar.isSessionRecording), shortcut: .toggleSessionRecording,
+                 isActive: menuBar.isSessionRecording, isEnabled: !menuBar.isSaveInProgress,
+                 action: controls.toggleSession)
+        }
         tile(ReplayControlLabels.microphone(isEnabled: captureMicrophone, isMuted: menuBar.isMicrophoneMuted),
              shortcut: .toggleMicrophoneMute, action: controls.toggleMicrophone)
         tile(ReplayControlLabels.systemAudio(isEnabled: captureSystemAudio, isMuted: menuBar.isSystemAudioMuted),
              shortcut: .toggleSystemAudioMute, action: controls.toggleSystemAudio)
-        muteAppsTile
+        if AppSettings.isFeatureEnabled(.audioMixing) {
+            muteAppsTile
+        }
     }
 
     private var muteAppsTile: some View {

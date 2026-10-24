@@ -475,4 +475,34 @@ final class MainWindowStateTests: XCTestCase {
         let stored = ClipLibraryMetadataStore.load(in: directory)
         XCTAssertEqual(stored[ClipLibraryMetadataStore.key(for: renamedURL)], updatedMetadata)
     }
+
+    @MainActor
+    func testVisibleSettingsPagesFollowPresetAndRouteFallback() {
+        let originalModules = Defaults[.enabledFeatureModules]
+        defer { Defaults[.enabledFeatureModules] = originalModules }
+
+        withState { state, _ in
+            AppSettings.applyExperiencePreset(.simple)
+            XCTAssertEqual(state.visibleSettingsPages, [.general, .appearance, .video, .audio, .hotkeys])
+
+            AppSettings.applyExperiencePreset(.balanced)
+            XCTAssertEqual(state.visibleSettingsPages, [.general, .appearance, .video, .audio, .hotkeys])
+
+            AppSettings.applyExperiencePreset(.full)
+            XCTAssertEqual(state.visibleSettingsPages, [.general, .appearance, .video, .audio, .profiles, .hotkeys, .companion, .advanced])
+
+            // If user is on an advanced page and its module is turned off, navigation gracefully routes to .general
+            state.select(.companion)
+            XCTAssertEqual(state.page, .companion)
+            AppSettings.setFeatureEnabled(.companion, false)
+
+            // Let the MainActor observation run
+            let expectation = expectation(description: "Navigation falls back to general")
+            Task { @MainActor in
+                XCTAssertEqual(state.page, .general)
+                expectation.fulfill()
+            }
+            wait(for: [expectation], timeout: 2.0)
+        }
+    }
 }

@@ -166,6 +166,34 @@ extension AppDelegate {
             self?.broadcastCompanionSnapshot()
             self?.scheduleRuntimeSettingsReconcile(needsFullRestart: true)
         })
+        settingsObservations.append(Defaults.observe(.enabledFeatureModules) { [weak self] _ in
+            guard let self else { return }
+            if AppSettings.companionServerEnabled {
+                if !self.companionServer.isRunning {
+                    do {
+                        try self.companionServer.start(port: UInt16(AppSettings.companionServerPort))
+                    } catch {
+                        runtimeSettingsLogger.error("Failed to start companion server: \(String(describing: error), privacy: .public)")
+                    }
+                }
+            } else if self.companionServer.isRunning {
+                self.companionServer.stop()
+            }
+
+            self.syncGameAutoRecordMonitoringState()
+            if !AppSettings.autoRecordGamesEnabled,
+               AppSettings.autoStartRecordingOnLaunch,
+               !self.isCaptureRunning {
+                self.startCapturePipeline(userInitiated: false)
+            }
+
+            self.applyEffectiveAudioVolumes()
+            self.syncAudioMuteStateToUI()
+            self.syncMemoryCapsToSettings()
+            self.statusItemController.refreshPresentation()
+            self.broadcastCompanionSnapshot()
+            self.scheduleRuntimeSettingsReconcile(needsFullRestart: true)
+        })
     }
 
     // MARK: - Runtime settings reconciler handlers

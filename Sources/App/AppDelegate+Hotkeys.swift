@@ -14,33 +14,42 @@ extension AppDelegate {
             self?.toggleCapturePipeline()
         }
         hotkeyManager.onSaveLast15Seconds = { [weak self] in
+            guard AppSettings.isFeatureEnabled(.quickSaveAndThumbnail) else { return }
             self?.saveClip(lastSeconds: 15)
         }
         hotkeyManager.onSaveLast60Seconds = { [weak self] in
+            guard AppSettings.isFeatureEnabled(.quickSaveAndThumbnail) else { return }
             self?.saveClip(lastSeconds: 60)
         }
         hotkeyManager.onSaveLongBuffer = { [weak self] in
+            guard AppSettings.isFeatureEnabled(.extendedReplay) else { return }
             self?.saveLongBufferFromUI()
         }
         hotkeyManager.onToggleSessionRecording = { [weak self] in
-            self?.toggleSessionRecording()
+            guard let self else { return }
+            guard AppSettings.isFeatureEnabled(.sessionRecording) || self.menuBarState.isSessionRecording else { return }
+            self.toggleSessionRecording()
         }
         hotkeyManager.onOpenClipLibrary = { [weak self] in
             self?.toggleClipLibraryWindow()
         }
         hotkeyManager.onToggleMicrophoneMute = { [weak self] in
+            guard AppSettings.isFeatureEnabled(.audioMixing) else { return }
             self?.toggleMicrophoneMuteFromUI()
         }
         hotkeyManager.onPushToMuteMicrophoneChanged = { [weak self] isPressed in
+            guard AppSettings.isFeatureEnabled(.audioMixing) else { return }
             self?.setPushToMuteMicrophone(isPressed)
         }
         hotkeyManager.onToggleSystemAudioMute = { [weak self] in
+            guard AppSettings.isFeatureEnabled(.audioMixing) else { return }
             self?.toggleSystemAudioMuteFromUI()
         }
         hotkeyManager.onCopyLastClip = { [weak self] in
             self?.copyLastClipFromUI()
         }
         hotkeyManager.onEditLastClip = { [weak self] in
+            guard AppSettings.isFeatureEnabled(.quickSaveAndThumbnail) else { return }
             self?.editLastClipFromUI()
         }
         hotkeyManager.start()

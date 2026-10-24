@@ -112,6 +112,39 @@ final class OnboardingStateTests: XCTestCase {
         XCTAssertNil(defaults.object(forKey: "hasCompletedOnboarding"))
     }
 
+    @MainActor
+    func testMigrationInitializesFullPresetForExistingInstallation() throws {
+        let (defaults, suiteName) = try makeDefaults()
+        defaults.set(true, forKey: "hasCompletedOnboarding")
+
+        OnboardingState.migrateExistingInstallationIfNeeded(
+            defaults: defaults,
+            bundleIdentifier: suiteName,
+            outputDirectory: FileManager.default.temporaryDirectory
+                .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        )
+
+        let modules = (defaults.stringArray(forKey: "enabledFeatureModules") ?? [])
+        XCTAssertEqual(Set(modules.compactMap(FeatureModule.init)), ExperiencePreset.full.modules)
+        XCTAssertEqual(defaults.bool(forKey: "didInitializeExperiencePreset"), true)
+    }
+
+    @MainActor
+    func testFreshInstallInitializesSimplePreset() throws {
+        let (defaults, suiteName) = try makeDefaults()
+
+        OnboardingState.migrateExistingInstallationIfNeeded(
+            defaults: defaults,
+            bundleIdentifier: suiteName,
+            outputDirectory: FileManager.default.temporaryDirectory
+                .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        )
+
+        let modules = (defaults.stringArray(forKey: "enabledFeatureModules") ?? [])
+        XCTAssertEqual(Set(modules.compactMap(FeatureModule.init)), ExperiencePreset.simple.modules)
+        XCTAssertEqual(defaults.bool(forKey: "didInitializeExperiencePreset"), true)
+    }
+
     private func makeDefaults() throws -> (UserDefaults, String) {
         let suiteName = "OnboardingStateTests.\(UUID().uuidString)"
         suiteNames.append(suiteName)

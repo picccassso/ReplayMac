@@ -30,132 +30,10 @@ extension SettingsView {
 
     var audioTab: some View {
         Form {
-            Section {
-                Picker("System audio", selection: systemAudioModeBinding) {
-                    ForEach(SystemAudioMode.allCases) { mode in
-                        Text(mode.title).tag(mode)
-                    }
-                }
-
-                if systemAudioModeBinding.wrappedValue == .selectedApp {
-                    if audioApplications.isEmpty {
-                        HStack {
-                            Text("Audio app")
-                            Spacer()
-                            Text("No capturable apps detected")
-                                .foregroundStyle(AppTheme.textSecondary)
-                        }
-                    } else {
-                        Picker("Audio app", selection: $perAppAudioBundleID) {
-                            ForEach(audioApplications) { app in
-                                Text(app.name).tag(app.bundleID)
-                            }
-                        }
-                    }
-
-                    Label(selectedAppAudioHelpText, systemImage: "info.circle")
-                        .foregroundStyle(AppTheme.textSecondary)
-                        .font(.system(size: 12, design: .rounded))
-                } else if systemAudioModeBinding.wrappedValue == .allApps {
-                    mutedApplicationsSubSection
-                }
-
-                Toggle("Capture microphone", isOn: $captureMicrophone)
-                Toggle("Merge audio tracks", isOn: $mergeAudioTracks)
-                Label("Combines system audio and microphone into one track for sharing. Turn off for separate tracks in editors.", systemImage: "info.circle")
-                    .foregroundStyle(AppTheme.textSecondary)
-                    .font(.system(size: 12, design: .rounded))
-                Toggle("Exclude \(AppBranding.name) audio", isOn: $excludeOwnAppAudio)
-                    .disabled(systemAudioModeBinding.wrappedValue == .off)
-            } header: {
-                Text("Sources")
-            }
-
-            Section {
-                VStack(alignment: .leading, spacing: 6) {
-                    HStack {
-                        Text("System audio volume")
-                        Spacer()
-                        Button {
-                            isSystemAudioMuted.toggle()
-                        } label: {
-                            Label(
-                                isSystemAudioMuted ? "Muted" : "Mute",
-                                systemImage: isSystemAudioMuted ? "speaker.slash.fill" : "speaker.wave.2.fill"
-                            )
-                            .font(.system(size: 11, weight: .semibold, design: .rounded))
-                            .foregroundStyle(isSystemAudioMuted ? AppTheme.danger : AppTheme.textSecondary)
-                        }
-                        .buttonStyle(.plain)
-                        .help(isSystemAudioMuted ? "Unmute system audio" : "Mute system audio")
-
-                        Text(isSystemAudioMuted ? "Muted (\(Int(systemAudioVolume * 100))%)" : "\(Int(systemAudioVolume * 100))%")
-                            .foregroundStyle(isSystemAudioMuted ? AppTheme.danger : AppTheme.accent)
-                            .fontWeight(.semibold)
-                    }
-                    Slider(value: $systemAudioVolume, in: 0...1, step: 0.05)
-                        .tint(isSystemAudioMuted ? AppTheme.danger : AppTheme.accent)
-                    LiveAudioLevelMeter(source: .systemAudio, isEnabled: captureSystemAudio && !isSystemAudioMuted)
-                }
-                .disabled(!captureSystemAudio)
-
-                VStack(alignment: .leading, spacing: 6) {
-                    HStack {
-                        Text("Microphone volume")
-                        Spacer()
-                        Button {
-                            isMicrophoneMuted.toggle()
-                        } label: {
-                            Label(
-                                isMicrophoneMuted ? "Muted" : "Mute",
-                                systemImage: isMicrophoneMuted ? "mic.slash.fill" : "mic.fill"
-                            )
-                            .font(.system(size: 11, weight: .semibold, design: .rounded))
-                            .foregroundStyle(isMicrophoneMuted ? AppTheme.danger : AppTheme.textSecondary)
-                        }
-                        .buttonStyle(.plain)
-                        .help(isMicrophoneMuted ? "Unmute microphone" : "Mute microphone")
-
-                        Text(isMicrophoneMuted ? "Muted (\(Int(microphoneVolume * 100))%)" : "\(Int(microphoneVolume * 100))%")
-                            .foregroundStyle(isMicrophoneMuted ? AppTheme.danger : AppTheme.accent)
-                            .fontWeight(.semibold)
-                    }
-                    Slider(value: $microphoneVolume, in: 0...1, step: 0.05)
-                        .tint(isMicrophoneMuted ? AppTheme.danger : AppTheme.accent)
-                    LiveAudioLevelMeter(source: .microphone, isEnabled: captureMicrophone && !isMicrophoneMuted)
-                }
-                .disabled(!captureMicrophone)
-            } header: {
-                Text("Levels")
-            }
-
-            Section {
-                if microphones.isEmpty {
-                    HStack {
-                        Text("Mic device")
-                        Spacer()
-                        Text("No microphones detected")
-                            .foregroundStyle(AppTheme.textSecondary)
-                    }
-                } else {
-                    Picker("Mic device", selection: $microphoneID) {
-                        ForEach(microphones) { microphone in
-                            Text(microphone.name).tag(microphone.id)
-                        }
-                    }
-
-                    Label("Changing mic restarts the mic track; recording continues.", systemImage: "info.circle")
-                        .foregroundStyle(AppTheme.textSecondary)
-                        .font(.system(size: 12, design: .rounded))
-                }
-            } header: {
-                Text("Microphone")
-            }
-
-            Section {
-                Label("Audio source changes apply automatically.", systemImage: "bolt.circle")
-                    .foregroundStyle(AppTheme.textSecondary)
-                    .font(.system(size: 12, design: .rounded))
+            if AppSettings.isFeatureEnabled(.audioMixing) {
+                fullAudioContent
+            } else {
+                simpleAudioContent
             }
         }
         .formStyle(.grouped)
@@ -176,6 +54,158 @@ extension SettingsView {
         .onChange(of: microphoneVolume) { _, _ in refreshAudioLevelPreview() }
         .onChange(of: isSystemAudioMuted) { _, _ in refreshAudioLevelPreview() }
         .onChange(of: isMicrophoneMuted) { _, _ in refreshAudioLevelPreview() }
+    }
+
+    @ViewBuilder
+    private var simpleAudioContent: some View {
+        Section {
+            Toggle("Record system audio", isOn: $captureSystemAudio)
+            Text("Includes game and application sound in your clips.")
+                .font(.caption)
+                .foregroundStyle(AppTheme.textSecondary)
+
+            Toggle("Capture microphone", isOn: $captureMicrophone)
+            Text("Includes your voice. macOS will ask for microphone permission when recording starts.")
+                .font(.caption)
+                .foregroundStyle(AppTheme.textSecondary)
+        } header: {
+            Text("Audio Sources")
+        } footer: {
+            Text("Volume sliders, mic device selection, and per-app audio routing can be enabled in App Experience → Customise Features.")
+                .font(.caption)
+                .foregroundStyle(AppTheme.textSecondary)
+        }
+    }
+
+    @ViewBuilder
+    private var fullAudioContent: some View {
+        Section {
+            Picker("System audio", selection: systemAudioModeBinding) {
+                ForEach(SystemAudioMode.allCases) { mode in
+                    Text(mode.title).tag(mode)
+                }
+            }
+
+            if systemAudioModeBinding.wrappedValue == .selectedApp {
+                if audioApplications.isEmpty {
+                    HStack {
+                        Text("Audio app")
+                        Spacer()
+                        Text("No capturable apps detected")
+                            .foregroundStyle(AppTheme.textSecondary)
+                    }
+                } else {
+                    Picker("Audio app", selection: $perAppAudioBundleID) {
+                        ForEach(audioApplications) { app in
+                            Text(app.name).tag(app.bundleID)
+                        }
+                    }
+                }
+
+                Label(selectedAppAudioHelpText, systemImage: "info.circle")
+                    .foregroundStyle(AppTheme.textSecondary)
+                    .font(.system(size: 12, design: .rounded))
+            } else if systemAudioModeBinding.wrappedValue == .allApps {
+                mutedApplicationsSubSection
+            }
+
+            Toggle("Capture microphone", isOn: $captureMicrophone)
+            Toggle("Merge audio tracks", isOn: $mergeAudioTracks)
+            Label("Combines system audio and microphone into one track for sharing. Turn off for separate tracks in editors.", systemImage: "info.circle")
+                .foregroundStyle(AppTheme.textSecondary)
+                .font(.system(size: 12, design: .rounded))
+            Toggle("Exclude \(AppBranding.name) audio", isOn: $excludeOwnAppAudio)
+                .disabled(systemAudioModeBinding.wrappedValue == .off)
+        } header: {
+            Text("Sources")
+        }
+
+        Section {
+            VStack(alignment: .leading, spacing: 6) {
+                HStack {
+                    Text("System audio volume")
+                    Spacer()
+                    Button {
+                        isSystemAudioMuted.toggle()
+                    } label: {
+                        Label(
+                            isSystemAudioMuted ? "Muted" : "Mute",
+                            systemImage: isSystemAudioMuted ? "speaker.slash.fill" : "speaker.wave.2.fill"
+                        )
+                        .font(.system(size: 11, weight: .semibold, design: .rounded))
+                        .foregroundStyle(isSystemAudioMuted ? AppTheme.danger : AppTheme.textSecondary)
+                    }
+                    .buttonStyle(.plain)
+                    .help(isSystemAudioMuted ? "Unmute system audio" : "Mute system audio")
+
+                    Text(isSystemAudioMuted ? "Muted (\(Int(systemAudioVolume * 100))%)" : "\(Int(systemAudioVolume * 100))%")
+                        .foregroundStyle(isSystemAudioMuted ? AppTheme.danger : AppTheme.accent)
+                        .fontWeight(.semibold)
+                }
+                Slider(value: $systemAudioVolume, in: 0...1, step: 0.05)
+                    .tint(isSystemAudioMuted ? AppTheme.danger : AppTheme.accent)
+                LiveAudioLevelMeter(source: .systemAudio, isEnabled: captureSystemAudio && !isSystemAudioMuted)
+            }
+            .disabled(!captureSystemAudio)
+
+            VStack(alignment: .leading, spacing: 6) {
+                HStack {
+                    Text("Microphone volume")
+                    Spacer()
+                    Button {
+                        isMicrophoneMuted.toggle()
+                    } label: {
+                        Label(
+                            isMicrophoneMuted ? "Muted" : "Mute",
+                            systemImage: isMicrophoneMuted ? "mic.slash.fill" : "mic.fill"
+                        )
+                        .font(.system(size: 11, weight: .semibold, design: .rounded))
+                        .foregroundStyle(isMicrophoneMuted ? AppTheme.danger : AppTheme.textSecondary)
+                    }
+                    .buttonStyle(.plain)
+                    .help(isMicrophoneMuted ? "Unmute microphone" : "Mute microphone")
+
+                    Text(isMicrophoneMuted ? "Muted (\(Int(microphoneVolume * 100))%)" : "\(Int(microphoneVolume * 100))%")
+                        .foregroundStyle(isMicrophoneMuted ? AppTheme.danger : AppTheme.accent)
+                        .fontWeight(.semibold)
+                }
+                Slider(value: $microphoneVolume, in: 0...1, step: 0.05)
+                    .tint(isMicrophoneMuted ? AppTheme.danger : AppTheme.accent)
+                LiveAudioLevelMeter(source: .microphone, isEnabled: captureMicrophone && !isMicrophoneMuted)
+            }
+            .disabled(!captureMicrophone)
+        } header: {
+            Text("Levels")
+        }
+
+        Section {
+            if microphones.isEmpty {
+                HStack {
+                    Text("Mic device")
+                    Spacer()
+                    Text("No microphones detected")
+                        .foregroundStyle(AppTheme.textSecondary)
+                }
+            } else {
+                Picker("Mic device", selection: $microphoneID) {
+                    ForEach(microphones) { microphone in
+                        Text(microphone.name).tag(microphone.id)
+                    }
+                }
+
+                Label("Changing mic restarts the mic track; recording continues.", systemImage: "info.circle")
+                    .foregroundStyle(AppTheme.textSecondary)
+                    .font(.system(size: 12, design: .rounded))
+            }
+        } header: {
+            Text("Microphone")
+        }
+
+        Section {
+            Label("Audio source changes apply automatically.", systemImage: "bolt.circle")
+                .foregroundStyle(AppTheme.textSecondary)
+                .font(.system(size: 12, design: .rounded))
+        }
     }
 
     private var mutedApplicationsSubSection: some View {

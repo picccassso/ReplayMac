@@ -18,56 +18,68 @@ extension SettingsView {
                 Text("Primary")
             }
 
-            Section {
-                KeyboardShortcuts.Recorder("Save last 15 seconds", name: .saveLast15Seconds)
-                KeyboardShortcuts.Recorder("Save last 60 seconds", name: .saveLast60Seconds)
-                KeyboardShortcuts.Recorder("Save extended replay", name: .saveLongBuffer)
-                Label(
-                    "Save extended replay saves the last 5, 10, or 30 minutes from a separate, longer buffer kept on disk. It's off by default: turn on Extended replay buffer in Settings → Video.",
-                    systemImage: "info.circle"
-                )
-                .foregroundStyle(AppTheme.textSecondary)
-                .font(.system(size: 12, design: .rounded))
-            } header: {
-                Text("Quick Presets")
+            if AppSettings.isFeatureEnabled(.quickSaveAndThumbnail) || AppSettings.isFeatureEnabled(.extendedReplay) {
+                Section {
+                    if AppSettings.isFeatureEnabled(.quickSaveAndThumbnail) {
+                        KeyboardShortcuts.Recorder("Save last 15 seconds", name: .saveLast15Seconds)
+                        KeyboardShortcuts.Recorder("Save last 60 seconds", name: .saveLast60Seconds)
+                    }
+                    if AppSettings.isFeatureEnabled(.extendedReplay) {
+                        KeyboardShortcuts.Recorder("Save extended replay", name: .saveLongBuffer)
+                        Label(
+                            "Save extended replay saves the last 5, 10, or 30 minutes from a separate, longer buffer kept on disk. Turn on Extended replay buffer in Settings → Video.",
+                            systemImage: "info.circle"
+                        )
+                        .foregroundStyle(AppTheme.textSecondary)
+                        .font(.system(size: 12, design: .rounded))
+                    }
+                } header: {
+                    Text("Quick Presets")
+                }
             }
 
-            Section {
-                KeyboardShortcuts.Recorder("Start/stop session recording", name: .toggleSessionRecording)
-                Label(
-                    "Records until you stop, then saves one file with screen, system audio, and mic. Separate from the instant-replay buffer.",
-                    systemImage: "info.circle"
-                )
-                .foregroundStyle(AppTheme.textSecondary)
-                .font(.system(size: 12, design: .rounded))
-            } header: {
-                Text("Session Recording")
+            if AppSettings.isFeatureEnabled(.sessionRecording) {
+                Section {
+                    KeyboardShortcuts.Recorder("Start/stop session recording", name: .toggleSessionRecording)
+                    Label(
+                        "Records until you stop, then saves one file with screen, system audio, and mic. Separate from the instant-replay buffer.",
+                        systemImage: "info.circle"
+                    )
+                    .foregroundStyle(AppTheme.textSecondary)
+                    .font(.system(size: 12, design: .rounded))
+                } header: {
+                    Text("Session Recording")
+                }
             }
 
-            Section {
-                KeyboardShortcuts.Recorder("Mute/unmute microphone", name: .toggleMicrophoneMute)
-                KeyboardShortcuts.Recorder("Push-to-mute microphone (hold)", name: .pushToMuteMicrophone)
-                KeyboardShortcuts.Recorder("Mute/unmute system audio", name: .toggleSystemAudioMute)
-                Label(
-                    "Silences audio live without restarting capture or clearing the replay buffer.",
-                    systemImage: "info.circle"
-                )
-                .foregroundStyle(AppTheme.textSecondary)
-                .font(.system(size: 12, design: .rounded))
-            } header: {
-                Text("Audio")
+            if AppSettings.isFeatureEnabled(.audioMixing) {
+                Section {
+                    KeyboardShortcuts.Recorder("Mute/unmute microphone", name: .toggleMicrophoneMute)
+                    KeyboardShortcuts.Recorder("Push-to-mute microphone (hold)", name: .pushToMuteMicrophone)
+                    KeyboardShortcuts.Recorder("Mute/unmute system audio", name: .toggleSystemAudioMute)
+                    Label(
+                        "Silences audio live without restarting capture or clearing the replay buffer.",
+                        systemImage: "info.circle"
+                    )
+                    .foregroundStyle(AppTheme.textSecondary)
+                    .font(.system(size: 12, design: .rounded))
+                } header: {
+                    Text("Audio")
+                }
             }
 
             Section {
                 KeyboardShortcuts.Recorder("Copy last saved clip", name: .copyLastClip)
                 KeyboardShortcuts.Recorder("Show or hide clip library", name: .openClipLibrary)
-                KeyboardShortcuts.Recorder("Edit last clip", name: .editLastClip)
-                Label(
-                    "Edit last clip shows a thumbnail of your most recent clip with Trim, Copy, and Show in Finder. It won't take focus from your game. To show it after every replay save, turn it on in Settings → Advanced.",
-                    systemImage: "info.circle"
-                )
-                .foregroundStyle(AppTheme.textSecondary)
-                .font(.system(size: 12, design: .rounded))
+                if AppSettings.isFeatureEnabled(.quickSaveAndThumbnail) {
+                    KeyboardShortcuts.Recorder("Edit last clip", name: .editLastClip)
+                    Label(
+                        "Edit last clip shows a thumbnail of your most recent clip with Trim, Copy, and Show in Finder. It won't take focus from your game. To show it after every replay save, turn it on in Settings → General.",
+                        systemImage: "info.circle"
+                    )
+                    .foregroundStyle(AppTheme.textSecondary)
+                    .font(.system(size: 12, design: .rounded))
+                }
             } header: {
                 Text("Library")
             }

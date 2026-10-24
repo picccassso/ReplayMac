@@ -29,35 +29,37 @@ extension SettingsView {
     var videoTab: some View {
         Form {
             Section {
-                Toggle("Record in HDR", isOn: $captureHDR)
-                    .disabled(!CaptureManager.supportsHDRCapture || isSideBySideCapture)
-                Text(hdrCaptureHelp)
-                    .font(.system(size: 12, design: .rounded))
-                    .foregroundStyle(AppTheme.textSecondary)
+                if AppSettings.isFeatureEnabled(.proVideo) {
+                    Toggle("Record in HDR", isOn: $captureHDR)
+                        .disabled(!CaptureManager.supportsHDRCapture || isSideBySideCapture)
+                    Text(hdrCaptureHelp)
+                        .font(.system(size: 12, design: .rounded))
+                        .foregroundStyle(AppTheme.textSecondary)
 
-                Picker("Codec", selection: Binding(
-                    get: { hdrCaptureEnabled ? VideoCodec.hevc.rawValue : videoCodecRawValue },
-                    set: { videoCodecRawValue = $0 }
-                )) {
-                    ForEach(VideoCodec.allCases) { codec in
-                        Text(codec.title).tag(codec.rawValue)
+                    Picker("Codec", selection: Binding(
+                        get: { hdrCaptureEnabled ? VideoCodec.hevc.rawValue : videoCodecRawValue },
+                        set: { videoCodecRawValue = $0 }
+                    )) {
+                        ForEach(VideoCodec.allCases) { codec in
+                            Text(codec.title).tag(codec.rawValue)
+                        }
                     }
-                }
-                .disabled(hdrCaptureEnabled)
+                    .disabled(hdrCaptureEnabled)
 
-                Picker("Capture mode", selection: $captureModeRawValue) {
-                    ForEach(CaptureMode.allCases) { mode in
-                        Text(mode.title).tag(mode.rawValue)
+                    Picker("Capture mode", selection: $captureModeRawValue) {
+                        ForEach(CaptureMode.allCases) { mode in
+                            Text(mode.title).tag(mode.rawValue)
+                        }
                     }
-                }
 
-                if captureModeRawValue == CaptureMode.dualSideBySide.rawValue {
-                    Label(
-                        "Recording two displays captures and encodes twice the pixels, and the replay buffers split the memory cap between them, so each display keeps less footage.",
-                        systemImage: "gauge.with.dots.needle.67percent"
-                    )
-                    .foregroundStyle(AppTheme.textSecondary)
-                    .font(.system(size: 12, design: .rounded))
+                    if captureModeRawValue == CaptureMode.dualSideBySide.rawValue {
+                        Label(
+                            "Recording two displays captures and encodes twice the pixels, and the replay buffers split the memory cap between them, so each display keeps less footage.",
+                            systemImage: "gauge.with.dots.needle.67percent"
+                        )
+                        .foregroundStyle(AppTheme.textSecondary)
+                        .font(.system(size: 12, design: .rounded))
+                    }
                 }
 
                 if displays.isEmpty {
@@ -67,7 +69,7 @@ extension SettingsView {
                         Text(displayLoadError ?? "No displays available yet")
                             .foregroundStyle(AppTheme.textSecondary)
                     }
-                } else if captureModeRawValue == CaptureMode.dualSideBySide.rawValue {
+                } else if AppSettings.isFeatureEnabled(.proVideo) && captureModeRawValue == CaptureMode.dualSideBySide.rawValue {
                     Picker("Display 1", selection: $captureDisplayID) {
                         ForEach(displays) { display in
                             Text(display.name).tag(display.id)
@@ -136,7 +138,7 @@ extension SettingsView {
                 .foregroundStyle(AppTheme.textSecondary)
                 .font(.system(size: 12, design: .rounded))
 
-                if captureResolutionRawValue == CaptureResolution.custom.rawValue {
+                if AppSettings.isFeatureEnabled(.proVideo) && captureResolutionRawValue == CaptureResolution.custom.rawValue {
                     Stepper(value: $customCaptureWidth, in: 640...7680, step: 16) {
                         Text("Custom width: \(customCaptureWidth)")
                     }
@@ -163,28 +165,30 @@ extension SettingsView {
                         .font(.system(size: 12, design: .rounded))
                 }
 
-                VStack(alignment: .leading, spacing: 6) {
-                    HStack {
-                        Text("Bitrate")
-                        Spacer()
-                        Text(bitrateValueLabel)
-                            .foregroundStyle(AppTheme.accent)
-                            .fontWeight(.semibold)
+                if AppSettings.isFeatureEnabled(.proVideo) {
+                    VStack(alignment: .leading, spacing: 6) {
+                        HStack {
+                            Text("Bitrate")
+                            Spacer()
+                            Text(bitrateValueLabel)
+                                .foregroundStyle(AppTheme.accent)
+                                .fontWeight(.semibold)
+                        }
+                        Slider(
+                            value: $bitrateSliderValue,
+                            in: 10...50,
+                            step: 1,
+                            onEditingChanged: handleBitrateSliderEditingChanged
+                        )
+                            .tint(AppTheme.accent)
+                        HStack(spacing: 8) {
+                            Label(bitrateScopeLabel, systemImage: "info.circle")
+                            Spacer()
+                            Text(recommendedBitrateLabel)
+                        }
+                        .foregroundStyle(AppTheme.textSecondary)
+                        .font(.system(size: 12, design: .rounded))
                     }
-                    Slider(
-                        value: $bitrateSliderValue,
-                        in: 10...50,
-                        step: 1,
-                        onEditingChanged: handleBitrateSliderEditingChanged
-                    )
-                        .tint(AppTheme.accent)
-                    HStack(spacing: 8) {
-                        Label(bitrateScopeLabel, systemImage: "info.circle")
-                        Spacer()
-                        Text(recommendedBitrateLabel)
-                    }
-                    .foregroundStyle(AppTheme.textSecondary)
-                    .font(.system(size: 12, design: .rounded))
                 }
 
                 Picker("Quality preset", selection: $qualityPresetRawValue) {
@@ -202,39 +206,43 @@ extension SettingsView {
                     .font(.system(size: 12, design: .rounded))
             }
 
-            Section {
-                Toggle("Extended replay buffer", isOn: longBufferToggleBinding)
+            if AppSettings.isFeatureEnabled(.extendedReplay) {
+                Section {
+                    Toggle("Extended replay buffer", isOn: longBufferToggleBinding)
 
-                Picker("Long buffer duration", selection: $longBufferDurationMinutes) {
-                    ForEach(LongBufferDuration.allCases) { duration in
-                        Text(duration.title).tag(duration.rawValue)
+                    Picker("Long buffer duration", selection: $longBufferDurationMinutes) {
+                        ForEach(LongBufferDuration.allCases) { duration in
+                            Text(duration.title).tag(duration.rawValue)
+                        }
                     }
-                }
-                .disabled(!longBufferEnabled)
+                    .disabled(!longBufferEnabled)
 
-                Label(
-                    "A second buffer, separate from the normal replay buffer that Save clip uses. To save this longer window, use the Save extended replay hotkey or its Save Last item in the menu bar.",
-                    systemImage: "info.circle"
-                )
-                .foregroundStyle(AppTheme.textSecondary)
-                .font(.system(size: 12, design: .rounded))
-
-                Label(longBufferWarningText, systemImage: "externaldrive.badge.timemachine")
-                    .foregroundStyle(longBufferEnabled ? .orange : AppTheme.textSecondary)
+                    Label(
+                        "A second buffer, separate from the normal replay buffer that Save clip uses. To save this longer window, use the Save extended replay hotkey or its Save Last item in the menu bar.",
+                        systemImage: "info.circle"
+                    )
+                    .foregroundStyle(AppTheme.textSecondary)
                     .font(.system(size: 12, design: .rounded))
-            } header: {
-                Text("Long Buffer")
+
+                    Label(longBufferWarningText, systemImage: "externaldrive.badge.timemachine")
+                        .foregroundStyle(longBufferEnabled ? .orange : AppTheme.textSecondary)
+                        .font(.system(size: 12, design: .rounded))
+                } header: {
+                    Text("Long Buffer")
+                }
             }
 
-            Section {
-                Label(
-                    "Session recording is always available from the menu bar (Start Session Recording) or a hotkey in Settings → Hotkeys. It records until you stop, then saves one MP4 with screen, system audio, and microphone — no rolling buffer cutoff.",
-                    systemImage: "record.circle"
-                )
-                .foregroundStyle(AppTheme.textSecondary)
-                .font(.system(size: 12, design: .rounded))
-            } header: {
-                Text("Session Recording")
+            if AppSettings.isFeatureEnabled(.sessionRecording) {
+                Section {
+                    Label(
+                        "Session recording is always available from the menu bar (Start Session Recording) or a hotkey in Settings → Hotkeys. It records until you stop, then saves one MP4 with screen, system audio, and microphone — no rolling buffer cutoff.",
+                        systemImage: "record.circle"
+                    )
+                    .foregroundStyle(AppTheme.textSecondary)
+                    .font(.system(size: 12, design: .rounded))
+                } header: {
+                    Text("Session Recording")
+                }
             }
         }
         .formStyle(.grouped)

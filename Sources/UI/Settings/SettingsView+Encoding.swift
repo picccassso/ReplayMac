@@ -112,7 +112,8 @@ extension SettingsView {
 
     var captureResolutionOptions: [CaptureResolution] {
         CaptureResolution.allCases.filter { resolution in
-            resolution != .retina || isRetinaResolutionAvailable
+            (resolution != .retina || isRetinaResolutionAvailable)
+                && (AppSettings.isFeatureEnabled(.proVideo) || resolution != .custom)
         }
     }
 
