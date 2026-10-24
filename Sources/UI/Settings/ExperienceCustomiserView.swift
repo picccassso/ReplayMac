@@ -215,6 +215,9 @@ public struct FeatureCustomiserSheet: View {
                         RoundedRectangle(cornerRadius: 6, style: .continuous)
                             .stroke(isCurrent ? AppTheme.accent.opacity(0.35) : Color.clear, lineWidth: 1)
                     )
+                    // Unselected segments have a clear background, which a plain
+                    // button ignores for clicks; make the whole segment clickable.
+                    .contentShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
                 }
                 .buttonStyle(.plain)
             }
