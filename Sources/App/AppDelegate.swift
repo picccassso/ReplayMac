@@ -220,7 +220,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         clipThumbnailController.onTrim = { [weak self] url in
             self?.openClipEditor(url)
         }
-        Task {
+        Task { [weak self, captureManager] in
             await captureManager.activateDelegateCallbacks()
             await captureManager.setInterruptionHandler { [weak self] interruption in
                 Task { @MainActor in
