@@ -245,6 +245,7 @@ public struct FeatureCustomiserSheet: View {
                         }
                     }
                 }
+                .frame(maxWidth: .infinity)
                 .background(AppTheme.backgroundSecondary)
                 .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
                 .overlay(
@@ -258,36 +259,40 @@ public struct FeatureCustomiserSheet: View {
     private func moduleRow(_ module: FeatureModule) -> some View {
         let isEnabled = enabledFeatureModules.contains(module)
 
-        return Toggle(isOn: Binding(
-            get: { isEnabled },
-            set: { newValue in
-                withAnimation(.easeInOut(duration: 0.15)) {
-                    AppSettings.setFeatureEnabled(module, newValue)
-                }
-            }
-        )) {
-            HStack(spacing: 11) {
-                Image(systemName: module.icon)
-                    .font(.system(size: 14, weight: .medium))
-                    .foregroundStyle(isEnabled ? AppTheme.accent : AppTheme.textSecondary)
-                    .frame(width: 20, height: 20)
+        // Icon, text and switch sit in fixed columns: the text takes the
+        // remaining width so every row spans the card and the switches line up.
+        return HStack(spacing: 11) {
+            Image(systemName: module.icon)
+                .font(.system(size: 14, weight: .medium))
+                .foregroundStyle(isEnabled ? AppTheme.accent : AppTheme.textSecondary)
+                .frame(width: 20, height: 20)
 
-                VStack(alignment: .leading, spacing: 1) {
-                    Text(module.title)
-                        .font(.system(size: 12.5, weight: .semibold, design: .rounded))
-                        .foregroundStyle(AppTheme.textPrimary)
+            VStack(alignment: .leading, spacing: 1) {
+                Text(module.title)
+                    .font(.system(size: 12.5, weight: .semibold, design: .rounded))
+                    .foregroundStyle(AppTheme.textPrimary)
 
-                    Text(module.detail)
-                        .font(.system(size: 10.5, design: .rounded))
-                        .foregroundStyle(AppTheme.textSecondary)
-                        .lineLimit(2)
-                        .fixedSize(horizontal: false, vertical: true)
-                }
+                Text(module.detail)
+                    .font(.system(size: 10.5, design: .rounded))
+                    .foregroundStyle(AppTheme.textSecondary)
+                    .lineLimit(2)
+                    .fixedSize(horizontal: false, vertical: true)
             }
-            .padding(.vertical, 7)
+            .frame(maxWidth: .infinity, alignment: .leading)
+
+            Toggle(module.title, isOn: Binding(
+                get: { isEnabled },
+                set: { newValue in
+                    withAnimation(.easeInOut(duration: 0.15)) {
+                        AppSettings.setFeatureEnabled(module, newValue)
+                    }
+                }
+            ))
+            .labelsHidden()
+            .toggleStyle(.switch)
+            .controlSize(.regular)
         }
-        .toggleStyle(.switch)
-        .controlSize(.regular)
+        .padding(.vertical, 7)
         .padding(.horizontal, 12)
     }
 
