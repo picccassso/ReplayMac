@@ -130,6 +130,7 @@ public struct ExperiencePresetCardsView: View {
 public struct FeatureCustomiserSheet: View {
     @Environment(\.dismiss) private var dismiss
     @Default(.enabledFeatureModules) private var enabledFeatureModules
+    @State private var selectedCategory: FeatureCategory = .video
 
     public init() {}
 
@@ -140,47 +141,48 @@ public struct FeatureCustomiserSheet: View {
     public var body: some View {
         VStack(spacing: 0) {
             header
-                .padding(.horizontal, 22)
-                .padding(.top, 18)
-                .padding(.bottom, 12)
+                .padding(.horizontal, 28)
+                .padding(.top, 22)
+                .padding(.bottom, 14)
 
             presetQuickPicker
-                .padding(.horizontal, 22)
-                .padding(.bottom, 12)
+                .padding(.horizontal, 28)
+                .padding(.bottom, 18)
 
             Divider()
 
-            ScrollView {
-                VStack(alignment: .leading, spacing: 14) {
-                    ForEach(FeatureCategory.allCases) { category in
-                        categorySection(category)
-                    }
-                }
-                .padding(.horizontal, 22)
-                .padding(.vertical, 16)
+            HStack(alignment: .top, spacing: 0) {
+                categorySidebar
+                    .frame(width: 290, height: 340, alignment: .top)
+                    .background(AppTheme.backgroundSecondary.opacity(0.45))
+
+                Divider()
+                    .frame(height: 340)
+
+                categoryDetailPane(selectedCategory)
+                    .frame(maxWidth: .infinity, minHeight: 340, alignment: .topLeading)
             }
-            .defaultScrollAnchor(.top)
 
             Divider()
 
             footer
-                .padding(.horizontal, 22)
-                .padding(.vertical, 12)
+                .padding(.horizontal, 28)
+                .padding(.vertical, 16)
                 .background(AppTheme.backgroundSecondary)
         }
-        .frame(width: 560, height: 620)
+        .frame(width: 780)
+        .fixedSize(horizontal: false, vertical: true)
         .background(AppTheme.backgroundPrimary)
-        .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
         .themedWindowRoot()
     }
 
     private var header: some View {
         HStack(alignment: .top) {
-            VStack(alignment: .leading, spacing: 3) {
+            VStack(alignment: .leading, spacing: 4) {
                 Text("Customise Features")
-                    .font(.system(size: 18, weight: .bold, design: .rounded))
+                    .font(.system(size: 19, weight: .bold, design: .rounded))
                 Text("Tailor ReplayMac to your workflow. Changes apply instantly without losing saved configurations.")
-                    .font(.system(size: 12, design: .rounded))
+                    .font(.system(size: 12.5, design: .rounded))
                     .foregroundStyle(AppTheme.textSecondary)
                     .fixedSize(horizontal: false, vertical: true)
             }
@@ -189,7 +191,7 @@ public struct FeatureCustomiserSheet: View {
     }
 
     private var presetQuickPicker: some View {
-        HStack(spacing: 0) {
+        HStack(spacing: 4) {
             ForEach(ExperiencePreset.selectablePresets) { preset in
                 let isCurrent = activePreset == preset
                 Button {
@@ -199,84 +201,150 @@ public struct FeatureCustomiserSheet: View {
                 } label: {
                     HStack(spacing: 6) {
                         Image(systemName: preset.icon)
-                            .font(.system(size: 11, weight: .semibold))
+                            .font(.system(size: 12, weight: .semibold))
                         Text(preset.title)
-                            .font(.system(size: 12, weight: isCurrent ? .semibold : .medium, design: .rounded))
+                            .font(.system(size: 12.5, weight: isCurrent ? .semibold : .medium, design: .rounded))
                     }
                     .frame(maxWidth: .infinity)
-                    .padding(.vertical, 6)
+                    .padding(.vertical, 8)
                     .background(
                         isCurrent
-                            ? RoundedRectangle(cornerRadius: 6, style: .continuous).fill(AppTheme.accent.opacity(0.18))
-                            : RoundedRectangle(cornerRadius: 6, style: .continuous).fill(Color.clear)
+                            ? RoundedRectangle(cornerRadius: 7, style: .continuous).fill(AppTheme.accent.opacity(0.18))
+                            : RoundedRectangle(cornerRadius: 7, style: .continuous).fill(Color.clear)
                     )
                     .foregroundStyle(isCurrent ? AppTheme.accent : AppTheme.textSecondary)
                     .overlay(
-                        RoundedRectangle(cornerRadius: 6, style: .continuous)
+                        RoundedRectangle(cornerRadius: 7, style: .continuous)
                             .stroke(isCurrent ? AppTheme.accent.opacity(0.35) : Color.clear, lineWidth: 1)
                     )
                     // Unselected segments have a clear background, which a plain
                     // button ignores for clicks; make the whole segment clickable.
-                    .contentShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
+                    .contentShape(RoundedRectangle(cornerRadius: 7, style: .continuous))
                 }
                 .buttonStyle(.plain)
             }
         }
-        .padding(3)
+        .padding(4)
         .background(AppTheme.backgroundSecondary)
-        .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+        .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
     }
 
-    private func categorySection(_ category: FeatureCategory) -> some View {
-        let modules = FeatureModule.allCases.filter { $0.category == category }
-        guard !modules.isEmpty else { return AnyView(EmptyView()) }
-
-        return AnyView(
-            VStack(alignment: .leading, spacing: 6) {
-                Text(category.title)
-                    .font(.system(size: 11, weight: .semibold, design: .rounded))
-                    .foregroundStyle(AppTheme.textSecondary)
-                    .padding(.leading, 2)
-
-                VStack(spacing: 0) {
-                    ForEach(Array(modules.enumerated()), id: \.element.id) { index, module in
-                        moduleRow(module)
-
-                        if index < modules.count - 1 {
-                            Divider()
-                                .padding(.leading, 42)
-                        }
-                    }
-                }
-                .frame(maxWidth: .infinity)
-                .background(AppTheme.backgroundSecondary)
-                .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
-                .overlay(
-                    RoundedRectangle(cornerRadius: 10, style: .continuous)
-                        .stroke(Color.secondary.opacity(0.12), lineWidth: 1)
-                )
+    private var categorySidebar: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            ForEach(FeatureCategory.allCases) { category in
+                categorySidebarRow(category)
             }
-        )
+            Spacer(minLength: 0)
+        }
+        .padding(14)
+    }
+
+    private func categorySidebarRow(_ category: FeatureCategory) -> some View {
+        let isSelected = selectedCategory == category
+        let modules = FeatureModule.allCases.filter { $0.category == category }
+        let enabledCount = modules.filter { enabledFeatureModules.contains($0) }.count
+
+        return Button {
+            withAnimation(.easeInOut(duration: 0.14)) {
+                selectedCategory = category
+            }
+        } label: {
+            HStack(spacing: 10) {
+                Image(systemName: category.icon)
+                    .font(.system(size: 13, weight: isSelected ? .semibold : .medium))
+                    .foregroundStyle(isSelected ? AppTheme.accent : AppTheme.textSecondary)
+                    .frame(width: 18)
+
+                Text(category.title)
+                    .font(.system(size: 12.5, weight: isSelected ? .semibold : .medium, design: .rounded))
+                    .foregroundStyle(isSelected ? AppTheme.textPrimary : AppTheme.textSecondary)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.85)
+
+                Spacer(minLength: 8)
+
+                // Badge keeps its natural size so a long category name can never
+                // squeeze it into a vertical stack of characters.
+                Text("\(enabledCount)/\(modules.count)")
+                    .font(.system(size: 10.5, weight: .semibold, design: .rounded))
+                    .monospacedDigit()
+                    .lineLimit(1)
+                    .frame(minWidth: 22)
+                    .padding(.horizontal, 7)
+                    .padding(.vertical, 2.5)
+                    .background(
+                        Capsule()
+                            .fill(enabledCount > 0 ? AppTheme.accent.opacity(0.16) : Color.primary.opacity(0.06))
+                    )
+                    .foregroundStyle(enabledCount > 0 ? AppTheme.accent : AppTheme.textSecondary.opacity(0.75))
+                    .fixedSize()
+            }
+            .padding(.horizontal, 12)
+            .padding(.vertical, 10)
+            .background(
+                RoundedRectangle(cornerRadius: 8, style: .continuous)
+                    .fill(isSelected ? AppTheme.accent.opacity(0.14) : Color.clear)
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: 8, style: .continuous)
+                    .stroke(isSelected ? AppTheme.accent.opacity(0.32) : Color.clear, lineWidth: 1)
+            )
+            .contentShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+        }
+        .buttonStyle(.plain)
+    }
+
+    private func categoryDetailPane(_ category: FeatureCategory) -> some View {
+        let modules = FeatureModule.allCases.filter { $0.category == category }
+
+        return VStack(alignment: .leading, spacing: 18) {
+            VStack(alignment: .leading, spacing: 4) {
+                Text(category.title)
+                    .font(.system(size: 16, weight: .bold, design: .rounded))
+                    .foregroundStyle(AppTheme.textPrimary)
+
+                Text(category.subtitle)
+                    .font(.system(size: 12.5, design: .rounded))
+                    .foregroundStyle(AppTheme.textSecondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+
+            VStack(spacing: 12) {
+                ForEach(modules) { module in
+                    moduleRow(module)
+                }
+            }
+            .frame(maxWidth: .infinity)
+
+            Spacer(minLength: 0)
+        }
+        .padding(.horizontal, 26)
+        .padding(.vertical, 22)
     }
 
     private func moduleRow(_ module: FeatureModule) -> some View {
         let isEnabled = enabledFeatureModules.contains(module)
 
-        // Icon, text and switch sit in fixed columns: the text takes the
-        // remaining width so every row spans the card and the switches line up.
-        return HStack(spacing: 11) {
-            Image(systemName: module.icon)
-                .font(.system(size: 14, weight: .medium))
-                .foregroundStyle(isEnabled ? AppTheme.accent : AppTheme.textSecondary)
-                .frame(width: 20, height: 20)
+        // Icon badge, text and switch sit in fixed columns inside a standalone
+        // interactive card so each item has clear visual boundaries and breathing room.
+        return HStack(spacing: 14) {
+            ZStack {
+                RoundedRectangle(cornerRadius: 8, style: .continuous)
+                    .fill(isEnabled ? AppTheme.accent.opacity(0.15) : Color.primary.opacity(0.05))
+                    .frame(width: 36, height: 36)
 
-            VStack(alignment: .leading, spacing: 1) {
+                Image(systemName: module.icon)
+                    .font(.system(size: 15, weight: .medium))
+                    .foregroundStyle(isEnabled ? AppTheme.accent : AppTheme.textSecondary)
+            }
+
+            VStack(alignment: .leading, spacing: 3) {
                 Text(module.title)
-                    .font(.system(size: 12.5, weight: .semibold, design: .rounded))
+                    .font(.system(size: 13.5, weight: .semibold, design: .rounded))
                     .foregroundStyle(AppTheme.textPrimary)
 
                 Text(module.detail)
-                    .font(.system(size: 10.5, design: .rounded))
+                    .font(.system(size: 11.5, design: .rounded))
                     .foregroundStyle(AppTheme.textSecondary)
                     .lineLimit(2)
                     .fixedSize(horizontal: false, vertical: true)
@@ -295,8 +363,23 @@ public struct FeatureCustomiserSheet: View {
             .toggleStyle(.switch)
             .controlSize(.regular)
         }
-        .padding(.vertical, 7)
-        .padding(.horizontal, 12)
+        .padding(.vertical, 12)
+        .padding(.horizontal, 14)
+        .background(AppTheme.backgroundSecondary)
+        .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: 10, style: .continuous)
+                .stroke(
+                    isEnabled ? AppTheme.accent.opacity(0.45) : Color.secondary.opacity(0.14),
+                    lineWidth: 1
+                )
+        )
+        .contentShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+        .onTapGesture {
+            withAnimation(.easeInOut(duration: 0.15)) {
+                AppSettings.setFeatureEnabled(module, !isEnabled)
+            }
+        }
     }
 
     private var footer: some View {

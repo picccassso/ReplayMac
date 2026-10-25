@@ -29,7 +29,7 @@ public enum FeatureModule: String, CaseIterable, Codable, Identifiable, Sendable
         case .appearance:
             return "Appearance & Themes"
         case .quickSaveAndThumbnail:
-            return "Quick-Save Presets & Floating Thumbnail"
+            return "Quick-Save Presets & Thumbnail"
         case .extendedReplay:
             return "Extended Replay Buffer"
         case .proVideo:
@@ -46,25 +46,25 @@ public enum FeatureModule: String, CaseIterable, Codable, Identifiable, Sendable
     public var detail: String {
         switch self {
         case .sessionRecording:
-            return "Record continuously from start to stop into a single MP4 file."
+            return "Record continuously from start to stop into a single MP4."
         case .autoRecordGames:
-            return "Automatically starts buffering when games launch and stops when they close."
+            return "Start buffering automatically when games launch and stop when they close."
         case .audioMixing:
-            return "Volume sliders, mic device picker, per-app audio routing, and app muting."
+            return "Volume sliders, microphone picker, per-app routing, and app muting."
         case .appearance:
-            return "Custom atmospheres, accent colours, dual-tone styles, and surface designs."
+            return "Custom atmospheres, accent colours, dual-tone styles, and surfaces."
         case .quickSaveAndThumbnail:
-            return "Hotkeys for saving the last 15s or 60s, plus a floating thumbnail card after saving."
+            return "15s and 60s quick-save hotkeys plus a floating thumbnail after saving."
         case .extendedReplay:
-            return "A rolling 5–30 minute buffer kept on disk for capturing longer sessions."
+            return "Keep a rolling 5–30 minute buffer on disk for longer sessions."
         case .proVideo:
-            return "HEVC/H.264 codec selection, manual bitrate slider, HDR, and dual-display capture."
+            return "Codec selection, manual bitrate, HDR, and dual-display capture."
         case .captureProfiles:
             return "Save and switch between named recording and encoder configurations."
         case .companion:
-            return "Control ReplayMac and trigger clips from your iPhone over the local network."
+            return "Trigger clips and control recording from your iPhone over local Wi-Fi."
         case .systemAndFileTuning:
-            return "Custom filename and date templates, buffer memory caps, and SCK queue depth."
+            return "Custom filename templates, buffer memory caps, and capture queue depth."
         }
     }
 
@@ -118,6 +118,36 @@ public enum FeatureCategory: String, CaseIterable, Identifiable, Sendable {
 
     public var id: String { rawValue }
     public var title: String { rawValue }
+
+    public var icon: String {
+        switch self {
+        case .appearance:
+            return "paintbrush"
+        case .video:
+            return "video"
+        case .audio:
+            return "slider.vertical.3"
+        case .automations:
+            return "gamecontroller"
+        case .advanced:
+            return "wrench.and.screwdriver"
+        }
+    }
+
+    public var subtitle: String {
+        switch self {
+        case .appearance:
+            return "Personalise atmospheres, accent colours, and window surfaces."
+        case .video:
+            return "Continuous recording, extended disk buffers, and pro encoding."
+        case .audio:
+            return "Per-app audio routing, volume sliders, and microphone controls."
+        case .automations:
+            return "Automatic game detection, quick-save hotkeys, and floating thumbnails."
+        case .advanced:
+            return "iPhone remote control, saved capture profiles, and system tuning."
+        }
+    }
 }
 
 /// Curated interface tiers that configure which feature modules are active.
