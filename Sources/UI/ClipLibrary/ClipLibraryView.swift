@@ -45,9 +45,7 @@ public struct ClipLibraryView: View {
                 tableView
             }
         }
-        // Thumbnails read fine under the glass bar, so the grid skips the
-        // system's dimmed band behind it; the table keeps it for its text rows.
-        .floatingBottomBar(scrollEdgeEffect: layout != .grid) { selectionPanel }
+        .floatingBottomBar { selectionPanel }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .task {
             await model.reload()
