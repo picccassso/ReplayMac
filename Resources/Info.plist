@@ -28,7 +28,7 @@
 	<string>15.0</string>
 	<key>NSAudioCaptureUsageDescription</key>
 	<string>ReplayCap needs audio capture permission to record system audio in your clips.</string>
-	<key>NSCameraUseUsageDescription</key>
+	<key>NSCameraUsageDescription</key>
 	<string>ReplayCap records your camera and adds it as an overlay to your screen recordings when you enable the camera in settings.</string>
 	<key>NSHumanReadableCopyright</key>
 	<string>© 2026 Alex (picccassso)</string>
