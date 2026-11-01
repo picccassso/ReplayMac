@@ -342,6 +342,139 @@ final class CameraOverlayTests: XCTestCase {
         }
     }
 
+    // MARK: - Idle screen: camera keeps the overlay moving
+
+    /// ScreenCaptureKit stops delivering complete frames while the display is
+    /// still. Camera frames must then re-emit the last screen frame at the
+    /// camera's rate, stamped with the camera PTS, and the screen takes over
+    /// again as soon as it changes.
+    func testIdleScreenCameraFramesKeepOverlayUpdating() throws {
+        let compositor = FrameCompositor()
+        compositor.configureSingleDisplay(width: 64, height: 36, fps: 60)
+        let layout = CameraOverlayLayout(position: .topLeft, size: .small, borderEnabled: false)
+        compositor.setCameraOverlay(layout)
+
+        let output = OutputRecorder()
+        compositor.outputHandler = { output.record($0) }
+        let rect = layout.overlayRect(canvasWidth: 64, canvasHeight: 36, aspectRatio: 32.0 / 18.0)
+
+        let red: (UInt8, UInt8, UInt8, UInt8) = (0, 0, 255, 255)
+        let green: (UInt8, UInt8, UInt8, UInt8) = (0, 255, 0, 255)
+
+        compositor.pushCameraFrame(try makeSolidFrame(width: 32, height: 18, bgra: red, seconds: 1.0))
+        compositor.pushPrimaryFrame(try makeSolidFrame(width: 64, height: 36, bgra: (255, 0, 0, 255), seconds: 1.0))
+        XCTAssertEqual(output.count, 1)
+
+        // A camera frame right after a screen frame doesn't count as idle yet.
+        compositor.pushCameraFrame(try makeSolidFrame(width: 32, height: 18, bgra: green, seconds: 1.0 + 1.0 / 30))
+        XCTAssertEqual(output.count, 1)
+
+        // The screen stays still: 10 camera frames at 30 fps, alternating colour.
+        let cameraTimes = (0..<10).map { 1.1 + Double($0) / 30 }
+        for (index, time) in cameraTimes.enumerated() {
+            compositor.pushCameraFrame(try makeSolidFrame(width: 32, height: 18, bgra: index.isMultiple(of: 2) ? red : green, seconds: time))
+        }
+        XCTAssertEqual(output.count, 11)
+        for (index, time) in cameraTimes.enumerated() {
+            let buffer = try XCTUnwrap(output.buffers[safe: index + 1])
+            XCTAssertEqual(CMSampleBufferGetPresentationTimeStamp(buffer).seconds, time, accuracy: 1e-3)
+            let pixelBuffer = try XCTUnwrap(CMSampleBufferGetImageBuffer(buffer))
+            let expected: (Int, Int, Int, Int) = index.isMultiple(of: 2) ? (0, 0, 255, 255) : (0, 255, 0, 255)
+            assertPixel(pixelAtCenter(of: rect, in: pixelBuffer, canvasHeight: 36), is: expected)
+            // The last screen frame (blue) is reused underneath.
+            assertPixel(pixelAt(pixelBuffer, col: 62, row: 34), is: (255, 0, 0, 255))
+        }
+
+        // The screen changes again: it drives emission from here on.
+        let resume = cameraTimes[cameraTimes.count - 1] + 1.0 / 30
+        compositor.pushPrimaryFrame(try makeSolidFrame(width: 64, height: 36, bgra: (0, 255, 255, 255), seconds: resume))
+        XCTAssertEqual(output.count, 12)
+        let resumed = try XCTUnwrap(output.last.flatMap(CMSampleBufferGetImageBuffer))
+        assertPixel(pixelAt(resumed, col: 62, row: 34), is: (0, 255, 255, 255))
+
+        // ...so a camera frame shortly after it waits for the idle gap again.
+        compositor.pushCameraFrame(try makeSolidFrame(width: 32, height: 18, bgra: red, seconds: resume + 1.0 / 30))
+        XCTAssertEqual(output.count, 12)
+
+        var previousPTS = -1.0
+        for buffer in output.buffers {
+            let pts = CMSampleBufferGetPresentationTimeStamp(buffer).seconds
+            XCTAssertGreaterThan(pts, previousPTS)
+            previousPTS = pts
+        }
+    }
+
+    /// While the screen updates at full rate, camera frames (which carry a
+    /// slightly older PTS than the screen frame they arrive next to) must
+    /// never add extra composites: one output per screen frame, screen PTS.
+    func testActiveScreenIsNotInterleavedWithCameraRefreshes() throws {
+        let compositor = FrameCompositor()
+        compositor.configureSingleDisplay(width: 64, height: 36, fps: 60)
+        compositor.setCameraOverlay(CameraOverlayLayout(position: .topLeft, size: .small, borderEnabled: true))
+
+        let output = OutputRecorder()
+        compositor.outputHandler = { output.record($0) }
+
+        for i in 0..<60 {
+            let screenTime = 1 + Double(i) / 60
+            compositor.pushPrimaryFrame(try makeSolidFrame(width: 64, height: 36, bgra: (255, 0, 0, 255), seconds: screenTime))
+            if i.isMultiple(of: 2) {
+                compositor.pushCameraFrame(try makeSolidFrame(width: 32, height: 18, bgra: (0, 0, 255, 255), seconds: screenTime - 0.03))
+            }
+        }
+
+        XCTAssertEqual(output.count, 60)
+        for (index, buffer) in output.buffers.enumerated() {
+            XCTAssertEqual(CMSampleBufferGetPresentationTimeStamp(buffer).seconds, 1 + Double(index) / 60, accuracy: 1e-3)
+        }
+    }
+
+    /// A camera frame a few ms newer than the screen frame being composited
+    /// is still drawn instead of blinking the overlay out.
+    func testCameraFrameSlightlyAheadOfScreenIsDrawn() throws {
+        let compositor = FrameCompositor()
+        compositor.configureSingleDisplay(width: 64, height: 36, fps: 60)
+        let layout = CameraOverlayLayout(position: .topLeft, size: .small, borderEnabled: false)
+        compositor.setCameraOverlay(layout)
+
+        let output = OutputRecorder()
+        compositor.outputHandler = { output.record($0) }
+
+        compositor.pushCameraFrame(try makeSolidFrame(width: 32, height: 18, bgra: (0, 0, 255, 255), seconds: 1.02))
+        compositor.pushPrimaryFrame(try makeSolidFrame(width: 64, height: 36, bgra: (255, 0, 0, 255), seconds: 1.0))
+
+        XCTAssertEqual(output.count, 1)
+        let pixelBuffer = try XCTUnwrap(output.last.flatMap(CMSampleBufferGetImageBuffer))
+        let rect = layout.overlayRect(canvasWidth: 64, canvasHeight: 36, aspectRatio: 32.0 / 18.0)
+        assertPixel(pixelAtCenter(of: rect, in: pixelBuffer, canvasHeight: 36), is: (0, 0, 255, 255))
+    }
+
+    /// Dual side-by-side mode refreshes both displays under a new camera frame
+    /// while the screens are idle.
+    func testDualModeIdleScreensRefreshFromCamera() throws {
+        let compositor = FrameCompositor()
+        compositor.configure(display1Width: 32, display1Height: 18, display2Width: 32, display2Height: 18, fps: 60)
+        let layout = CameraOverlayLayout(position: .topLeft, size: .small, borderEnabled: false)
+        compositor.setCameraOverlay(layout)
+
+        let output = OutputRecorder()
+        compositor.outputHandler = { output.record($0) }
+
+        compositor.pushPrimaryFrame(try makeSolidFrame(width: 32, height: 18, bgra: (255, 0, 0, 255), seconds: 1.0))
+        compositor.pushSecondaryFrame(try makeSolidFrame(width: 32, height: 18, bgra: (0, 255, 0, 255), seconds: 1.0))
+        XCTAssertEqual(output.count, 1)
+
+        compositor.pushCameraFrame(try makeSolidFrame(width: 16, height: 9, bgra: (0, 0, 255, 255), seconds: 1.2))
+        XCTAssertEqual(output.count, 2)
+        let buffer = try XCTUnwrap(output.last)
+        XCTAssertEqual(CMSampleBufferGetPresentationTimeStamp(buffer).seconds, 1.2, accuracy: 1e-3)
+        let pixelBuffer = try XCTUnwrap(CMSampleBufferGetImageBuffer(buffer))
+        XCTAssertEqual(CVPixelBufferGetWidth(pixelBuffer), 64)
+        let rect = layout.overlayRect(canvasWidth: 64, canvasHeight: 18, aspectRatio: 16.0 / 9.0)
+        assertPixel(pixelAtCenter(of: rect, in: pixelBuffer, canvasHeight: 18), is: (0, 0, 255, 255))
+        assertPixel(pixelAt(pixelBuffer, col: 50, row: 9), is: (0, 255, 0, 255))
+    }
+
     // MARK: - Dual mode + overlay
 
     func testDualModeWithOverlayKeepsCadenceAndDrawsOverlay() throws {

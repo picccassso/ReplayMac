@@ -63,6 +63,11 @@ public final class FrameCompositor: @unchecked Sendable {
 
     private let logger = Logger(subsystem: "com.replaycap", category: "FrameCompositor")
     private let lock = NSLock()
+    /// Serializes "reserve output PTS → render → hand to outputHandler", so
+    /// composites reach the encoder in PTS order now that both the screen
+    /// queue(s) and the camera queue can trigger one. Always taken before
+    /// `lock`, never while holding it.
+    private let emitLock = NSLock()
     private var primaryFrame: DisplayFrame?
     private var secondaryFrame: DisplayFrame?
     private var compositeWidth: Int = 0
@@ -78,8 +83,9 @@ public final class FrameCompositor: @unchecked Sendable {
     // space as the sRGB capture and the BT.709 tags the encoder writes.
     private let colorSpace = CGColorSpace(name: CGColorSpace.sRGB) ?? CGColorSpaceCreateDeviceRGB()
 
-    // Camera overlay state. `cameraFrame` is only ever stored, never emitted:
-    // emission cadence is driven exclusively by screen-frame PTS.
+    // Camera overlay state. While the screen updates, screen-frame PTS drives
+    // emission; a camera frame only re-emits the last screen frame once the
+    // screen has gone idle (`emitCameraRefreshIfScreenIdle`).
     private var cameraOverlay: CameraOverlayLayout?
     private var cameraFrame: CMSampleBuffer?
     private var cameraFramePTS: CMTime = .invalid
@@ -94,6 +100,21 @@ public final class FrameCompositor: @unchecked Sendable {
     private var syntheticPTSBasis: CMTime?
     private var lastSyntheticPTS: CMTime = .zero
     private var lastOutputPTS: CMTime?
+    /// true when the last emitted composite was a camera refresh (the screen
+    /// was idle), false when it came from a screen frame.
+    private var lastEmitWasCameraRefresh = false
+
+    /// How long the screen must have been idle before camera frames start
+    /// re-emitting the last screen frame. Two camera frames at 30 fps: long
+    /// enough that a screen which is actively updating (even below the target
+    /// fps, e.g. a game at 40 fps) keeps driving emission on its own.
+    private static let minimumScreenIdleInterval = CMTime(value: 1, timescale: 15)
+
+    /// How far a camera frame may be AHEAD of the screen frame it is drawn on.
+    /// Camera and screen frames arrive on different queues, so the newest
+    /// camera frame can carry a PTS a few ms past a screen frame that is still
+    /// being composited; refusing it would blink the overlay out for a frame.
+    private static let cameraLeadTolerance: Double = 0.05
 
     public var outputHandler: OutputHandler? {
         get {
@@ -128,6 +149,7 @@ public final class FrameCompositor: @unchecked Sendable {
 
         pixelBufferPool = Self.makePixelBufferPool(width: totalWidth, height: maxHeight)
         lastOutputPTS = nil
+        lastEmitWasCameraRefresh = false
         lastSyntheticPTS = .zero
         syntheticPTSBasis = nil
     }
@@ -146,6 +168,7 @@ public final class FrameCompositor: @unchecked Sendable {
 
         pixelBufferPool = Self.makePixelBufferPool(width: width, height: height)
         lastOutputPTS = nil
+        lastEmitWasCameraRefresh = false
         lastSyntheticPTS = .zero
         syntheticPTSBasis = nil
     }
@@ -187,14 +210,96 @@ public final class FrameCompositor: @unchecked Sendable {
         lock.unlock()
     }
 
-    /// Stores the latest camera frame + PTS under lock. NEVER emits — camera
-    /// frames only ever get composited on top of an emitted screen frame.
+    /// Stores the latest camera frame + PTS under lock. While the screen is
+    /// actively updating, screen frames drive emission and the camera frame is
+    /// only composited on top of them. ScreenCaptureKit only delivers a
+    /// complete frame when the display changes, though, so on a still screen
+    /// the camera frame also re-emits the last screen frame (see
+    /// `emitCameraRefreshIfScreenIdle`); otherwise the overlay would freeze
+    /// until something on screen moved.
     public func pushCameraFrame(_ sampleBuffer: CMSampleBuffer) {
         guard sampleBuffer.isValid else { return }
         lock.lock()
         cameraFrame = sampleBuffer
         cameraFramePTS = CMSampleBufferGetPresentationTimeStamp(sampleBuffer)
         lock.unlock()
+        emitCameraRefreshIfScreenIdle()
+    }
+
+    /// Re-composites the last screen frame(s) under the newest camera frame,
+    /// stamped with the camera frame's PTS (both are host-clock based), when
+    /// no composite has been emitted for a while. Needs at least one screen
+    /// composite first: the camera alone never starts emission.
+    private func emitCameraRefreshIfScreenIdle() {
+        // A composite already in flight means the screen is active; never
+        // block the camera queue waiting for it.
+        guard emitLock.try() else { return }
+        defer { emitLock.unlock() }
+
+        lock.lock()
+        guard cameraOverlay != nil,
+              let lastOutputPTS,
+              compositeWidth > 0, compositeHeight > 0,
+              let pool = pixelBufferPool,
+              let primary = primaryFrame else {
+            lock.unlock()
+            return
+        }
+        let secondary = secondaryFrame
+        if !singleDisplayMode && secondary == nil {
+            lock.unlock()
+            return
+        }
+        let pts = cameraFramePTS
+        guard Self.ptsIsValid(pts) else {
+            lock.unlock()
+            return
+        }
+        // After a screen frame, wait until the screen has clearly gone idle.
+        // Between camera refreshes, half a frame of slack absorbs camera
+        // timestamp jitter so a 30 fps camera is never halved by the gate.
+        let requiredGap = lastEmitWasCameraRefresh
+            ? CMTimeMultiplyByRatio(targetFrameDuration, multiplier: 1, divisor: 2)
+            : CMTimeMaximum(CMTimeMultiply(targetFrameDuration, multiplier: 2), Self.minimumScreenIdleInterval)
+        guard CMTimeCompare(CMTimeSubtract(pts, lastOutputPTS), requiredGap) >= 0 else {
+            lock.unlock()
+            return
+        }
+        let canvas = Canvas(width: compositeWidth, height: compositeHeight)
+        guard let overlayAssets = overlayAssetsLocked(canvas: canvas, screenPTS: pts) else {
+            lock.unlock()
+            return
+        }
+        self.lastOutputPTS = pts
+        lastEmitWasCameraRefresh = true
+        compositeFrameCount += 1
+        let handler = _outputHandler
+        lock.unlock()
+
+        let compositeBuffer: CMSampleBuffer?
+        if singleDisplayMode {
+            compositeBuffer = singleModeComposite(
+                frame: primary,
+                presentationTimeStamp: pts,
+                pool: pool,
+                canvas: canvas,
+                overlayAssets: overlayAssets
+            )
+        } else if let secondary {
+            compositeBuffer = composite(
+                primary: primary,
+                secondary: secondary,
+                presentationTimeStamp: pts,
+                pool: pool,
+                canvas: canvas,
+                overlayAssets: overlayAssets
+            )
+        } else {
+            compositeBuffer = nil
+        }
+        if let buffer = compositeBuffer {
+            handler?(buffer)
+        }
     }
 
     /// Drops the stored camera frame; subsequent composites have no overlay
@@ -223,6 +328,8 @@ public final class FrameCompositor: @unchecked Sendable {
     }
 
     private func processFrame(_ frame: DisplayFrame, for display: DisplayIndex) {
+        emitLock.lock()
+        defer { emitLock.unlock() }
         lock.lock()
 
         if singleDisplayMode, display == .secondary {
@@ -510,14 +617,15 @@ public final class FrameCompositor: @unchecked Sendable {
 
     /// Computes the overlay draw inputs under lock. Returns nil when there is
     /// no overlay configured or the stored camera frame is stale: the overlay
-    /// is drawn only while `0 <= screenPTS - cameraPTS < 0.5` (both PTS are
-    /// host-clock based). A stale/absent camera never affects emission.
+    /// is drawn only while `-cameraLeadTolerance <= screenPTS - cameraPTS < 0.5`
+    /// (both PTS are host-clock based). A stale/absent camera never affects
+    /// screen-driven emission.
     private func overlayAssetsLocked(canvas: Canvas, screenPTS: CMTime) -> OverlayAssets? {
         guard let layout = cameraOverlay, let camera = cameraFrame else { return nil }
         let cameraPTS = cameraFramePTS
         guard Self.ptsIsValid(cameraPTS) else { return nil }
         let age = screenPTS.seconds - cameraPTS.seconds
-        guard age >= 0, age < 0.5 else { return nil }
+        guard age >= -Self.cameraLeadTolerance, age < 0.5 else { return nil }
 
         guard let pixelBuffer = CMSampleBufferGetImageBuffer(camera) else { return nil }
         let cameraWidth = CVPixelBufferGetWidth(pixelBuffer)
@@ -656,6 +764,7 @@ public final class FrameCompositor: @unchecked Sendable {
         syntheticPTSBasis = nil
         lastSyntheticPTS = .zero
         lastOutputPTS = nil
+        lastEmitWasCameraRefresh = false
         // Also drop the camera frame and the cached overlay images.
         cameraFrame = nil
         cameraFramePTS = .invalid
@@ -676,6 +785,7 @@ public final class FrameCompositor: @unchecked Sendable {
     private func reserveOutputPTS(preferred: CMSampleBuffer, fallback: CMSampleBuffer? = nil) -> CMTime {
         let pts = candidateOutputPTS(preferred: preferred, fallback: fallback)
         lastOutputPTS = pts
+        lastEmitWasCameraRefresh = false
         return pts
     }
 

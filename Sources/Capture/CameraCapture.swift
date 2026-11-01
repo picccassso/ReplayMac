@@ -303,7 +303,18 @@ public final class CameraCapture: @unchecked Sendable {
         }
 
         session.commitConfiguration()
+
+        // Without a floor, macOS lowers the frame rate in dim light to
+        // lengthen exposure (often to 15 fps or less), which makes the overlay
+        // stutter. Hold the device at 30 fps instead; the image gets a little
+        // darker in a dim room but stays smooth. The lock is held across
+        // `startRunning` so the session doesn't reset the duration to the
+        // format default when it starts.
+        let lockedFrameRate = lockMinimumFrameRate(device)
         session.startRunning()
+        if lockedFrameRate {
+            device.unlockForConfiguration()
+        }
 
         lock.lock()
         self.session = session
@@ -311,6 +322,32 @@ public final class CameraCapture: @unchecked Sendable {
         self.videoOutput = output
         self.activeDevice = device
         lock.unlock()
+    }
+
+    /// Sets `activeVideoMaxFrameDuration` to 1/30 s when the active format
+    /// supports 30 fps. Returns true if the device was left locked for
+    /// configuration (the caller unlocks it after `startRunning`). Invalid
+    /// values raise an Objective-C exception, so every precondition is
+    /// checked first; any failure just leaves the device's default.
+    private func lockMinimumFrameRate(_ device: AVCaptureDevice) -> Bool {
+        let target = CMTime(value: 1, timescale: 30)
+        guard !device.isAutoVideoFrameRateEnabled,
+              device.activeFormat.videoSupportedFrameRateRanges.contains(where: {
+                  $0.minFrameRate <= 30 && $0.maxFrameRate >= 30
+              }) else {
+            logger.info("Camera format does not support a 30 fps floor; keeping the device default")
+            return false
+        }
+        do {
+            try device.lockForConfiguration()
+        } catch {
+            logger.warning("Could not lock camera for configuration: \(String(describing: error), privacy: .public)")
+            return false
+        }
+        // The format supports 30 fps (checked above), so 1/30 s is never
+        // shorter than its minimum frame duration.
+        device.activeVideoMaxFrameDuration = target
+        return true
     }
 
     /// Stops and dismantles the current session. Must be called on `sessionQueue`.

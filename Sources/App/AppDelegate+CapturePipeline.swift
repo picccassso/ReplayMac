@@ -32,8 +32,9 @@ extension AppDelegate {
 
         frameCompositor.outputHandler = replayCapFrameCompositorOutputHandler(videoEncoder)
 
-        // Camera frames are only stored by the compositor; emission cadence
-        // stays driven by screen-frame PTS.
+        // Camera frames are stored by the compositor; while the screen is
+        // idle they also re-emit the last screen frame so the overlay keeps
+        // the camera's frame rate.
         cameraCapture.setFrameHandler { [frameCompositor] sampleBuffer in
             frameCompositor.pushCameraFrame(sampleBuffer)
         }
@@ -125,6 +126,28 @@ extension AppDelegate {
                 // Dual separate-files mode writes two raw per-display files and
                 // never composites, so the overlay is not applied there.
                 let cameraActive = shouldCaptureCamera && cameraPermissionGranted && !isSeparateDualSaveMode
+
+                // Start the camera session before the screen capture below, so
+                // its cold start (first frames + auto-exposure settling) overlaps
+                // with the rest of the pipeline setup. Nothing waits on it: the
+                // overlay simply appears once the first camera frame arrives.
+                if cameraActive {
+                    do {
+                        try cameraCapture.start(
+                            deviceID: AppSettings.cameraDeviceID.isEmpty ? nil : AppSettings.cameraDeviceID,
+                            resolution: AppSettings.cameraResolutionEnum
+                        )
+                        lastCameraEnabled = true
+                        lastCameraDeviceID = AppSettings.cameraDeviceID
+                    } catch {
+                        // The overlay is optional: recording continues without it.
+                        capturePipelineLogger.error("Failed to start camera capture: \(String(describing: error), privacy: .public)")
+                        NotificationManager.shared.showOperationalNotification(
+                            title: "Camera Unavailable",
+                            body: "Recording continues without the camera overlay. \(error.localizedDescription)"
+                        )
+                    }
+                }
 
                 let isDual = AppSettings.captureMode == CaptureMode.dualSideBySide.rawValue
                 let captureHDR = AppSettings.isHDRCaptureActive
@@ -289,24 +312,8 @@ extension AppDelegate {
                     }
                 }
 
-                if cameraActive {
-                    do {
-                        try cameraCapture.start(
-                            deviceID: AppSettings.cameraDeviceID.isEmpty ? nil : AppSettings.cameraDeviceID,
-                            resolution: AppSettings.cameraResolutionEnum
-                        )
-                        lastCameraEnabled = true
-                        lastCameraDeviceID = AppSettings.cameraDeviceID
-                    } catch {
-                        // The overlay is optional: recording continues without it.
-                        capturePipelineLogger.error("Failed to start camera capture: \(String(describing: error), privacy: .public)")
-                        NotificationManager.shared.showOperationalNotification(
-                            title: "Camera Unavailable",
-                            body: "Recording continues without the camera overlay. \(error.localizedDescription)"
-                        )
-                    }
-                }
-
+                // The camera session was already started above, before screen
+                // capture began.
                 isCaptureRunning = true
                 if !isRecoveryAttempt {
                     shouldResumeCaptureAfterInterruption = false

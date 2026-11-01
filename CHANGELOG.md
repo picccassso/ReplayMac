@@ -7,6 +7,8 @@
 - Add an optional webcam overlay to recordings: enable "Add camera to recordings" in Settings → Video or from the menu bar, then choose the camera, corner position, size, resolution (720p30 or 1080p30) and border & rounded corners. The camera image is composited into single-display and side-by-side dual-display recordings
 - While the camera overlay is on, recordings are captured in SDR only; the HDR option is disabled and Settings explains why
 - The first time you enable the overlay, macOS asks for Camera permission with a purpose string explaining that your camera is recorded as an overlay in your screen recordings; if you decline, recording continues without the overlay
+- Fix the camera overlay stuttering or freezing while the screen is still. Recordings only got a new frame when something on screen changed, so the camera only moved when the screen did. The camera now keeps the overlay at a steady 30 fps on a still screen too
+- Keep the camera at 30 fps in dim rooms instead of letting macOS drop it to 15 fps or lower to brighten the image
 
 ## 2.2.1
 
