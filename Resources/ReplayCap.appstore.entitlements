@@ -11,6 +11,9 @@
     <true/>
     <key>com.apple.security.device.audio-input</key>
     <true/>
+    <!-- Webcam overlay composited into recordings, on-device only -->
+    <key>com.apple.security.device.camera</key>
+    <true/>
     <!-- Output folders chosen via NSOpenPanel (persisted with
          security-scoped bookmarks, see OutputDirectoryAccess) -->
     <key>com.apple.security.files.user-selected.read-write</key>

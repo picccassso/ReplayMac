@@ -24,6 +24,39 @@ extension SettingsView {
         }
     }
 
+    /// macOS hides video devices until camera access is granted, so the list is
+    /// only enumerated when authorized. A saved camera that is no longer present
+    /// falls back to the system default ("").
+    func loadCameras() {
+        guard CameraCapture.authorizationStatus() == .authorized else {
+            cameras = []
+            return
+        }
+
+        cameras = CameraCapture.availableDevices().map {
+            CameraOption(id: $0.uniqueID, name: $0.localizedName, isContinuityCamera: $0.isContinuityCamera)
+        }
+
+        if !cameraDeviceID.isEmpty && !cameras.contains(where: { $0.id == cameraDeviceID }) {
+            cameraDeviceID = ""
+        }
+    }
+
+    var cameraAccessNotDetermined: Bool {
+        CameraCapture.authorizationStatus() == .notDetermined
+    }
+
+    var cameraAccessDenied: Bool {
+        CameraCapture.authorizationStatus() == .denied
+    }
+
+    /// Just-in-time permission prompt: shown from the "Grant Camera Access…"
+    /// button only — never at launch, never polled.
+    func requestCameraAccess() async {
+        _ = await CameraCapture.requestAccess()
+        loadCameras()
+    }
+
     func refreshAudioApplicationsAfterWorkspaceChange() {
         Task {
             await loadAudioApplications()

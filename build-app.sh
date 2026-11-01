@@ -134,6 +134,9 @@ cp "$INFO_PLIST" "$APP_DIR/Contents/Info.plist"
 if [ "$APP_NAME" != "ReplayCap" ]; then
   sed -i '' "s/ReplayCap/${APP_NAME}/g" "$APP_DIR/Contents/Info.plist"
 fi
+# Apple privacy manifest (required for App Store submissions since May 2024);
+# ships in Contents/Resources for both direct and --appstore builds, before codesign.
+cp "$ROOT_DIR/Resources/PrivacyInfo.xcprivacy" "$APP_DIR/Contents/Resources/PrivacyInfo.xcprivacy"
 cp "$BIN_PATH" "$APP_DIR/Contents/MacOS/$APP_NAME"
 chmod +x "$APP_DIR/Contents/MacOS/$APP_NAME"
 

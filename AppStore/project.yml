@@ -30,6 +30,8 @@ targets:
         group: App
       - path: ../Resources/ReplayCap.icns
         buildPhase: resources
+      - path: ../Resources/PrivacyInfo.xcprivacy
+        buildPhase: resources
     dependencies:
       - package: ReplayCapPackage
         product: ReplayCapKit

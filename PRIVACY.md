@@ -9,6 +9,7 @@ ReplayMac does not collect, store, transmit, or share any personal data.
 ## What happens on your Mac, stays on your Mac
 
 - **Screen and audio recordings** are processed entirely on your Mac and saved only to the output folder you choose (by default `~/Movies/ReplayMac`). They are never uploaded anywhere.
+- **Camera overlay**: if you turn on the camera overlay, your webcam video is composited into your recordings on your Mac only. It is never transmitted anywhere and never used for anything else — no analytics, no advertising, no training.
 - **Clip metadata** (names, tags, notes, favorites) is stored in a local file inside your output folder.
 - **Settings** are stored locally in the app's preferences.
 
@@ -33,7 +34,7 @@ macOS will ask for Local Network permission the first time you turn the server o
 
 ## Permissions
 
-ReplayMac asks macOS for Screen Recording (and optionally Microphone) permission solely to create the recordings you ask it to make. If you turn on the Companion server, it also asks for Local Network permission so your phone can reach it. You can revoke these at any time in System Settings → Privacy & Security.
+ReplayMac asks macOS for Screen Recording (and optionally Microphone, or Camera if you turn on the camera overlay) permission solely to create the recordings you ask it to make. If you turn on the Companion server, it also asks for Local Network permission so your phone can reach it. You can revoke these at any time in System Settings → Privacy & Security.
 
 ## Questions
 

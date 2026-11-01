@@ -18,6 +18,9 @@ extension SettingsView {
 
                 Toggle("Include current appearance theme", isOn: $includeThemeInProfile)
                     .help("Saves your active Atmosphere, color scheme, surface style, and accent colors into this profile so applying the profile switches the app's look too.")
+
+                Toggle("Include camera overlay settings", isOn: $includeCameraInProfile)
+                    .help("Saves the camera overlay toggle, camera, position, size, border, and resolution into this profile.")
             } header: {
                 Text("Create")
             }
@@ -86,6 +89,7 @@ extension SettingsView {
                     ProfileDetailRow(label: "Video", value: selectedProfile.videoDetail)
                     ProfileDetailRow(label: "Capture", value: selectedProfile.captureDetail)
                     ProfileDetailRow(label: "Audio", value: selectedProfile.audioDetail)
+                    ProfileDetailRow(label: "Camera", value: selectedProfile.cameraDetail)
                     ProfileDetailRow(label: "Buffer", value: selectedProfile.bufferDetail)
                     if let themeSnapshot = selectedProfile.themeSnapshot {
                         ProfileDetailRow(label: "Theme", value: themeSnapshot.summary)
@@ -287,6 +291,24 @@ extension SettingsView {
         queueDepth = profile.queueDepth
         longBufferEnabled = profile.longBufferEnabled
         longBufferDurationMinutes = profile.longBufferDurationMinutes
+        if let cameraOverlayEnabled = profile.cameraOverlayEnabled {
+            self.cameraOverlayEnabled = cameraOverlayEnabled
+        }
+        if let cameraDeviceID = profile.cameraDeviceID {
+            self.cameraDeviceID = cameraDeviceID
+        }
+        if let cameraPosition = profile.cameraPosition {
+            cameraPositionRawValue = cameraPosition
+        }
+        if let cameraSize = profile.cameraSize {
+            cameraSizeRawValue = cameraSize
+        }
+        if let cameraBorderEnabled = profile.cameraBorderEnabled {
+            self.cameraBorderEnabled = cameraBorderEnabled
+        }
+        if let cameraResolution = profile.cameraResolution {
+            cameraResolutionRawValue = cameraResolution
+        }
         if let themeSnapshot = profile.themeSnapshot {
             AppSettings.applyThemeSnapshot(themeSnapshot)
         }
@@ -327,6 +349,12 @@ extension SettingsView {
             queueDepth: queueDepth,
             longBufferEnabled: longBufferEnabled,
             longBufferDurationMinutes: longBufferDurationMinutes,
+            cameraOverlayEnabled: includeCameraInProfile ? cameraOverlayEnabled : nil,
+            cameraDeviceID: includeCameraInProfile ? cameraDeviceID : nil,
+            cameraPosition: includeCameraInProfile ? cameraPositionRawValue : nil,
+            cameraSize: includeCameraInProfile ? cameraSizeRawValue : nil,
+            cameraBorderEnabled: includeCameraInProfile ? cameraBorderEnabled : nil,
+            cameraResolution: includeCameraInProfile ? cameraResolutionRawValue : nil,
             themeSnapshot: includeThemeInProfile ? AppSettings.currentThemeSnapshot() : nil
         )
     }
@@ -334,6 +362,7 @@ extension SettingsView {
     func syncSelectedProfileNameDraft() {
         selectedProfileNameDraft = selectedProfile?.name ?? ""
         includeThemeInProfile = selectedProfile?.themeSnapshot != nil
+        includeCameraInProfile = selectedProfile?.cameraOverlayEnabled != nil
     }
 }
 
@@ -384,5 +413,17 @@ private extension CaptureProfile {
     var bufferDetail: String {
         let longBuffer = longBufferEnabled ? "\(longBufferDurationMinutes)m long buffer" : "Long buffer off"
         return "\(Int(memoryCapMB)) MB cap · queue \(queueDepth) · \(longBuffer)"
+    }
+
+    var cameraDetail: String {
+        guard let cameraOverlayEnabled else { return "Not included" }
+        if !cameraOverlayEnabled { return "Camera off" }
+        var parts = ["Camera on"]
+        if let cameraPosition { parts.append(cameraPosition) }
+        if let cameraSize { parts.append(cameraSize) }
+        if let cameraResolution { parts.append(cameraResolution) }
+        if let cameraBorderEnabled, !cameraBorderEnabled { parts.append("no border") }
+        if let cameraDeviceID, !cameraDeviceID.isEmpty { parts.append("specific camera") }
+        return parts.joined(separator: " · ")
     }
 }

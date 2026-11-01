@@ -9,19 +9,22 @@ public struct ReplayControls {
     public var toggleBuffer: () -> Void
     public var toggleMicrophone: () -> Void
     public var toggleSystemAudio: () -> Void
+    public var toggleCameraOverlay: () -> Void
 
     public init(saveReplay: @escaping () -> Void = {},
                 saveExtendedReplay: @escaping () -> Void = {},
                 toggleSession: @escaping () -> Void = {},
                 toggleBuffer: @escaping () -> Void = {},
                 toggleMicrophone: @escaping () -> Void = {},
-                toggleSystemAudio: @escaping () -> Void = {}) {
+                toggleSystemAudio: @escaping () -> Void = {},
+                toggleCameraOverlay: @escaping () -> Void = {}) {
         self.saveReplay = saveReplay
         self.saveExtendedReplay = saveExtendedReplay
         self.toggleSession = toggleSession
         self.toggleBuffer = toggleBuffer
         self.toggleMicrophone = toggleMicrophone
         self.toggleSystemAudio = toggleSystemAudio
+        self.toggleCameraOverlay = toggleCameraOverlay
     }
 }
 
@@ -71,6 +74,14 @@ public enum ReplayControlLabels {
                                  accessibilityDescription: "Microphone muted")
             : ReplayControlLabel(title: "Mute Microphone", symbol: "mic.fill",
                                  accessibilityDescription: "Microphone active")
+    }
+
+    public static func camera(isEnabled: Bool) -> ReplayControlLabel {
+        isEnabled
+            ? ReplayControlLabel(title: "Hide Camera Overlay", symbol: "video.slash.fill",
+                                 accessibilityDescription: "Camera overlay enabled")
+            : ReplayControlLabel(title: "Show Camera Overlay", symbol: "video.fill",
+                                 accessibilityDescription: "Camera overlay disabled")
     }
 
     public static func systemAudio(isEnabled: Bool, isMuted: Bool) -> ReplayControlLabel {

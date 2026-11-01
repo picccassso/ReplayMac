@@ -29,6 +29,13 @@ public struct SettingsView: View {
     @Default(.bitrateMbps) var bitrateMbps
     @Default(.qualityPreset) var qualityPresetRawValue
 
+    @Default(.cameraOverlayEnabled) var cameraOverlayEnabled
+    @Default(.cameraDeviceID) var cameraDeviceID
+    @Default(.cameraPosition) var cameraPositionRawValue
+    @Default(.cameraSize) var cameraSizeRawValue
+    @Default(.cameraBorderEnabled) var cameraBorderEnabled
+    @Default(.cameraResolution) var cameraResolutionRawValue
+
     @Default(.captureSystemAudio) var captureSystemAudio
     @Default(.captureMicrophone) var captureMicrophone
     @Default(.mergeAudioTracks) var mergeAudioTracks
@@ -67,10 +74,12 @@ public struct SettingsView: View {
     @State var displays: [DisplayOption] = []
     @State var audioApplications: [AudioApplicationOption] = []
     @State var microphones: [MicrophoneOption] = []
+    @State var cameras: [CameraOption] = []
     @State var captureProfiles: [CaptureProfile] = []
     @State var selectedProfileID: UUID?
     @State var newProfileName = ""
     @State var includeThemeInProfile = false
+    @State var includeCameraInProfile = false
     @State var selectedProfileNameDraft = ""
     @State var profileErrorMessage: String?
     @State var launchAtLoginError: String?
@@ -126,6 +135,7 @@ public struct SettingsView: View {
         .task {
             loadCaptureProfiles()
             loadMicrophones()
+            loadCameras()
             await loadDisplays()
             syncLaunchAtLoginState()
         }

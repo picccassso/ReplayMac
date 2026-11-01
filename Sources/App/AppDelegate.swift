@@ -17,6 +17,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     let companionServer = CompanionServer.shared
     let captureManager = CaptureManager()
     let frameCompositor = FrameCompositor()
+    let cameraCapture = CameraCapture()
     let videoEncoder = VideoEncoder()
     lazy var videoRingBuffer = VideoRingBuffer(timeCap: AppSettings.ringBufferTimeCapSeconds)
     let dualDisplay1VideoEncoder = VideoEncoder()
@@ -109,6 +110,14 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     var lastMicEnabled = false
     var lastMicDeviceID = ""
     var hasNotifiedMicDenied = false
+    var lastCameraEnabled = false
+    var lastCameraDeviceID = ""
+    var hasNotifiedCameraDenied = false
+    /// True while screen frames are routed through `frameCompositor` so the
+    /// camera overlay can be composited (single-display + overlay, or dual
+    /// side-by-side with the overlay on). False for the direct SCK → encoder
+    /// path and dual separate-files.
+    var isCameraOverlayRoutingActive = false
     /// Latches the system-audio stall warning so a persistent stall logs once
     /// per outage instead of every monitoring tick.
     var hasWarnedSystemAudioStalled = false
@@ -142,6 +151,8 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         AppSettings.migrateLegacyBrandDefaults()
         lastMicEnabled = AppSettings.captureMicrophone
         lastMicDeviceID = AppSettings.microphoneID
+        lastCameraEnabled = AppSettings.cameraOverlayEnabled
+        lastCameraDeviceID = AppSettings.cameraDeviceID
     }
 
     func applicationDidFinishLaunching(_ notification: Notification) {
@@ -185,6 +196,9 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         }
         statusItemController.onToggleMicrophoneMute = { [weak self] in
             self?.toggleMicrophoneMuteFromUI()
+        }
+        statusItemController.onToggleCameraOverlay = { [weak self] in
+            self?.toggleCameraOverlayFromUI()
         }
         statusItemController.onToggleSystemAudioMute = { [weak self] in
             self?.toggleSystemAudioMuteFromUI()

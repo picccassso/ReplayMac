@@ -9,7 +9,7 @@ extension SettingsView {
     }
 
     var hdrCaptureEnabled: Bool {
-        captureHDR && CaptureManager.supportsHDRCapture && !isSideBySideCapture
+        captureHDR && CaptureManager.supportsHDRCapture && !isSideBySideCapture && !cameraOverlayEnabled
     }
 
     var hdrCaptureHelp: String {
@@ -18,6 +18,9 @@ extension SettingsView {
         }
         if isSideBySideCapture {
             return "Combined side-by-side video records in SDR. Choose separate files or a single display to record in HDR."
+        }
+        if cameraOverlayEnabled {
+            return "The camera overlay is composited in 8-bit SDR, so HDR recording is turned off while the overlay is on."
         }
         return "Preserves HDR highlights using 10-bit HEVC. For HDR gameplay, enable HDR on your display. Playback appearance depends on the display and player."
     }
@@ -31,7 +34,7 @@ extension SettingsView {
             Section {
                 if AppSettings.isFeatureEnabled(.proVideo) {
                     Toggle("Record in HDR", isOn: $captureHDR)
-                        .disabled(!CaptureManager.supportsHDRCapture || isSideBySideCapture)
+                        .disabled(!CaptureManager.supportsHDRCapture || isSideBySideCapture || cameraOverlayEnabled)
                     Text(hdrCaptureHelp)
                         .font(.system(size: 12, design: .rounded))
                         .foregroundStyle(AppTheme.textSecondary)
@@ -206,6 +209,97 @@ extension SettingsView {
                     .font(.system(size: 12, design: .rounded))
             }
 
+            Section {
+                Toggle("Add camera to recordings", isOn: $cameraOverlayEnabled)
+
+                if cameraOverlayEnabled {
+                    if cameraAccessNotDetermined {
+                        Button("Grant Camera Access…") {
+                            Task { await requestCameraAccess() }
+                        }
+                    } else if cameraAccessDenied {
+                        Link(
+                            destination: URL(
+                                string: "x-apple.systempreferences:com.apple.preference.security?Privacy_Camera"
+                            )!
+                        ) {
+                            Label(
+                                "Open System Settings → Privacy & Security → Camera",
+                                systemImage: "lock.shield"
+                            )
+                        }
+                    }
+
+                    if cameras.isEmpty {
+                        if !cameraAccessNotDetermined && !cameraAccessDenied {
+                            HStack {
+                                Text("Camera")
+                                Spacer()
+                                Text("No cameras detected")
+                                    .foregroundStyle(AppTheme.textSecondary)
+                            }
+                        }
+                    } else {
+                        Picker("Camera", selection: $cameraDeviceID) {
+                            Text("Default").tag("")
+                            ForEach(cameras) { camera in
+                                Text(camera.name).tag(camera.id)
+                            }
+                        }
+                    }
+
+                    Picker("Position", selection: $cameraPositionRawValue) {
+                        ForEach(CameraOverlayPosition.allCases, id: \.rawValue) { position in
+                            Text(cameraPositionTitle(position)).tag(position.rawValue)
+                        }
+                    }
+
+                    Picker("Size", selection: $cameraSizeRawValue) {
+                        ForEach(CameraOverlaySize.allCases, id: \.rawValue) { size in
+                            Text(cameraSizeTitle(size)).tag(size.rawValue)
+                        }
+                    }
+
+                    Picker("Camera resolution", selection: $cameraResolutionRawValue) {
+                        ForEach(CameraCaptureResolution.allCases, id: \.rawValue) { resolution in
+                            Text(resolution.rawValue).tag(resolution.rawValue)
+                        }
+                    }
+
+                    Toggle("Border & rounded corners", isOn: $cameraBorderEnabled)
+
+                    Label(
+                        "Camera access is requested just-in-time — only when you tap Grant Camera Access or start a recording with the overlay on, never at launch.",
+                        systemImage: "info.circle"
+                    )
+                    .foregroundStyle(AppTheme.textSecondary)
+                    .font(.system(size: 12, design: .rounded))
+
+                    Label(
+                        "The overlay is baked into single-display and side-by-side recordings. Dual recordings saved as two separate files are not overlaid.",
+                        systemImage: "rectangle.split.2x1"
+                    )
+                    .foregroundStyle(AppTheme.textSecondary)
+                    .font(.system(size: 12, design: .rounded))
+
+                    Label(
+                        "macOS shows the green camera-in-use indicator in the menu bar while the overlay is active; it cannot be hidden.",
+                        systemImage: "video.circle"
+                    )
+                    .foregroundStyle(AppTheme.textSecondary)
+                    .font(.system(size: 12, design: .rounded))
+
+                    Label(
+                        "Camera frames are processed on-device only and stay in your local recording — nothing is uploaded.",
+                        systemImage: "lock"
+                    )
+                    .foregroundStyle(AppTheme.textSecondary)
+                    .font(.system(size: 12, design: .rounded))
+                }
+            } header: {
+                Text("Camera")
+            }
+
             if AppSettings.isFeatureEnabled(.extendedReplay) {
                 Section {
                     Toggle("Extended replay buffer", isOn: longBufferToggleBinding)
@@ -246,6 +340,23 @@ extension SettingsView {
             }
         }
         .formStyle(.grouped)
+    }
+
+    func cameraPositionTitle(_ position: CameraOverlayPosition) -> String {
+        switch position {
+        case .topLeft: return "Top left"
+        case .topRight: return "Top right"
+        case .bottomLeft: return "Bottom left"
+        case .bottomRight: return "Bottom right"
+        }
+    }
+
+    func cameraSizeTitle(_ size: CameraOverlaySize) -> String {
+        switch size {
+        case .small: return "Small"
+        case .medium: return "Medium"
+        case .large: return "Large"
+        }
     }
 
     func validateDisplay2Selection() {

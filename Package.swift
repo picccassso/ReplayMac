@@ -38,6 +38,7 @@ let package = Package(
             dependencies: ["Branding"],
             path: "Sources/Capture",
             linkerSettings: [
+                .linkedFramework("AVFoundation"),
                 .linkedFramework("ScreenCaptureKit"),
                 .linkedFramework("CoreMedia"),
                 .linkedFramework("CoreVideo"),

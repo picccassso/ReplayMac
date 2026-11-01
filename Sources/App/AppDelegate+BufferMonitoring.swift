@@ -84,6 +84,17 @@ extension AppDelegate {
                 // capture watchdog above this recovers in place.
                 self.micAudioCapture.restartIfStalled(timeout: 10, isSessionActive: isSessionActive)
 
+                // Camera permission revoked mid-recording: tear the session
+                // down (drops the green in-use indicator) and drop the stored
+                // camera frame; the compositor omits the overlay from then on
+                // and the recording continues without it.
+                if self.cameraCapture.isRunning, CameraCapture.authorizationStatus() != .authorized {
+                    bufferMonitorLogger.warning("Camera access was revoked mid-recording; stopping the camera overlay.")
+                    self.cameraCapture.stop()
+                    self.frameCompositor.clearCameraFrame()
+                    self.notifyCameraPermissionDeniedIfNeeded()
+                }
+
                 // Judged against the main SCK stream's samples, so it must be
                 // gated on the main stream actually carrying audio: per-app
                 // audio runs a separate stream that reports no stats here.

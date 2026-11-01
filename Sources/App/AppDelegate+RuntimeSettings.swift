@@ -106,6 +106,37 @@ extension AppDelegate {
         settingsObservations.append(Defaults.observe(.microphoneID) { [weak self] _ in
             self?.scheduleRuntimeSettingsReconcile(needsVideoReset: false)
         })
+        // Camera overlay enable/device/resolution can change the video routing
+        // (direct vs compositor) and force SDR, so they need a full restart
+        // while capture is running.
+        settingsObservations.append(Defaults.observe(.cameraOverlayEnabled) { [weak self] _ in
+            guard let self else { return }
+            self.statusItemController.refreshPresentation()
+            guard self.isCaptureRunning else { return }
+            self.scheduleRuntimeSettingsReconcile(needsFullRestart: true)
+        })
+        settingsObservations.append(Defaults.observe(.cameraDeviceID) { [weak self] _ in
+            guard let self, self.isCaptureRunning else { return }
+            self.scheduleRuntimeSettingsReconcile(needsFullRestart: true)
+        })
+        settingsObservations.append(Defaults.observe(.cameraResolution) { [weak self] _ in
+            guard let self, self.isCaptureRunning else { return }
+            self.scheduleRuntimeSettingsReconcile(needsFullRestart: true)
+        })
+        // Pure overlay-layout changes are live-applied to the compositor while
+        // capture runs — no pipeline restart needed.
+        settingsObservations.append(Defaults.observe(.cameraPosition) { [weak self] _ in
+            guard let self, self.isCaptureRunning else { return }
+            self.frameCompositor.setCameraOverlay(AppSettings.cameraOverlayEnabled ? AppSettings.cameraOverlayLayout : nil)
+        })
+        settingsObservations.append(Defaults.observe(.cameraSize) { [weak self] _ in
+            guard let self, self.isCaptureRunning else { return }
+            self.frameCompositor.setCameraOverlay(AppSettings.cameraOverlayEnabled ? AppSettings.cameraOverlayLayout : nil)
+        })
+        settingsObservations.append(Defaults.observe(.cameraBorderEnabled) { [weak self] _ in
+            guard let self, self.isCaptureRunning else { return }
+            self.frameCompositor.setCameraOverlay(AppSettings.cameraOverlayEnabled ? AppSettings.cameraOverlayLayout : nil)
+        })
         settingsObservations.append(Defaults.observe(.memoryCapMB) { [weak self] _ in
             self?.syncMemoryCapsToSettings()
         })
@@ -282,6 +313,7 @@ extension AppDelegate {
                 }
                 await applySystemAudioSettingIfNeeded()
                 await applyMicSettingIfNeeded()
+                await applyCameraSettingIfNeeded()
                 await configureLongBufferForCurrentSettings()
             }
         } catch {
@@ -329,6 +361,7 @@ extension AppDelegate {
                 display2Height: scaled2.height,
                 fps: fps
             )
+            frameCompositor.setCameraOverlay(isCameraOverlayRoutingActive ? AppSettings.cameraOverlayLayout : nil)
 
             try await captureManager.updateDualStreamConfigurations(
                 fps: fps,
@@ -363,6 +396,15 @@ extension AppDelegate {
                 excludeOwnAppAudio: AppSettings.excludeOwnAppAudio,
                 resolution: CaptureResolutionConfig(width: scaled.width, height: scaled.height)
             )
+
+            // Single-display + overlay routes screen frames through the
+            // compositor, so its canvas must be re-created at the new scaled
+            // size. Without the overlay the direct SCK → encoder path is
+            // untouched.
+            if isCameraOverlayRoutingActive {
+                frameCompositor.configureSingleDisplay(width: scaled.width, height: scaled.height, fps: fps)
+                frameCompositor.setCameraOverlay(AppSettings.cameraOverlayLayout)
+            }
 
             // Restart encoder with new codec/bitrate/resolution
             try videoEncoder.start(width: scaled.width, height: scaled.height, fps: fps, codec: codec, bitrate: bitrate, captureHDR: captureHDR)
@@ -556,6 +598,56 @@ extension AppDelegate {
         )
     }
 
+    /// Starts/stops/restarts the camera capture to match the current camera
+    /// settings, mirroring `applyMicSettingIfNeeded`. Only runs when the
+    /// enable/device actually changed since the pipeline last configured it.
+    func applyCameraSettingIfNeeded() async {
+        // Dual separate-files never composites, so the overlay is inactive there.
+        let shouldCaptureCamera = AppSettings.cameraOverlayEnabled && !isSeparateDualSaveMode
+        let selectedCameraDeviceID = AppSettings.cameraDeviceID
+        let cameraSettingsChanged = shouldCaptureCamera != lastCameraEnabled || selectedCameraDeviceID != lastCameraDeviceID
+        guard cameraSettingsChanged else { return }
+
+        if shouldCaptureCamera {
+            let cameraPermissionGranted = await requestCameraPermissionIfNeeded()
+            if cameraPermissionGranted {
+                cameraCapture.stop()
+                frameCompositor.clearCameraFrame()
+                do {
+                    try cameraCapture.start(
+                        deviceID: selectedCameraDeviceID.isEmpty ? nil : selectedCameraDeviceID,
+                        resolution: AppSettings.cameraResolutionEnum
+                    )
+                    lastCameraEnabled = true
+                    lastCameraDeviceID = selectedCameraDeviceID
+                } catch {
+                    runtimeSettingsLogger.error("Failed to restart camera capture: \(String(describing: error), privacy: .public)")
+                    NotificationManager.shared.showOperationalNotification(
+                        title: "Camera Unavailable",
+                        body: "Recording continues without the camera overlay. \(error.localizedDescription)"
+                    )
+                }
+            } else {
+                notifyCameraPermissionDeniedIfNeeded()
+            }
+        } else {
+            cameraCapture.stop()
+            frameCompositor.setCameraOverlay(nil)
+            frameCompositor.clearCameraFrame()
+            lastCameraEnabled = false
+            lastCameraDeviceID = selectedCameraDeviceID
+        }
+    }
+
+    func notifyCameraPermissionDeniedIfNeeded() {
+        guard !hasNotifiedCameraDenied else { return }
+        hasNotifiedCameraDenied = true
+        NotificationManager.shared.showOperationalNotification(
+            title: "Camera Access Denied",
+            body: "Clips will not include a camera overlay. Enable camera access in System Settings → Privacy & Security → Camera."
+        )
+    }
+
     func restartFullPipeline() async {
         await stopCapturePipelineAsync()
         await startCapturePipelineAsync(userInitiated: false)
@@ -567,6 +659,22 @@ extension AppDelegate {
             return true
         case .notDetermined:
             return await AVCaptureDevice.requestAccess(for: .audio)
+        case .denied, .restricted:
+            return false
+        @unknown default:
+            return false
+        }
+    }
+
+    /// Just-in-time camera permission: prompts only when the status is
+    /// `.notDetermined` (the user just enabled the overlay or started a
+    /// recording with it). Never called at launch and never polled.
+    func requestCameraPermissionIfNeeded() async -> Bool {
+        switch CameraCapture.authorizationStatus() {
+        case .authorized:
+            return true
+        case .notDetermined:
+            return await CameraCapture.requestAccess()
         case .denied, .restricted:
             return false
         @unknown default:

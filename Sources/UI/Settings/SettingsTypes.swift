@@ -68,6 +68,12 @@ struct MicrophoneOption: Identifiable, Hashable {
     let name: String
 }
 
+public struct CameraOption: Identifiable, Hashable {
+    public let id: String
+    public let name: String
+    public let isContinuityCamera: Bool
+}
+
 public struct AudioApplicationOption: Identifiable, Hashable, Sendable {
     public let bundleID: String
     public let name: String
@@ -115,6 +121,14 @@ public struct CaptureProfile: Identifiable, Codable, Equatable, Sendable {
     public var queueDepth: Int
     public var longBufferEnabled: Bool
     public var longBufferDurationMinutes: Int
+    /// Camera overlay fields are optional so profiles saved before the camera
+    /// overlay existed still decode; nil means "not captured by this profile".
+    public var cameraOverlayEnabled: Bool? = nil
+    public var cameraDeviceID: String? = nil
+    public var cameraPosition: String? = nil
+    public var cameraSize: String? = nil
+    public var cameraBorderEnabled: Bool? = nil
+    public var cameraResolution: String? = nil
     public var themeSnapshot: ProfileThemeSnapshot? = nil
 
     public var summary: String {

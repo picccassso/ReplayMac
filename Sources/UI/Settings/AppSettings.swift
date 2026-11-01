@@ -308,6 +308,27 @@ public enum AppSettings {
         DualCaptureSaveMode(rawValue: Defaults[.dualCaptureSaveMode]) ?? .sideBySide
     }
 
+    public static var cameraOverlayEnabled: Bool { Defaults[.cameraOverlayEnabled] }
+    /// Empty string means the system default camera.
+    public static var cameraDeviceID: String { Defaults[.cameraDeviceID] }
+    public static var cameraPositionEnum: CameraOverlayPosition {
+        CameraOverlayPosition(rawValue: Defaults[.cameraPosition]) ?? .topLeft
+    }
+    public static var cameraSizeEnum: CameraOverlaySize {
+        CameraOverlaySize(rawValue: Defaults[.cameraSize]) ?? .small
+    }
+    public static var cameraBorderEnabled: Bool { Defaults[.cameraBorderEnabled] }
+    public static var cameraResolutionEnum: CameraCaptureResolution {
+        CameraCaptureResolution(rawValue: Defaults[.cameraResolution]) ?? .hd720p30
+    }
+    public static var cameraOverlayLayout: CameraOverlayLayout {
+        CameraOverlayLayout(
+            position: cameraPositionEnum,
+            size: cameraSizeEnum,
+            borderEnabled: cameraBorderEnabled
+        )
+    }
+
     public static var systemAudioVolume: Double { Defaults[.systemAudioVolume] }
     public static var microphoneVolume: Double { Defaults[.microphoneVolume] }
     public static var isSystemAudioMuted: Bool { Defaults[.isSystemAudioMuted] }
@@ -375,6 +396,26 @@ public enum AppSettings {
             return false
         }
         if !profile.captureDisplayID.isEmpty && Defaults[.captureDisplayID] != profile.captureDisplayID {
+            return false
+        }
+        // Camera fields are optional: profiles saved before the camera overlay
+        // existed have nil here and don't constrain the current camera settings.
+        if let value = profile.cameraOverlayEnabled, Defaults[.cameraOverlayEnabled] != value {
+            return false
+        }
+        if let value = profile.cameraDeviceID, Defaults[.cameraDeviceID] != value {
+            return false
+        }
+        if let value = profile.cameraPosition, Defaults[.cameraPosition] != value {
+            return false
+        }
+        if let value = profile.cameraSize, Defaults[.cameraSize] != value {
+            return false
+        }
+        if let value = profile.cameraBorderEnabled, Defaults[.cameraBorderEnabled] != value {
+            return false
+        }
+        if let value = profile.cameraResolution, Defaults[.cameraResolution] != value {
             return false
         }
         if let theme = profile.themeSnapshot, currentThemeSnapshot() != theme {
@@ -457,6 +498,24 @@ public enum AppSettings {
         Defaults[.queueDepth] = profile.queueDepth
         Defaults[.longBufferEnabled] = profile.longBufferEnabled
         Defaults[.longBufferDurationMinutes] = profile.longBufferDurationMinutes
+        if let cameraOverlayEnabled = profile.cameraOverlayEnabled {
+            Defaults[.cameraOverlayEnabled] = cameraOverlayEnabled
+        }
+        if let cameraDeviceID = profile.cameraDeviceID {
+            Defaults[.cameraDeviceID] = cameraDeviceID
+        }
+        if let cameraPosition = profile.cameraPosition {
+            Defaults[.cameraPosition] = cameraPosition
+        }
+        if let cameraSize = profile.cameraSize {
+            Defaults[.cameraSize] = cameraSize
+        }
+        if let cameraBorderEnabled = profile.cameraBorderEnabled {
+            Defaults[.cameraBorderEnabled] = cameraBorderEnabled
+        }
+        if let cameraResolution = profile.cameraResolution {
+            Defaults[.cameraResolution] = cameraResolution
+        }
         if let themeSnapshot = profile.themeSnapshot {
             applyThemeSnapshot(themeSnapshot)
         }
@@ -482,7 +541,9 @@ public enum AppSettings {
         isFeatureEnabled(.proVideo) && Defaults[.captureHDR]
     }
     public static var isHDRCaptureActive: Bool {
-        captureHDR && CaptureManager.supportsHDRCapture
+        // The camera overlay is composited in 8-bit SDR, so HDR is impossible
+        // while it is enabled.
+        captureHDR && !cameraOverlayEnabled && CaptureManager.supportsHDRCapture
             && (captureMode != CaptureMode.dualSideBySide.rawValue || dualCaptureSaveModeEnum == .separateFiles)
     }
     public static var effectiveVideoCodec: String { isHDRCaptureActive ? "hevc" : videoCodec }
@@ -771,6 +832,13 @@ public extension Defaults.Keys {
     static let frameRate = Key<Int>("frameRate", default: 60)
     static let bitrateMbps = Key<Double>("bitrateMbps", default: 25)
     static let qualityPreset = Key<String>("qualityPreset", default: QualityPreset.quality.rawValue)
+
+    static let cameraOverlayEnabled = Key<Bool>("cameraOverlayEnabled", default: false)
+    static let cameraDeviceID = Key<String>("cameraDeviceID", default: "")   // "" = system default
+    static let cameraPosition = Key<String>("cameraPosition", default: CameraOverlayPosition.topLeft.rawValue)
+    static let cameraSize = Key<String>("cameraSize", default: CameraOverlaySize.small.rawValue)
+    static let cameraBorderEnabled = Key<Bool>("cameraBorderEnabled", default: true)
+    static let cameraResolution = Key<String>("cameraResolution", default: CameraCaptureResolution.hd720p30.rawValue)
 
     static let captureSystemAudio = Key<Bool>("captureSystemAudio", default: true)
     static let captureMicrophone = Key<Bool>("captureMicrophone", default: false)

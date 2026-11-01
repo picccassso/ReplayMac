@@ -69,6 +69,14 @@ final class ReplayControlLabelsTests: XCTestCase {
     }
 
     @MainActor
+    func testCameraOverlayLabels() {
+        XCTAssertEqual(ReplayControlLabels.camera(isEnabled: false).title, "Show Camera Overlay")
+        XCTAssertEqual(ReplayControlLabels.camera(isEnabled: false).symbol, "video.fill")
+        XCTAssertEqual(ReplayControlLabels.camera(isEnabled: true).title, "Hide Camera Overlay")
+        XCTAssertEqual(ReplayControlLabels.camera(isEnabled: true).symbol, "video.slash.fill")
+    }
+
+    @MainActor
     func testToggleAndSaveTitles() {
         XCTAssertEqual(ReplayControlLabels.replayBuffer(isRecording: false).title, "Start Replay Buffer")
         XCTAssertEqual(ReplayControlLabels.replayBuffer(isRecording: true).title, "Stop Replay Buffer")

@@ -24,6 +24,7 @@ public final class MenuBarState: ObservableObject {
     @Published public private(set) var isUsingFallbackDisplay = false
     @Published public private(set) var isMicrophoneMuted = false
     @Published public private(set) var isSystemAudioMuted = false
+    @Published public private(set) var isCameraOverlayEnabled = false
     public var onSaveStatusChanged: (@MainActor () -> Void)?
     /// Fires when the buffer, session, captured display or mute state shown to the user changes.
     public var onDisplayedStateChanged: (@MainActor () -> Void)?
@@ -124,6 +125,12 @@ public final class MenuBarState: ObservableObject {
         guard self.isMicrophoneMuted != isMicrophoneMuted || self.isSystemAudioMuted != isSystemAudioMuted else { return }
         self.isMicrophoneMuted = isMicrophoneMuted
         self.isSystemAudioMuted = isSystemAudioMuted
+        onDisplayedStateChanged?()
+    }
+
+    public func setCameraOverlayEnabled(_ enabled: Bool) {
+        guard isCameraOverlayEnabled != enabled else { return }
+        isCameraOverlayEnabled = enabled
         onDisplayedStateChanged?()
     }
 

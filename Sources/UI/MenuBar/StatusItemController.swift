@@ -13,6 +13,7 @@ public final class StatusItemController: NSObject, NSMenuDelegate {
     private var toggleSessionRecordingItem: NSMenuItem?
     private var toggleRecordingItem: NSMenuItem?
     private var toggleMicMuteItem: NSMenuItem?
+    private var toggleCameraOverlayItem: NSMenuItem?
     private var toggleSystemAudioMuteItem: NSMenuItem?
     private var muteAppsItem: NSMenuItem?
     private var muteAppsSubmenu: NSMenu?
@@ -34,6 +35,7 @@ public final class StatusItemController: NSObject, NSMenuDelegate {
     public var onToggleSessionRecording: (() -> Void)?
     public var onToggleRecording: (() -> Void)?
     public var onToggleMicrophoneMute: (() -> Void)?
+    public var onToggleCameraOverlay: (() -> Void)?
     public var onToggleSystemAudioMute: (() -> Void)?
     public var onCopyLastClip: (() -> Void)?
     public var onOpenMainWindow: (() -> Void)?
@@ -191,6 +193,10 @@ public final class StatusItemController: NSObject, NSMenuDelegate {
         toggleMicMuteItem.target = self
         menu.addItem(toggleMicMuteItem)
 
+        let toggleCameraOverlayItem = NSMenuItem(title: "", action: #selector(toggleCameraOverlay), keyEquivalent: "")
+        toggleCameraOverlayItem.target = self
+        menu.addItem(toggleCameraOverlayItem)
+
         let toggleSystemAudioMuteItem = NSMenuItem(title: "", action: #selector(toggleSystemAudioMute), keyEquivalent: "")
         toggleSystemAudioMuteItem.target = self
         menu.addItem(toggleSystemAudioMuteItem)
@@ -266,6 +272,7 @@ public final class StatusItemController: NSObject, NSMenuDelegate {
         self.toggleSessionRecordingItem = toggleSessionRecordingItem
         self.toggleRecordingItem = toggleRecordingItem
         self.toggleMicMuteItem = toggleMicMuteItem
+        self.toggleCameraOverlayItem = toggleCameraOverlayItem
         self.toggleSystemAudioMuteItem = toggleSystemAudioMuteItem
         self.muteAppsItem = muteAppsItem
         self.muteAppsSubmenu = muteAppsSubmenu
@@ -315,6 +322,13 @@ public final class StatusItemController: NSObject, NSMenuDelegate {
         toggleMicMuteItem?.title = microphone.title
         toggleMicMuteItem?.image = NSImage(systemSymbolName: microphone.symbol,
                                            accessibilityDescription: microphone.accessibilityDescription)
+
+        state.setCameraOverlayEnabled(AppSettings.cameraOverlayEnabled)
+        let cameraOverlay = ReplayControlLabels.camera(isEnabled: state.isCameraOverlayEnabled)
+        toggleCameraOverlayItem?.title = cameraOverlay.title
+        toggleCameraOverlayItem?.image = NSImage(systemSymbolName: cameraOverlay.symbol,
+                                                 accessibilityDescription: cameraOverlay.accessibilityDescription)
+        toggleCameraOverlayItem?.state = state.isCameraOverlayEnabled ? .on : .off
 
         let systemAudio = ReplayControlLabels.systemAudio(isEnabled: AppSettings.captureSystemAudio,
                                                            isMuted: state.isSystemAudioMuted)
@@ -525,6 +539,10 @@ public final class StatusItemController: NSObject, NSMenuDelegate {
 
     @objc private func toggleMicrophoneMute() {
         onToggleMicrophoneMute?()
+    }
+
+    @objc private func toggleCameraOverlay() {
+        onToggleCameraOverlay?()
     }
 
     @objc private func toggleSystemAudioMute() {

@@ -1,5 +1,13 @@
 # Changelog
 
+## Unreleased
+
+### Camera overlay
+
+- Add an optional webcam overlay to recordings: enable "Add camera to recordings" in Settings → Video or from the menu bar, then choose the camera, corner position, size, resolution (720p30 or 1080p30) and border & rounded corners. The camera image is composited into single-display and side-by-side dual-display recordings
+- While the camera overlay is on, recordings are captured in SDR only; the HDR option is disabled and Settings explains why
+- The first time you enable the overlay, macOS asks for Camera permission with a purpose string explaining that your camera is recorded as an overlay in your screen recordings; if you decline, recording continues without the overlay
+
 ## 2.2.1
 
 - Fix a crash about two minutes after starting the replay buffer. Every audio buffer made the next one slightly more expensive to hand off, until the audio thread ran out of stack space and ReplayMac quit

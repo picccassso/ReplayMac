@@ -140,6 +140,21 @@ final class MenuBarStateTests: XCTestCase {
         XCTAssertTrue(state.isSystemAudioMuted)
     }
 
+    func testCameraOverlayStateUpdatesOnMenuBarState() {
+        let state = MenuBarState()
+        XCTAssertFalse(state.isCameraOverlayEnabled)
+
+        state.setCameraOverlayEnabled(true)
+        XCTAssertTrue(state.isCameraOverlayEnabled)
+
+        // Repeating the same value is a no-op.
+        state.setCameraOverlayEnabled(true)
+        XCTAssertTrue(state.isCameraOverlayEnabled)
+
+        state.setCameraOverlayEnabled(false)
+        XCTAssertFalse(state.isCameraOverlayEnabled)
+    }
+
     func testCopyLastClipToPasteboardWritesLastSavedClipAndFallsBackToDirectory() throws {
         let tempDir = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
         try FileManager.default.createDirectory(at: tempDir, withIntermediateDirectories: true)

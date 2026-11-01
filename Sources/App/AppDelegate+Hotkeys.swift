@@ -100,6 +100,11 @@ extension AppDelegate {
         }
     }
 
+    func toggleCameraOverlayFromUI() {
+        Defaults[.cameraOverlayEnabled].toggle()
+        statusItemController.refreshPresentation()
+    }
+
     func toggleSystemAudioMuteFromUI() {
         if !AppSettings.captureSystemAudio {
             Defaults[.captureSystemAudio] = true

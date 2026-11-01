@@ -8,6 +8,9 @@
     <true/>
     <key>com.apple.security.device.audio-input</key>
     <true/>
+    <!-- Webcam overlay composited into recordings, on-device only -->
+    <key>com.apple.security.device.camera</key>
+    <true/>
     <!-- Default output location ~/Movies/ReplayCap -->
     <key>com.apple.security.assets.movies.read-write</key>
     <true/>

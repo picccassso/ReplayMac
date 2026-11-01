@@ -32,6 +32,22 @@ extension AppDelegate {
 
         frameCompositor.outputHandler = replayCapFrameCompositorOutputHandler(videoEncoder)
 
+        // Camera frames are only stored by the compositor; emission cadence
+        // stays driven by screen-frame PTS.
+        cameraCapture.setFrameHandler { [frameCompositor] sampleBuffer in
+            frameCompositor.pushCameraFrame(sampleBuffer)
+        }
+        cameraCapture.setErrorHandler { [weak self] error in
+            Task { @MainActor in
+                guard let self else { return }
+                capturePipelineLogger.error("Camera capture error: \(String(describing: error), privacy: .public)")
+                NotificationManager.shared.showOperationalNotification(
+                    title: "Camera Overlay Unavailable",
+                    body: "Recording continues without the camera overlay. \(error.localizedDescription)"
+                )
+            }
+        }
+
         systemAudioEncoder.outputHandler = replayCapSystemAudioOutputHandler(
             systemAudioRingBuffer: systemAudioRingBuffer,
             longBufferAppendPump: longBufferAppendPump,
@@ -100,6 +116,15 @@ extension AppDelegate {
                 if shouldCaptureMic && !micPermissionGranted {
                     notifyMicPermissionDeniedIfNeeded()
                 }
+
+                let shouldCaptureCamera = AppSettings.cameraOverlayEnabled
+                let cameraPermissionGranted = shouldCaptureCamera ? await requestCameraPermissionIfNeeded() : false
+                if shouldCaptureCamera && !cameraPermissionGranted {
+                    notifyCameraPermissionDeniedIfNeeded()
+                }
+                // Dual separate-files mode writes two raw per-display files and
+                // never composites, so the overlay is not applied there.
+                let cameraActive = shouldCaptureCamera && cameraPermissionGranted && !isSeparateDualSaveMode
 
                 let isDual = AppSettings.captureMode == CaptureMode.dualSideBySide.rawValue
                 let captureHDR = AppSettings.isHDRCaptureActive
@@ -181,7 +206,8 @@ extension AppDelegate {
                             codec: codec,
                             bitrate: bitrate,
                             captureAudio: captureMainSystemAudio,
-                            captureHDR: captureHDR
+                            captureHDR: captureHDR,
+                            cameraActive: cameraActive
                         )
                     }
 
@@ -210,6 +236,8 @@ extension AppDelegate {
                             display2Height: scaled2.height,
                             fps: fps
                         )
+                        frameCompositor.setCameraOverlay(cameraActive ? AppSettings.cameraOverlayLayout : nil)
+                        isCameraOverlayRoutingActive = cameraActive
 
                         try startDualVideoEncoders(
                             saveMode: dualSaveMode,
@@ -239,12 +267,14 @@ extension AppDelegate {
                         codec: codec,
                         bitrate: bitrate,
                         captureAudio: captureMainSystemAudio,
-                        captureHDR: captureHDR
+                        captureHDR: captureHDR,
+                        cameraActive: cameraActive
                     )
                 }
 
                 currentFPS = fps
                 lastMicEnabled = shouldCaptureMic
+                lastCameraEnabled = cameraActive
 
                 if shouldCaptureMic && micPermissionGranted {
                     do {
@@ -255,6 +285,24 @@ extension AppDelegate {
                         NotificationManager.shared.showOperationalNotification(
                             title: "Microphone Unavailable",
                             body: error.localizedDescription
+                        )
+                    }
+                }
+
+                if cameraActive {
+                    do {
+                        try cameraCapture.start(
+                            deviceID: AppSettings.cameraDeviceID.isEmpty ? nil : AppSettings.cameraDeviceID,
+                            resolution: AppSettings.cameraResolutionEnum
+                        )
+                        lastCameraEnabled = true
+                        lastCameraDeviceID = AppSettings.cameraDeviceID
+                    } catch {
+                        // The overlay is optional: recording continues without it.
+                        capturePipelineLogger.error("Failed to start camera capture: \(String(describing: error), privacy: .public)")
+                        NotificationManager.shared.showOperationalNotification(
+                            title: "Camera Unavailable",
+                            body: "Recording continues without the camera overlay. \(error.localizedDescription)"
                         )
                     }
                 }
@@ -310,13 +358,17 @@ extension AppDelegate {
         longBufferAppendPump.reset()
         await longBufferRecorder.stop(deleteSegments: false)
         micAudioCapture.stop()
+        cameraCapture.stop()
         videoEncoder.stop()
         dualDisplay1VideoEncoder.stop()
         dualDisplay2VideoEncoder.stop()
         systemAudioEncoder.stop()
         micAudioEncoder.stop()
         systemAudioCapture.reset()
+        frameCompositor.setCameraOverlay(nil)
+        frameCompositor.clearCameraFrame()
         frameCompositor.reset()
+        isCameraOverlayRoutingActive = false
         AudioLevelMonitor.shared.reset()
         AudioLevelPreview.shared.setCaptureActive(false)
     }
@@ -329,9 +381,17 @@ extension AppDelegate {
         codec: Encode.VideoCodec,
         bitrate: Int,
         captureAudio: Bool,
-        captureHDR: Bool
+        captureHDR: Bool,
+        cameraActive: Bool = false
     ) async throws {
-        await captureManager.setVideoHandler(replayCapVideoEncodeHandler(videoEncoder))
+        if cameraActive {
+            // Overlay active: route screen frames through the compositor so the
+            // camera can be drawn on top (32BGRA canvas into the encoder).
+            await captureManager.setVideoHandler(replayCapPrimaryFrameCompositorHandler(frameCompositor))
+        } else {
+            // No overlay: keep the direct SCK 420YpCbCr8 → encoder path.
+            await captureManager.setVideoHandler(replayCapVideoEncodeHandler(videoEncoder))
+        }
         await captureManager.setAudioHandler(replayCapSystemAudioProcessHandler(systemAudioCapture))
 
         let config = try await captureManager.start(
@@ -356,13 +416,23 @@ extension AppDelegate {
             resolution: CaptureResolutionConfig(width: scaled.width, height: scaled.height)
         )
 
+        if cameraActive {
+            frameCompositor.configureSingleDisplay(width: scaled.width, height: scaled.height, fps: fps)
+            frameCompositor.setCameraOverlay(AppSettings.cameraOverlayLayout)
+            isCameraOverlayRoutingActive = true
+        } else {
+            isCameraOverlayRoutingActive = false
+        }
+
         try videoEncoder.start(
             width: scaled.width,
             height: scaled.height,
             fps: fps,
             codec: codec,
             bitrate: bitrate,
-            captureHDR: captureHDR
+            // The overlay composites into a 32BGRA SDR canvas, so the encoder
+            // must run SDR whenever the overlay is active.
+            captureHDR: cameraActive ? false : captureHDR
         )
 
         isDualMode = false
@@ -425,13 +495,17 @@ extension AppDelegate {
         await longBufferRecorder.stop(deleteSegments: !preserveResumeIntent)
         await sessionRecorder.stop(deleteSegments: true)
         micAudioCapture.stop()
+        cameraCapture.stop()
         videoEncoder.stop()
         dualDisplay1VideoEncoder.stop()
         dualDisplay2VideoEncoder.stop()
         systemAudioEncoder.stop()
         micAudioEncoder.stop()
         systemAudioCapture.reset()
+        frameCompositor.setCameraOverlay(nil)
+        frameCompositor.clearCameraFrame()
         frameCompositor.reset()
+        isCameraOverlayRoutingActive = false
         AudioLevelMonitor.shared.reset()
 
         isCaptureRunning = false
