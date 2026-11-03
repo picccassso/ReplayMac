@@ -112,6 +112,7 @@ extension AppDelegate {
         settingsObservations.append(Defaults.observe(.cameraOverlayEnabled) { [weak self] _ in
             guard let self else { return }
             self.statusItemController.refreshPresentation()
+            self.broadcastCompanionSnapshot()
             guard self.isCaptureRunning else { return }
             self.scheduleRuntimeSettingsReconcile(needsFullRestart: true)
         })
