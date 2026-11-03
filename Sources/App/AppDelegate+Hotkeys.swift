@@ -46,6 +46,7 @@ extension AppDelegate {
             self?.toggleSystemAudioMuteFromUI()
         }
         hotkeyManager.onToggleCameraOverlay = { [weak self] in
+            guard AppSettings.isFeatureEnabled(.cameraOverlay) else { return }
             self?.toggleCameraOverlayFromUI()
         }
         hotkeyManager.onCopyLastClip = { [weak self] in

@@ -172,6 +172,21 @@ public enum AppSettings {
         Defaults[.enabledFeatureModules] = current
     }
 
+    /// Camera Overlay arrived after people had already picked a preset. Full
+    /// means every feature, so it joins a stored Full set once, as it does for
+    /// anyone who already turned the overlay on; other presets opt in from
+    /// Customise Features.
+    public static func migrateCameraFeatureModuleIfNeeded() {
+        guard !Defaults[.didAddCameraFeatureModule] else { return }
+        Defaults[.didAddCameraFeatureModule] = true
+        var modules = Defaults[.enabledFeatureModules]
+        guard !modules.contains(.cameraOverlay) else { return }
+        if modules == ExperiencePreset.full.modules.subtracting([.cameraOverlay]) || Defaults[.cameraOverlayEnabled] {
+            modules.insert(.cameraOverlay)
+            Defaults[.enabledFeatureModules] = modules
+        }
+    }
+
     public static func applyExperiencePreset(_ preset: ExperiencePreset) {
         guard preset != .custom else { return }
         Defaults[.enabledFeatureModules] = preset.modules
@@ -308,7 +323,9 @@ public enum AppSettings {
         DualCaptureSaveMode(rawValue: Defaults[.dualCaptureSaveMode]) ?? .sideBySide
     }
 
-    public static var cameraOverlayEnabled: Bool { Defaults[.cameraOverlayEnabled] }
+    public static var cameraOverlayEnabled: Bool {
+        isFeatureEnabled(.cameraOverlay) && Defaults[.cameraOverlayEnabled]
+    }
     /// Empty string means the system default camera.
     public static var cameraDeviceID: String { Defaults[.cameraDeviceID] }
     public static var cameraPositionEnum: CameraOverlayPosition {
@@ -881,6 +898,7 @@ public extension Defaults.Keys {
     static let hasCompletedOnboarding = Key<Bool>("hasCompletedOnboarding", default: false)
     static let enabledFeatureModules = Key<Set<FeatureModule>>("enabledFeatureModules", default: ExperiencePreset.full.modules)
     static let didInitializeExperiencePreset = Key<Bool>("didInitializeExperiencePreset", default: false)
+    static let didAddCameraFeatureModule = Key<Bool>("didAddCameraFeatureModule", default: false)
 
     static let themeColorScheme = Key<ThemeColorScheme>("themeColorScheme", default: .system)
     static let themeAtmosphere = Key<ThemeAtmosphere>("themeAtmosphere", default: .native)

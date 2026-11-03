@@ -126,7 +126,7 @@ public struct ExperiencePresetCardsView: View {
     }
 }
 
-/// Modal sheet that allows users to toggle each of the 10 feature modules individually.
+/// Modal sheet that allows users to toggle each feature module individually.
 public struct FeatureCustomiserSheet: View {
     @Environment(\.dismiss) private var dismiss
     @Default(.enabledFeatureModules) private var enabledFeatureModules
@@ -396,7 +396,7 @@ public struct FeatureCustomiserSheet: View {
                 } else if activePreset == .balanced {
                     Text("Balanced Mode · 5 features enabled")
                 } else {
-                    Text("Full Mode · All 10 features enabled")
+                    Text("Full Mode · All \(FeatureModule.allCases.count) features enabled")
                 }
             }
             .font(.system(size: 11, weight: .medium, design: .rounded))

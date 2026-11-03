@@ -19,8 +19,10 @@ extension SettingsView {
                 Toggle("Include current appearance theme", isOn: $includeThemeInProfile)
                     .help("Saves your active Atmosphere, color scheme, surface style, and accent colors into this profile so applying the profile switches the app's look too.")
 
-                Toggle("Include camera overlay settings", isOn: $includeCameraInProfile)
-                    .help("Saves the camera overlay toggle, camera, position, size, border, and resolution into this profile.")
+                if AppSettings.isFeatureEnabled(.cameraOverlay) {
+                    Toggle("Include camera overlay settings", isOn: $includeCameraInProfile)
+                        .help("Saves the camera overlay toggle, camera, position, size, border, and resolution into this profile.")
+                }
             } header: {
                 Text("Create")
             }

@@ -149,6 +149,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         OnboardingState.migrateExistingInstallationIfNeeded()
         super.init()
         AppSettings.migrateLegacyBrandDefaults()
+        AppSettings.migrateCameraFeatureModuleIfNeeded()
         lastMicEnabled = AppSettings.captureMicrophone
         lastMicDeviceID = AppSettings.microphoneID
         lastCameraEnabled = AppSettings.cameraOverlayEnabled

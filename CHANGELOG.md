@@ -10,6 +10,7 @@
 - Fix the camera overlay stuttering or freezing while the screen is still. Recordings only got a new frame when something on screen changed, so the camera only moved when the screen did. The camera now keeps the overlay at a steady 30 fps on a still screen too
 - Keep the camera at 30 fps in dim rooms instead of letting macOS drop it to 15 fps or lower to brighten the image
 - Turn the camera overlay on or off from the Home page, with a global hotkey (set it in Settings → Hotkeys), or from the Companion app
+- Camera Overlay is a feature in Customise Features → Video & Recording. It's on in Full mode; in Simple and Balanced you can switch it on there. Turning it off hides every camera control and stops the overlay
 
 ## 2.2.1
 

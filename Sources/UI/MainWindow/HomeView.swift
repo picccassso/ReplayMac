@@ -343,8 +343,10 @@ struct HomeView: View {
              shortcut: .toggleMicrophoneMute, action: controls.toggleMicrophone)
         tile(ReplayControlLabels.systemAudio(isEnabled: captureSystemAudio, isMuted: menuBar.isSystemAudioMuted),
              shortcut: .toggleSystemAudioMute, action: controls.toggleSystemAudio)
-        tile(ReplayControlLabels.camera(isEnabled: cameraOverlayEnabled), shortcut: .toggleCameraOverlay,
-             action: controls.toggleCameraOverlay)
+        if AppSettings.isFeatureEnabled(.cameraOverlay) {
+            tile(ReplayControlLabels.camera(isEnabled: cameraOverlayEnabled), shortcut: .toggleCameraOverlay,
+                 action: controls.toggleCameraOverlay)
+        }
         if AppSettings.isFeatureEnabled(.audioMixing) {
             muteAppsTile
         }

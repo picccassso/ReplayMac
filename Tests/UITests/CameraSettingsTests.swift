@@ -18,7 +18,12 @@ final class CameraSettingsTests: XCTestCase {
         let mode = Defaults[.captureMode]
         let saveMode = Defaults[.dualCaptureSaveMode]
         let profilesJSON = Defaults[.captureProfilesJSON]
+        let modules = Defaults[.enabledFeatureModules]
+        let didAddCameraModule = Defaults[.didAddCameraFeatureModule]
+        Defaults[.enabledFeatureModules] = ExperiencePreset.full.modules
         defer {
+            Defaults[.enabledFeatureModules] = modules
+            Defaults[.didAddCameraFeatureModule] = didAddCameraModule
             Defaults[.cameraOverlayEnabled] = overlay
             Defaults[.cameraDeviceID] = device
             Defaults[.cameraPosition] = position
@@ -271,5 +276,59 @@ final class CameraSettingsTests: XCTestCase {
             longBufferEnabled: Defaults[.longBufferEnabled],
             longBufferDurationMinutes: Defaults[.longBufferDurationMinutes]
         )
+    }
+
+    func testCameraFeatureLivesInVideoAndRecording() {
+        XCTAssertEqual(FeatureModule.cameraOverlay.category, .video)
+        XCTAssertTrue(ExperiencePreset.full.modules.contains(.cameraOverlay))
+        XCTAssertFalse(ExperiencePreset.simple.modules.contains(.cameraOverlay))
+    }
+
+    func testDisabledCameraFeatureTurnsTheOverlayOff() {
+        withSavedCameraDefaults {
+            Defaults[.cameraOverlayEnabled] = true
+            Defaults[.captureHDR] = true
+            Defaults[.captureMode] = CaptureMode.single.rawValue
+            XCTAssertTrue(AppSettings.cameraOverlayEnabled)
+
+            AppSettings.setFeatureEnabled(.cameraOverlay, false)
+            XCTAssertFalse(AppSettings.cameraOverlayEnabled)
+            XCTAssertEqual(AppSettings.isHDRCaptureActive, CaptureManager.supportsHDRCapture,
+                           "A hidden overlay must not force SDR")
+            XCTAssertTrue(Defaults[.cameraOverlayEnabled], "The user's own choice is kept for when it comes back")
+        }
+    }
+
+    func testMigrationAddsCameraToAStoredFullPresetOnce() {
+        withSavedCameraDefaults {
+            let oldFull = ExperiencePreset.full.modules.subtracting([.cameraOverlay])
+            Defaults[.cameraOverlayEnabled] = false
+            Defaults[.didAddCameraFeatureModule] = false
+            Defaults[.enabledFeatureModules] = oldFull
+
+            AppSettings.migrateCameraFeatureModuleIfNeeded()
+            XCTAssertEqual(AppSettings.experiencePreset, .full)
+
+            // Turning it off afterwards sticks across launches.
+            AppSettings.setFeatureEnabled(.cameraOverlay, false)
+            AppSettings.migrateCameraFeatureModuleIfNeeded()
+            XCTAssertFalse(AppSettings.isFeatureEnabled(.cameraOverlay))
+        }
+    }
+
+    func testMigrationLeavesOtherPresetsAloneUnlessTheOverlayWasOn() {
+        withSavedCameraDefaults {
+            Defaults[.cameraOverlayEnabled] = false
+            Defaults[.didAddCameraFeatureModule] = false
+            Defaults[.enabledFeatureModules] = ExperiencePreset.balanced.modules
+            AppSettings.migrateCameraFeatureModuleIfNeeded()
+            XCTAssertEqual(AppSettings.experiencePreset, .balanced)
+
+            Defaults[.cameraOverlayEnabled] = true
+            Defaults[.didAddCameraFeatureModule] = false
+            Defaults[.enabledFeatureModules] = ExperiencePreset.simple.modules
+            AppSettings.migrateCameraFeatureModuleIfNeeded()
+            XCTAssertTrue(AppSettings.isFeatureEnabled(.cameraOverlay))
+        }
     }
 }

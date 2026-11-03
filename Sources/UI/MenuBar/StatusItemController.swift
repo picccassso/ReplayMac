@@ -329,6 +329,7 @@ public final class StatusItemController: NSObject, NSMenuDelegate {
         toggleCameraOverlayItem?.image = NSImage(systemSymbolName: cameraOverlay.symbol,
                                                  accessibilityDescription: cameraOverlay.accessibilityDescription)
         toggleCameraOverlayItem?.state = state.isCameraOverlayEnabled ? .on : .off
+        toggleCameraOverlayItem?.isHidden = !AppSettings.isFeatureEnabled(.cameraOverlay)
 
         let systemAudio = ReplayControlLabels.systemAudio(isEnabled: AppSettings.captureSystemAudio,
                                                            isMuted: state.isSystemAudioMuted)

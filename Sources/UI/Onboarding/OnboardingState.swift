@@ -74,6 +74,7 @@ public enum OnboardingState {
             key != "hasCompletedOnboarding"
                 && key != "didEvaluateLegacyOnboardingMigration"
                 && key != "didInitializeExperiencePreset"
+                && key != "didAddCameraFeatureModule"
                 && key != "enabledFeatureModules"
                 && !key.hasPrefix("NS")
                 && !key.hasPrefix("com_apple_")

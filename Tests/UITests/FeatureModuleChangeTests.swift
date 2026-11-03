@@ -118,4 +118,15 @@ final class FeatureModuleChangeTests: XCTestCase {
         XCTAssertTrue(result.reconcileCompanionServer)
         XCTAssertFalse(result.reconcileCapture)
     }
+
+    func testCameraOverlayRestartsOnlyWhenTheOverlayIsOn() {
+        let full = ExperiencePreset.full.modules
+        let withoutCamera = full.subtracting([.cameraOverlay])
+        XCTAssertEqual(change(from: full, to: withoutCamera), noEffect)
+
+        let overlayOn = change(from: full, to: withoutCamera) { $0.cameraOverlayEnabled = true }
+        XCTAssertTrue(overlayOn.reconcileCapture)
+        XCTAssertTrue(overlayOn.needsFullRestart)
+        XCTAssertEqual(change(from: withoutCamera, to: full) { $0.cameraOverlayEnabled = true }, overlayOn)
+    }
 }

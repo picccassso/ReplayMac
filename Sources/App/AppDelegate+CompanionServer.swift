@@ -31,6 +31,7 @@ extension AppDelegate {
             self?.toggleSystemAudioMuteFromUI()
         }
         companionServer.onToggleCamera = { [weak self] in
+            guard AppSettings.isFeatureEnabled(.cameraOverlay) else { return }
             self?.toggleCameraOverlayFromUI()
         }
         companionServer.onRevealClip = { [weak self] clipId in

@@ -9,6 +9,7 @@ public enum FeatureModule: String, CaseIterable, Codable, Identifiable, Sendable
     case sessionRecording
     case extendedReplay
     case proVideo
+    case cameraOverlay
     case audioMixing
     case autoRecordGames
     case quickSaveAndThumbnail
@@ -34,6 +35,8 @@ public enum FeatureModule: String, CaseIterable, Codable, Identifiable, Sendable
             return "Extended Replay Buffer"
         case .proVideo:
             return "Pro Video & Dual Display"
+        case .cameraOverlay:
+            return "Camera Overlay"
         case .captureProfiles:
             return "Capture Profiles"
         case .companion:
@@ -59,6 +62,8 @@ public enum FeatureModule: String, CaseIterable, Codable, Identifiable, Sendable
             return "Keep a rolling 5–30 minute buffer on disk for longer sessions."
         case .proVideo:
             return "Codec selection, manual bitrate, HDR, and dual-display capture."
+        case .cameraOverlay:
+            return "Add your webcam to recordings, with its own hotkey and Home control."
         case .captureProfiles:
             return "Save and switch between named recording and encoder configurations."
         case .companion:
@@ -84,6 +89,8 @@ public enum FeatureModule: String, CaseIterable, Codable, Identifiable, Sendable
             return "externaldrive.badge.timemachine"
         case .proVideo:
             return "video.badge.waveform"
+        case .cameraOverlay:
+            return "web.camera"
         case .captureProfiles:
             return "rectangle.stack.badge.play"
         case .companion:
@@ -97,7 +104,7 @@ public enum FeatureModule: String, CaseIterable, Codable, Identifiable, Sendable
         switch self {
         case .appearance:
             return .appearance
-        case .sessionRecording, .extendedReplay, .proVideo:
+        case .sessionRecording, .extendedReplay, .proVideo, .cameraOverlay:
             return .video
         case .audioMixing:
             return .audio
@@ -139,7 +146,7 @@ public enum FeatureCategory: String, CaseIterable, Identifiable, Sendable {
         case .appearance:
             return "Personalise atmospheres, accent colours, and window surfaces."
         case .video:
-            return "Continuous recording, extended disk buffers, and pro encoding."
+            return "Continuous recording, extended disk buffers, camera overlay, and pro encoding."
         case .audio:
             return "Per-app audio routing, volume sliders, and microphone controls."
         case .automations:
@@ -261,6 +268,7 @@ public struct FeatureModuleChange: Equatable, Sendable {
         public var captureHDR = false
         public var videoCodec = VideoCodec.hevc.rawValue
         public var captureResolution = CaptureResolution.native.rawValue
+        public var cameraOverlayEnabled = false
 
         public init() {}
 
@@ -273,6 +281,7 @@ public struct FeatureModuleChange: Equatable, Sendable {
             stored.captureHDR = Defaults[.captureHDR] && CaptureManager.supportsHDRCapture
             stored.videoCodec = Defaults[.videoCodec]
             stored.captureResolution = Defaults[.captureResolution]
+            stored.cameraOverlayEnabled = Defaults[.cameraOverlayEnabled]
             return stored
         }
     }
@@ -326,6 +335,12 @@ public struct FeatureModuleChange: Equatable, Sendable {
                 reconcileCapture = true
                 needsVideoReset = true
             }
+        }
+
+        // The overlay switches capture between the direct and compositor paths.
+        if toggled.contains(.cameraOverlay), stored.cameraOverlayEnabled {
+            reconcileCapture = true
+            needsFullRestart = true
         }
     }
 }
