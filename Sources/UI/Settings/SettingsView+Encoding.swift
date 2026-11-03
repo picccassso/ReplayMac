@@ -18,6 +18,10 @@ extension SettingsView {
         "Recommended: \(Int(recommendedBitrateMbps())) Mbps"
     }
 
+    var isAtRecommendedBitrate: Bool {
+        Int(bitrateSliderValue.rounded()) == Int(recommendedBitrateMbps())
+    }
+
     func applyQualityPresetIfNeeded(_ presetRawValue: String) {
         guard let preset = QualityPreset(rawValue: presetRawValue) else {
             return
@@ -236,30 +240,47 @@ extension SettingsView {
         resolutionRawValue: String,
         frameRate: Int
     ) -> Double {
-        guard preset != .custom else {
-            return bitrateSliderValue
-        }
-
         let dimensions = effectiveVideoDimensions(resolutionRawValue: resolutionRawValue)
-        let referencePixels = Double(2560 * 1440)
-        let pixelScale = max(Double(dimensions.width * dimensions.height) / referencePixels, 0.25)
-        let fpsScale = max(Double(frameRate) / 60.0, 0.5)
-        let codecScale = !hdrCaptureEnabled && videoCodecRawValue == VideoCodec.h264.rawValue ? 1.3 : 1.0
+        return BitrateGuide.recommendedMbps(
+            preset: preset,
+            width: dimensions.width,
+            height: dimensions.height,
+            frameRate: frameRate,
+            isH264SDR: isH264SDR
+        )
+    }
 
-        let baseMbps: Double
-        switch preset {
-        case .performance:
-            baseMbps = 18
-        case .quality:
-            baseMbps = 25
-        case .ultra:
-            baseMbps = 40
-        case .custom:
-            baseMbps = bitrateSliderValue
-        }
+    var isH264SDR: Bool {
+        !hdrCaptureEnabled && videoCodecRawValue == VideoCodec.h264.rawValue
+    }
 
-        let recommendation = (baseMbps * pixelScale * fpsScale * codecScale).rounded()
-        return min(max(recommendation, 10), 50)
+    var bitrateGuide: BitrateGuide {
+        let dimensions = effectiveVideoDimensions(resolutionRawValue: captureResolutionRawValue)
+        return BitrateGuide(
+            width: dimensions.width,
+            height: dimensions.height,
+            frameRate: frameRate,
+            isH264SDR: isH264SDR
+        )
+    }
+
+    func applyRecommendedBitrate() {
+        applyBitrate(recommendedBitrateMbps())
+    }
+
+    func applyBitrate(_ mbps: Double) {
+        bitrateSliderValue = mbps
+        bitrateMbps = mbps
+    }
+
+    var bitrateExplainerContext: BitrateExplainerContext {
+        let dimensions = effectiveVideoDimensions(resolutionRawValue: captureResolutionRawValue)
+        return BitrateExplainerContext(
+            width: dimensions.width,
+            height: dimensions.height,
+            frameRate: frameRate,
+            guide: bitrateGuide
+        )
     }
 
     func effectiveVideoDimensions(resolutionRawValue: String) -> (width: Int, height: Int) {

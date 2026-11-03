@@ -86,6 +86,7 @@ public struct SettingsView: View {
     @State var displayLoadError: String?
     @State var bitrateSliderValue = Defaults[.bitrateMbps]
     @State var bitrateSliderIsEditing = false
+    @State var isShowingBitrateExplainer = false
     @State var isApplyingQualityPreset = false
     @Binding var isPresentingCustomiser: Bool
     @State private var pageWidth: CGFloat = 0

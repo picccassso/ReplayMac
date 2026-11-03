@@ -4,9 +4,14 @@ import Defaults
 extension ReplayMemoryEstimate {
     /// The estimate for whatever is currently saved in Defaults.
     static var current: ReplayMemoryEstimate {
+        current(bitrateMbps: Defaults[.bitrateMbps])
+    }
+
+    /// The saved settings, but at a bitrate that isn't saved yet.
+    static func current(bitrateMbps: Double) -> ReplayMemoryEstimate {
         make(
             bufferSeconds: Defaults[.bufferDurationSeconds],
-            bitrateMbps: Defaults[.bitrateMbps],
+            bitrateMbps: bitrateMbps,
             isDualMode: Defaults[.captureMode] == CaptureMode.dualSideBySide.rawValue,
             isSeparateDualSave: Defaults[.dualCaptureSaveMode] == DualCaptureSaveMode.separateFiles.rawValue,
             captureSystemAudio: Defaults[.captureSystemAudio],

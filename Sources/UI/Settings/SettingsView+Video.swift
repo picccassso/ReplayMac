@@ -174,9 +174,13 @@ extension SettingsView {
                 }
 
                 if AppSettings.isFeatureEnabled(.proVideo) {
+                    let guide = bitrateGuide
                     VStack(alignment: .leading, spacing: 6) {
                         HStack {
                             Text("Bitrate")
+                            Button("What does bitrate do?") { isShowingBitrateExplainer = true }
+                                .buttonStyle(.link)
+                                .font(.system(size: 12, design: .rounded))
                             Spacer()
                             Text(bitrateValueLabel)
                                 .foregroundStyle(AppTheme.accent)
@@ -184,18 +188,37 @@ extension SettingsView {
                         }
                         Slider(
                             value: $bitrateSliderValue,
-                            in: 10...50,
+                            in: BitrateGuide.sliderRange,
                             step: 1,
+                            label: { Text("Bitrate") },
                             onEditingChanged: handleBitrateSliderEditingChanged
                         )
+                            .labelsHidden()
                             .tint(AppTheme.accent)
+                            .background(BitrateSweetSpotBand(sweetSpot: guide.sweetSpot))
+                            .accessibilityHint(guide.message(for: bitrateSliderValue.rounded()))
                         HStack(spacing: 8) {
                             Label(bitrateScopeLabel, systemImage: "info.circle")
                             Spacer()
-                            Text(recommendedBitrateLabel)
+                            if isAtRecommendedBitrate {
+                                Text(recommendedBitrateLabel)
+                            } else {
+                                Button(recommendedBitrateLabel, action: applyRecommendedBitrate)
+                                    .buttonStyle(.link)
+                                    .help("Set the bitrate to the recommendation")
+                            }
                         }
                         .foregroundStyle(AppTheme.textSecondary)
                         .font(.system(size: 12, design: .rounded))
+                        BitrateZoneLabel(guide: guide, bitrateMbps: bitrateSliderValue.rounded())
+                        BitrateCostHint(bitrateMbps: bitrateSliderValue.rounded())
+                    }
+                    .sheet(isPresented: $isShowingBitrateExplainer) {
+                        BitrateExplainerSheet(
+                            context: bitrateExplainerContext,
+                            initialMbps: bitrateSliderValue.rounded(),
+                            apply: applyBitrate
+                        )
                     }
                 }
 
