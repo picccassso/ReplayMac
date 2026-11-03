@@ -122,18 +122,21 @@ public final class CameraCapture: @unchecked Sendable {
     /// camera permission is granted, so callers should gate this on
     /// `authorizationStatus() == .authorized`.
     public static func availableDevices() -> [CameraDeviceInfo] {
-        let discovery = AVCaptureDevice.DiscoverySession(
-            deviceTypes: [.builtInWideAngleCamera, .external, .continuityCamera],
-            mediaType: .video,
-            position: .unspecified
-        )
-        return discovery.devices.map {
+        discoverySession().devices.map {
             CameraDeviceInfo(
                 uniqueID: $0.uniqueID,
                 localizedName: $0.localizedName,
                 isContinuityCamera: $0.deviceType == .continuityCamera
             )
         }
+    }
+
+    private static func discoverySession() -> AVCaptureDevice.DiscoverySession {
+        AVCaptureDevice.DiscoverySession(
+            deviceTypes: [.builtInWideAngleCamera, .external, .continuityCamera],
+            mediaType: .video,
+            position: .unspecified
+        )
     }
 
     // MARK: - State
@@ -244,12 +247,16 @@ public final class CameraCapture: @unchecked Sendable {
             }
             return device
         }
-        // System default video device. On macOS this imports as
-        // `AVCaptureDevice.default(_:for:position:)`.
-        guard let device = AVCaptureDevice.default(.builtInWideAngleCamera, for: .video, position: .unspecified) else {
-            throw CameraCaptureError.noDeviceAvailable
+        // "Default" prefers the built-in camera, but Mac mini/Studio/Pro have
+        // none and a MacBook with its lid closed hides it, so fall back to the
+        // system's default video device and then to any camera the picker
+        // lists (USB or Continuity Camera).
+        if let device = AVCaptureDevice.default(.builtInWideAngleCamera, for: .video, position: .unspecified)
+            ?? AVCaptureDevice.default(for: .video)
+            ?? discoverySession().devices.first {
+            return device
         }
-        return device
+        throw CameraCaptureError.noDeviceAvailable
     }
 
     /// Builds and starts a session for `device`. Must be called on `sessionQueue`.
