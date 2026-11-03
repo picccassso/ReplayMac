@@ -18,6 +18,7 @@ struct HomeView: View {
     @Default(.longBufferDurationMinutes) private var longBufferMinutes
     @Default(.captureMicrophone) private var captureMicrophone
     @Default(.captureSystemAudio) private var captureSystemAudio
+    @Default(.cameraOverlayEnabled) private var cameraOverlayEnabled
     @Default(.perAppAudioEnabled) private var perAppAudioEnabled
     @Default(.mutedAudioAppBundleIDs) private var mutedAudioAppBundleIDs
     @Default(.enabledFeatureModules) private var enabledFeatureModules
@@ -342,6 +343,8 @@ struct HomeView: View {
              shortcut: .toggleMicrophoneMute, action: controls.toggleMicrophone)
         tile(ReplayControlLabels.systemAudio(isEnabled: captureSystemAudio, isMuted: menuBar.isSystemAudioMuted),
              shortcut: .toggleSystemAudioMute, action: controls.toggleSystemAudio)
+        tile(ReplayControlLabels.camera(isEnabled: cameraOverlayEnabled), shortcut: .toggleCameraOverlay,
+             action: controls.toggleCameraOverlay)
         if AppSettings.isFeatureEnabled(.audioMixing) {
             muteAppsTile
         }
@@ -526,7 +529,7 @@ struct HomeView: View {
     private func reloadShortcuts() {
         let names: [KeyboardShortcuts.Name] = [.saveClip, .saveLongBuffer, .toggleRecording,
                                                .toggleSessionRecording, .toggleMicrophoneMute,
-                                               .toggleSystemAudioMute]
+                                               .toggleSystemAudioMute, .toggleCameraOverlay]
         shortcuts = Dictionary(uniqueKeysWithValues: names.compactMap { name in
             KeyboardShortcuts.getShortcut(for: name).map { (name, $0.description) }
         })

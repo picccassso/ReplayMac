@@ -41,6 +41,7 @@ You only change three things: the **action name**, the **key code**, and the
 | Mute/unmute microphone | `KeyboardShortcuts_toggleMicrophoneMute` |
 | Push-to-mute microphone (hold) | `KeyboardShortcuts_pushToMuteMicrophone` |
 | Mute/unmute system audio | `KeyboardShortcuts_toggleSystemAudioMute` |
+| Show/hide camera overlay | `KeyboardShortcuts_toggleCameraOverlay` |
 | Copy last saved clip | `KeyboardShortcuts_copyLastClip` |
 | Open clip library | `KeyboardShortcuts_openClipLibrary` |
 

@@ -224,7 +224,8 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             toggleSession: { [weak self] in self?.toggleSessionRecording() },
             toggleBuffer: { [weak self] in self?.toggleCapturePipeline() },
             toggleMicrophone: { [weak self] in self?.toggleMicrophoneMuteFromUI() },
-            toggleSystemAudio: { [weak self] in self?.toggleSystemAudioMuteFromUI() }
+            toggleSystemAudio: { [weak self] in self?.toggleSystemAudioMuteFromUI() },
+            toggleCameraOverlay: { [weak self] in self?.toggleCameraOverlayFromUI() }
         )
         applyEffectiveAudioVolumes()
         syncAudioMuteStateToUI()

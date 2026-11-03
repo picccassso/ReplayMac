@@ -61,6 +61,7 @@ public final class CompanionServer: ObservableObject {
     public var onToggleSession: (@MainActor () -> Void)?
     public var onToggleMicrophone: (@MainActor () -> Void)?
     public var onToggleSystemAudio: (@MainActor () -> Void)?
+    public var onToggleCamera: (@MainActor () -> Void)?
     public var onRevealClip: (@MainActor (String) -> Void)?
     public var onDeleteClip: (@MainActor (String) -> Void)?
     public var onTrimClip: (@MainActor (String) -> Void)?
@@ -410,6 +411,8 @@ public final class CompanionServer: ObservableObject {
                 onToggleMicrophone?()
             case "toggleSystemAudio", "toggle_system_audio":
                 onToggleSystemAudio?()
+            case "toggleCamera", "toggle_camera":
+                onToggleCamera?()
             case "reveal_clip", "revealClip":
                 if let clipId = message.clipId {
                     onRevealClip?(clipId)
@@ -752,6 +755,7 @@ public final class CompanionServer: ObservableObject {
             microphoneVolume: snapshot.microphoneVolume,
             systemAudioVolume: snapshot.systemAudioVolume,
             perAppAudioEnabled: snapshot.perAppAudioEnabled,
+            isCameraOverlayEnabled: snapshot.isCameraOverlayEnabled,
             audioApps: snapshot.audioApps,
             displays: snapshot.displays,
             profiles: snapshot.profiles,

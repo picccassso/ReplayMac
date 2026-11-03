@@ -69,6 +69,18 @@ extension SettingsView {
             }
 
             Section {
+                KeyboardShortcuts.Recorder("Show/hide camera overlay", name: .toggleCameraOverlay)
+                Label(
+                    "Adds or removes your camera from recordings. Choose the camera, position, and size in Settings → Video.",
+                    systemImage: "info.circle"
+                )
+                .foregroundStyle(AppTheme.textSecondary)
+                .font(.system(size: 12, design: .rounded))
+            } header: {
+                Text("Camera")
+            }
+
+            Section {
                 KeyboardShortcuts.Recorder("Copy last saved clip", name: .copyLastClip)
                 KeyboardShortcuts.Recorder("Show or hide clip library", name: .openClipLibrary)
                 if AppSettings.isFeatureEnabled(.quickSaveAndThumbnail) {

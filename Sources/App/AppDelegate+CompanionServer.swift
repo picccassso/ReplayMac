@@ -30,6 +30,9 @@ extension AppDelegate {
         companionServer.onToggleSystemAudio = { [weak self] in
             self?.toggleSystemAudioMuteFromUI()
         }
+        companionServer.onToggleCamera = { [weak self] in
+            self?.toggleCameraOverlayFromUI()
+        }
         companionServer.onRevealClip = { [weak self] clipId in
             guard let self,
                   let clip = self.mainWindowState.recentClips.first(where: {
@@ -222,6 +225,7 @@ extension AppDelegate {
             microphoneVolume: AppSettings.microphoneVolume,
             systemAudioVolume: AppSettings.systemAudioVolume,
             perAppAudioEnabled: AppSettings.perAppAudioEnabled,
+            isCameraOverlayEnabled: AppSettings.cameraOverlayEnabled,
             audioApps: audioApps,
             displays: displays,
             profiles: profiles,

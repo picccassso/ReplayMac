@@ -97,6 +97,23 @@ final class CompanionConnectionTests: XCTestCase {
         try await waitUntil { toggles == 1 }
     }
 
+    func testToggleCameraActionReachesHandler() async throws {
+        let server = try await startTestServer(pairing: pairing, defaults: defaults)
+        defer { server.stop() }
+        var toggles = 0
+        server.onToggleCamera = { toggles += 1 }
+
+        let client = RawWebSocketClient(port: server.listeningPort)
+        defer { client.close() }
+        try await client.signIn(deviceId: "phone-1", secret: secret)
+        try await waitUntil { server.connectedClientsCount == 1 }
+
+        client.sendText(#"{"type":"action","action":"toggleCamera"}"#)
+        try await waitUntil { toggles == 1 }
+        client.sendText(#"{"type":"action","action":"toggle_camera"}"#)
+        try await waitUntil { toggles == 2 }
+    }
+
     func testClosedClientIsStillDropped() async throws {
         let server = try await startTestServer(pairing: pairing, defaults: defaults)
         defer { server.stop() }

@@ -13,6 +13,7 @@ public final class HotkeyManager {
     public var onToggleMicrophoneMute: (() -> Void)?
     public var onPushToMuteMicrophoneChanged: ((Bool) -> Void)?
     public var onToggleSystemAudioMute: (() -> Void)?
+    public var onToggleCameraOverlay: (() -> Void)?
     public var onCopyLastClip: (() -> Void)?
     public var onEditLastClip: (() -> Void)?
 
@@ -34,6 +35,7 @@ public final class HotkeyManager {
             KeyboardShortcuts.removeHandler(for: .toggleMicrophoneMute)
             KeyboardShortcuts.removeHandler(for: .pushToMuteMicrophone)
             KeyboardShortcuts.removeHandler(for: .toggleSystemAudioMute)
+            KeyboardShortcuts.removeHandler(for: .toggleCameraOverlay)
             KeyboardShortcuts.removeHandler(for: .copyLastClip)
             KeyboardShortcuts.removeHandler(for: .editLastClip)
         }
@@ -77,6 +79,9 @@ public final class HotkeyManager {
         }
         KeyboardShortcuts.onKeyUp(for: .toggleSystemAudioMute) { [weak self] in
             self?.onToggleSystemAudioMute?()
+        }
+        KeyboardShortcuts.onKeyUp(for: .toggleCameraOverlay) { [weak self] in
+            self?.onToggleCameraOverlay?()
         }
         KeyboardShortcuts.onKeyUp(for: .copyLastClip) { [weak self] in
             self?.onCopyLastClip?()
