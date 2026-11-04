@@ -13,8 +13,11 @@ public final class VideoRingBuffer: @unchecked Sendable {
     private var _timeCap: TimeInterval
     private var _memoryCap: Int
 
-    /// Maximum buffered duration. Setting it does not evict on its own; the
-    /// next append (or an explicit `trimToDuration`) applies the new cap.
+    /// Buffered duration to keep. Once the buffer is that full it never drops
+    /// back below it: whole GOPs are only evicted while the rest still spans
+    /// `timeCap`, so the buffer can briefly run over by up to one GOP. Setting
+    /// it does not evict on its own; the next append (or an explicit
+    /// `trimToDuration`) applies the new cap.
     public var timeCap: TimeInterval {
         get {
             lock.lock()
@@ -132,6 +135,8 @@ public final class VideoRingBuffer: @unchecked Sendable {
         return deque.count
     }
 
+    /// Evicts old GOPs down to `maxSeconds`, keeping at least that much
+    /// (see `timeCap`). Returns the number of bytes freed.
     @discardableResult
     public func trimToDuration(maxSeconds: TimeInterval) -> Int {
         lock.lock()
@@ -142,7 +147,7 @@ public final class VideoRingBuffer: @unchecked Sendable {
             guard let oldest = deque.first, let newest = deque.last else { break }
             let duration = presentationTimeStamp(of: newest) - presentationTimeStamp(of: oldest)
             guard duration > maxSeconds else { break }
-            guard evictOldestGOP() else { break }
+            guard evictOldestGOP(keepingAtLeast: maxSeconds) else { break }
         }
         return max(0, startingBytes - _currentMemoryBytes)
     }
@@ -157,7 +162,7 @@ public final class VideoRingBuffer: @unchecked Sendable {
             guard let oldest = deque.first, let newest = deque.last else { break }
             let duration = presentationTimeStamp(of: newest) - presentationTimeStamp(of: oldest)
             if duration > _timeCap {
-                guard evictOldestGOP() else { break }
+                guard evictOldestGOP(keepingAtLeast: _timeCap) else { break }
             } else if duration == 0 && deque.count > 1 && _currentMemoryBytes > _memoryCap / 2 {
                 // PTS all equal — fall back to memory-pressure eviction at 50% cap
                 guard evictOldestGOP() else { break }
@@ -169,6 +174,20 @@ public final class VideoRingBuffer: @unchecked Sendable {
         while _currentMemoryBytes > _memoryCap {
             guard deque.count > 1, evictOldestGOP() else { break }
         }
+    }
+
+    /// Drops the oldest GOP only if the footage left behind still spans
+    /// `seconds`. Keyframes are not evenly spaced: the capture skips frames
+    /// while the screen is still, and the encoder can only start a GOP on a
+    /// frame it receives, so one GOP can cover many seconds. Dropping it
+    /// whenever the buffer ran over would take the buffer well below the
+    /// window, and it would read as filling again until it caught back up.
+    private func evictOldestGOP(keepingAtLeast seconds: TimeInterval) -> Bool {
+        guard keyframeIndices.count >= 2, let newest = deque.last else { return false }
+        let remaining = presentationTimeStamp(of: newest)
+            - presentationTimeStamp(of: deque[keyframeIndices[1]])
+        guard remaining >= seconds else { return false }
+        return evictOldestGOP()
     }
 
     /// Drops everything before the second buffered keyframe.

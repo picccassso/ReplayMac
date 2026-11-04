@@ -195,11 +195,10 @@ public enum AppSettings {
     public static var bufferDurationSeconds: Int { Defaults[.bufferDurationSeconds] }
 
     /// Extra seconds retained in the ring buffers beyond the user-facing replay
-    /// window. Video eviction is GOP-granular — whole keyframe groups (~2s at the
-    /// encoder's 2s max keyframe interval) drop at once — so without headroom the
-    /// buffer settles just under the requested duration and a "Save Last 30s"
-    /// comes up short (e.g. 29s). One keyframe interval of slack plus a small
-    /// margin guarantees the full window is always retained.
+    /// window. The video buffer itself never evicts below its cap (it only drops
+    /// a whole GOP when the rest still covers the cap), but a saved clip starts
+    /// at the keyframe at or before the window, so the audio buffers keep a
+    /// little slack to cover that lead-in on a typical ~2s GOP.
     public static let ringBufferHeadroomSeconds: TimeInterval = 3.0
 
     /// Internal ring-buffer time cap: the user-facing replay window plus headroom.

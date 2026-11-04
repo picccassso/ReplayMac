@@ -90,10 +90,9 @@ final class RingBufferTests: XCTestCase {
         XCTAssertGreaterThan(duration, 3.5)
     }
 
-    /// Regression: GOP-granular eviction settles the buffer just under `timeCap`,
-    /// so retaining exactly the requested window returns less than that window.
-    /// Retaining the window plus one-GOP-plus headroom must hand out the full
-    /// requested duration. Mirrors "Save Last 30 Seconds" with 2s keyframes.
+    /// Regression: GOP-granular eviction used to settle the buffer just under
+    /// `timeCap`, so "Save Last 30 Seconds" came up short. Both the headroom cap
+    /// the app uses and a bare cap must hand out the full requested duration.
     func testSamplesLastReturnsFullWindowWithHeadroom() {
         let requested = 30.0
         let headroom = 3.0 // AppSettings.ringBufferHeadroomSeconds
@@ -114,7 +113,8 @@ final class RingBufferTests: XCTestCase {
             "Buffer with headroom must retain the full requested window"
         )
 
-        // Sanity check the failure mode: without headroom the window comes up short.
+        // Eviction keeps the window on its own, so even a cap with no headroom
+        // hands out the full requested duration.
         let tight = VideoRingBuffer(timeCap: requested, memoryCap: 1_500_000_000)
         for i in 0..<3600 {
             let pts = Double(i) / 60.0
@@ -124,7 +124,52 @@ final class RingBufferTests: XCTestCase {
         let tightSamples = tight.samples(last: requested)
         let tightSpan = CMSampleBufferGetPresentationTimeStamp(tightSamples.last!).seconds
             - CMSampleBufferGetPresentationTimeStamp(tightSamples.first!).seconds
-        XCTAssertLessThan(tightSpan, requested, "Without headroom the window is short by up to one GOP")
+        XCTAssertGreaterThanOrEqual(tightSpan, requested, "Eviction must not cut into the requested window")
+    }
+
+    /// Regression: on a still screen the capture skips unchanged frames, so
+    /// keyframes can land 10s apart. Dropping a whole 10s GOP each time the
+    /// buffer ran over the cap took it to about 4:53 of a 5:00 window, and the
+    /// UI flipped from Ready back to Filling every few seconds.
+    func testSparseKeyframesNeverDropBelowWindowOnceFull() {
+        let window = 300.0
+        let buffer = VideoRingBuffer(timeCap: window + 3, memoryCap: 1_500_000_000)
+
+        // 15 minutes at 10 fps, keyframe every 10 seconds.
+        var reachedWindow = false
+        for i in 0..<9000 {
+            let pts = Double(i) / 10.0
+            buffer.append(encodedSample: Self.makeSampleBuffer(pts: pts, isKeyframe: i % 100 == 0))
+            if buffer.duration >= window {
+                reachedWindow = true
+            } else if reachedWindow {
+                XCTFail("Buffer fell back to \(buffer.duration)s at \(pts)s after holding the full window")
+                return
+            }
+        }
+        XCTAssertTrue(reachedWindow)
+        // Overshoot is bounded by one GOP.
+        XCTAssertLessThan(buffer.duration, window + 3 + 10)
+
+        let samples = buffer.samples(last: window)
+        let span = CMSampleBufferGetPresentationTimeStamp(samples.last!).seconds
+            - CMSampleBufferGetPresentationTimeStamp(samples.first!).seconds
+        XCTAssertGreaterThanOrEqual(span, window)
+    }
+
+    func testTrimToDurationKeepsRequestedSpanWithSparseKeyframes() {
+        let buffer = VideoRingBuffer(timeCap: 100, memoryCap: 1_500_000_000)
+        for i in 0..<600 {
+            let pts = Double(i) / 10.0
+            buffer.append(encodedSample: Self.makeSampleBuffer(pts: pts, isKeyframe: i % 100 == 0))
+        }
+
+        // Keyframes at 0, 10, ... 50; newest at 59.9. Keeping 25s means the
+        // oldest GOP that can go is the one before 30.
+        let freed = buffer.trimToDuration(maxSeconds: 25)
+        XCTAssertGreaterThan(freed, 0)
+        XCTAssertGreaterThanOrEqual(buffer.duration, 25)
+        XCTAssertEqual(buffer.duration, 29.9, accuracy: 0.001)
     }
 
     func testEvictionByMemory() {
