@@ -86,6 +86,122 @@ final class EncoderTests: XCTestCase {
         XCTAssertEqual(recorded.first, recorded.last)
     }
 
+    // MARK: - Idle refresh
+
+    func testIdlePolicyWaitsForTheIdleInterval() {
+        let last = CMTime(value: 1_000_000, timescale: 1_000)
+        XCTAssertFalse(IdleFrameRefreshPolicy.shouldRefresh(lastSubmittedPTS: last, now: CMTime(value: 1_000_200, timescale: 1_000)))
+        XCTAssertTrue(IdleFrameRefreshPolicy.shouldRefresh(lastSubmittedPTS: last, now: CMTime(value: 1_000_250, timescale: 1_000)))
+        XCTAssertFalse(IdleFrameRefreshPolicy.shouldRefresh(lastSubmittedPTS: .invalid, now: last))
+    }
+
+    func testIdlePolicyKeepsPresentationTimesIncreasing() {
+        let last = CMTime(value: 1_000_500, timescale: 1_000)
+        let late = CMTime(value: 1_000_450, timescale: 1_000)
+        XCTAssertGreaterThan(IdleFrameRefreshPolicy.monotonicPTS(late, after: last), last)
+        XCTAssertGreaterThan(IdleFrameRefreshPolicy.monotonicPTS(last, after: last), last)
+        let later = CMTime(value: 1_000_600, timescale: 1_000)
+        XCTAssertEqual(IdleFrameRefreshPolicy.monotonicPTS(later, after: last), later)
+    }
+
+    func testIdlePolicyForcesKeyframeOnlyPastTheBackstop() {
+        let keyframe = CMTime(value: 1_000_000, timescale: 1_000)
+        XCTAssertFalse(IdleFrameRefreshPolicy.shouldForceKeyframe(pts: CMTime(value: 1_002_000, timescale: 1_000), lastKeyframePTS: keyframe))
+        XCTAssertTrue(IdleFrameRefreshPolicy.shouldForceKeyframe(pts: CMTime(value: 1_002_500, timescale: 1_000), lastKeyframePTS: keyframe))
+        XCTAssertFalse(IdleFrameRefreshPolicy.shouldForceKeyframe(pts: keyframe, lastKeyframePTS: .invalid))
+    }
+
+    /// One frame, then 20 s of still screen: the encoder must keep emitting the
+    /// last frame on the clock, with keyframes no further apart than the ring
+    /// buffers' headroom assumes.
+    func testStillScreenKeepsStreamOnTheClockWithRegularKeyframes() throws {
+        let encoder = VideoEncoder(idleRefreshEnabled: false)
+        let outputs = Mutex<[(pts: Double, isKeyframe: Bool)]>([])
+        encoder.outputHandler = { sample in
+            outputs.withLock { $0.append((CMSampleBufferGetPresentationTimeStamp(sample).seconds, Self.isKeyframe(sample))) }
+        }
+        try encoder.start(width: 64, height: 64, fps: 30, codec: .h264, bitrate: 1_000_000)
+
+        encoder.encode(sampleBuffer: try makeFrame(width: 64, height: 64, presentationTime: Self.time(ms: 0)))
+        XCTAssertFalse(encoder.refreshIfIdle(now: Self.time(ms: 100)), "Refreshed before the screen had gone idle")
+        for ms in stride(from: 200, through: 20_000, by: 100) {
+            encoder.refreshIfIdle(now: Self.time(ms: ms))
+        }
+        encoder.stop()
+
+        let frames = outputs.withLock { $0 }
+        let times = frames.map(\.pts)
+        XCTAssertGreaterThan(frames.count, 50)
+        XCTAssertEqual(try XCTUnwrap(times.last), 1_020, accuracy: IdleFrameRefreshPolicy.idleInterval.seconds + 0.11)
+        XCTAssertEqual(times, times.sorted())
+        XCTAssertEqual(Set(times).count, times.count)
+
+        let maximumFrameGap = zip(times, times.dropFirst()).map { $1 - $0 }.max() ?? 0
+        XCTAssertLessThanOrEqual(maximumFrameGap, IdleFrameRefreshPolicy.idleInterval.seconds + 0.1 + 0.001)
+
+        let keyframes = frames.filter(\.isKeyframe).map(\.pts)
+        let maximumKeyframeGap = zip(keyframes, keyframes.dropFirst()).map { $1 - $0 }.max() ?? .infinity
+        XCTAssertLessThanOrEqual(maximumKeyframeGap, IdleFrameRefreshPolicy.worstCaseKeyframeSpacing)
+        XCTAssertGreaterThanOrEqual(try XCTUnwrap(keyframes.last), 1_020 - IdleFrameRefreshPolicy.worstCaseKeyframeSpacing)
+    }
+
+    /// A real frame captured just before a repeat, but delivered just after it,
+    /// must not reach the session out of order.
+    func testLateRealFrameAfterRefreshStaysInOrder() throws {
+        let encoder = VideoEncoder(idleRefreshEnabled: false)
+        let times = Mutex<[Double]>([])
+        encoder.outputHandler = { sample in
+            times.withLock { $0.append(CMSampleBufferGetPresentationTimeStamp(sample).seconds) }
+        }
+        try encoder.start(width: 64, height: 64, fps: 30, codec: .h264, bitrate: 1_000_000)
+
+        encoder.encode(sampleBuffer: try makeFrame(width: 64, height: 64, presentationTime: Self.time(ms: 0)))
+        XCTAssertTrue(encoder.refreshIfIdle(now: Self.time(ms: 500)))
+        encoder.encode(sampleBuffer: try makeFrame(width: 64, height: 64, presentationTime: Self.time(ms: 450)))
+        encoder.stop()
+
+        let recorded = times.withLock { $0 }
+        XCTAssertEqual(recorded.count, 3)
+        XCTAssertEqual(recorded, recorded.sorted())
+        XCTAssertEqual(Set(recorded).count, 3)
+    }
+
+    /// The real timer, on the host clock: frames keep coming with no input, and
+    /// stop once the encoder is stopped.
+    func testIdleRefreshTimerRepeatsFramesUntilStopped() throws {
+        let encoder = VideoEncoder()
+        let times = Mutex<[Double]>([])
+        encoder.outputHandler = { sample in
+            times.withLock { $0.append(CMSampleBufferGetPresentationTimeStamp(sample).seconds) }
+        }
+        try encoder.start(width: 64, height: 64, fps: 30, codec: .h264, bitrate: 1_000_000)
+
+        let hostClock = CMClockGetHostTimeClock()
+        encoder.encode(sampleBuffer: try makeFrame(width: 64, height: 64, presentationTime: CMClockGetTime(hostClock)))
+        Thread.sleep(forTimeInterval: 1.0)
+        let now = CMClockGetTime(hostClock).seconds
+        encoder.stop()
+
+        let whileRunning = times.withLock { $0 }
+        XCTAssertGreaterThanOrEqual(whileRunning.count, 3, "Expected repeated frames while idle, got \(whileRunning.count)")
+        XCTAssertEqual(try XCTUnwrap(whileRunning.last), now, accuracy: 0.5)
+
+        Thread.sleep(forTimeInterval: 0.4)
+        XCTAssertEqual(times.withLock { $0.count }, whileRunning.count, "Encoder kept emitting after stop()")
+    }
+
+    private static func time(ms: Int) -> CMTime {
+        CMTime(value: 1_000_000 + Int64(ms), timescale: 1_000)
+    }
+
+    private static func isKeyframe(_ sample: CMSampleBuffer) -> Bool {
+        guard let attachments = CMSampleBufferGetSampleAttachmentsArray(sample, createIfNecessary: false) as? [[CFString: Any]],
+              let first = attachments.first else {
+            return true
+        }
+        return !((first[kCMSampleAttachmentKey_NotSync] as? Bool) ?? false)
+    }
+
     private func makeFrame(width: Int, height: Int, presentationTime: CMTime) throws -> CMSampleBuffer {
         var pixelBuffer: CVPixelBuffer?
         let attributes: [String: Any] = [kCVPixelBufferIOSurfacePropertiesKey as String: [:]]

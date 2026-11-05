@@ -24,8 +24,9 @@ final class ReplayMemoryEstimateTests: XCTestCase {
         let result = estimate(seconds: 300, mbps: 25)
 
         XCTAssertFalse(result.isCapLimited)
-        // (25 + 0.4 audio) Mbps over 303s is about 962 MB.
-        XCTAssertEqual(Double(result.requiredBytes), 962_000_000, accuracy: 5_000_000)
+        // 25 Mbps video plus two raw PCM audio sources (768 kB/s) over 303s
+        // is about 1180 MB.
+        XCTAssertEqual(Double(result.requiredBytes), 1_179_600_000, accuracy: 5_000_000)
         XCTAssertEqual(result.tier, .heavy)
     }
 
@@ -33,8 +34,9 @@ final class ReplayMemoryEstimateTests: XCTestCase {
         let result = estimate(seconds: 300, mbps: 50)
 
         XCTAssertTrue(result.isCapLimited)
-        // 85% of 1536 MiB for video at 6.25 MB/s, minus headroom: about 216s.
-        XCTAssertEqual(result.coveredSeconds, 216, accuracy: 2)
+        // 1536 MiB shared by 6.25 MB/s of video and 0.768 MB/s of audio, minus
+        // headroom: about 226s for every buffer.
+        XCTAssertEqual(result.coveredSeconds, 226, accuracy: 2)
         let target = try XCTUnwrap(result.minimumCapMBToFit)
         XCTAssertEqual(target.truncatingRemainder(dividingBy: ReplayMemoryEstimate.memoryCapStepMB), 0)
         XCTAssertFalse(estimate(seconds: 300, mbps: 50, capMB: target).isCapLimited)
@@ -53,7 +55,9 @@ final class ReplayMemoryEstimateTests: XCTestCase {
         let sideBySide = estimate(seconds: 60, mbps: 25, dual: true)
         let separate = estimate(seconds: 60, mbps: 25, dual: true, separate: true)
 
-        XCTAssertGreaterThan(separate.requiredBytes, sideBySide.requiredBytes * 19 / 10)
+        // The second display adds one more video stream; audio is shared.
+        let oneVideoStream = 25_000_000 / 8 * (60 + Int(AppSettings.ringBufferHeadroomSeconds))
+        XCTAssertEqual(separate.requiredBytes - sideBySide.requiredBytes, oneVideoStream, accuracy: 1_000)
     }
 
     func testMinimumCapIsNilWhenSliderMaximumIsNotEnough() {
@@ -61,6 +65,49 @@ final class ReplayMemoryEstimateTests: XCTestCase {
 
         XCTAssertTrue(result.isCapLimited)
         XCTAssertNil(result.minimumCapMBToFit)
+    }
+
+    /// The estimate used to budget audio at the 0.2 Mbps AAC rate, about a
+    /// fifteenth of the raw PCM the buffers actually hold.
+    func testAudioIsBudgetedAtTheRawPCMRate() {
+        let withAudio = estimate(seconds: 60, mbps: 25)
+        let videoOnly = ReplayMemoryEstimate.make(
+            bufferSeconds: 60,
+            bitrateMbps: 25,
+            isDualMode: false,
+            isSeparateDualSave: false,
+            captureSystemAudio: false,
+            captureMicrophone: false,
+            memoryCapMB: 1536
+        )
+        let retained = 60 + AppSettings.ringBufferHeadroomSeconds
+        XCTAssertEqual(
+            Double(withAudio.requiredBytes - videoOnly.requiredBytes),
+            2 * AppSettings.audioRingBufferBytesPerSecond * retained,
+            accuracy: 1_000
+        )
+    }
+
+    /// Coverage must never promise more than the audio buffers can hold.
+    func testCoveredSecondsNeverExceedWhatAudioHolds() {
+        for capMB in [256.0, 768, 1536, 4096] {
+            for mbps in [5.0, 25, 80] {
+                let result = estimate(seconds: 300, mbps: mbps, capMB: capMB)
+                let caps = AppSettings.ringBufferMemoryCaps(
+                    isDualMode: false,
+                    captureSystemAudio: true,
+                    captureMicrophone: true,
+                    bitrateMbps: mbps,
+                    totalCapMB: capMB
+                )
+                let audioSeconds = Double(caps.audioPerBuffer) / AppSettings.audioRingBufferBytesPerSecond
+                XCTAssertLessThanOrEqual(
+                    Double(result.coveredSeconds),
+                    audioSeconds - AppSettings.ringBufferHeadroomSeconds + 1,
+                    "cap=\(capMB) mbps=\(mbps)"
+                )
+            }
+        }
     }
 
     func testTierBoundaries() {

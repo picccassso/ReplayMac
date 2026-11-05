@@ -50,6 +50,21 @@ public final class VideoEncoder: @unchecked Sendable {
     private var encodeCount: Int64 = 0
     private var forcesKeyframeOnNextFrame = false
 
+    // Idle refresh (see `IdleFrameRefreshPolicy`). The last frame handed to the
+    // session is kept so it can be repeated while the screen is still.
+    private let idleRefreshEnabled: Bool
+    private let idleRefreshQueue = DispatchQueue(label: "com.replaycap.video.idle-refresh", qos: .userInitiated)
+    private var idleRefreshTimer: DispatchSourceTimer?
+    private var lastSubmittedPixelBuffer: CVPixelBuffer?
+    private var lastSubmittedPTS: CMTime = .invalid
+    private var lastKeyframePTS: CMTime = .invalid
+    private var idleRefreshCount: Int64 = 0
+
+    /// Serializes frame submission so a repeated frame and a real one cannot
+    /// interleave and reach the session out of order. Never taken by the
+    /// output callback, which may run inside `VTCompressionSessionEncodeFrame`.
+    private let submitLock = NSLock()
+
     public var outputHandler: OutputHandler? {
         get {
             stateLock.lock()
@@ -63,7 +78,12 @@ public final class VideoEncoder: @unchecked Sendable {
         }
     }
 
-    public init() {}
+    /// - Parameter idleRefreshEnabled: repeat the last frame on a timer while
+    ///   no new frame arrives. Tests turn it off and drive `refreshIfIdle(now:)`
+    ///   with their own clock.
+    public init(idleRefreshEnabled: Bool = true) {
+        self.idleRefreshEnabled = idleRefreshEnabled
+    }
 
     public var currentConfiguration: VideoEncoderConfiguration? {
         stateLock.lock()
@@ -180,6 +200,10 @@ public final class VideoEncoder: @unchecked Sendable {
             captureHDR: captureHDR
         )
         stateLock.unlock()
+
+        if idleRefreshEnabled {
+            startIdleRefreshTimer()
+        }
     }
 
     /// Forces the next encoded frame to be a keyframe.
@@ -197,22 +221,71 @@ public final class VideoEncoder: @unchecked Sendable {
     }
 
     public func encode(sampleBuffer: CMSampleBuffer) {
-        stateLock.lock()
-        let session = compressionSession
-        stateLock.unlock()
-
-        guard let session else { return }
         guard let pixelBuffer = CMSampleBufferGetImageBuffer(sampleBuffer) else { return }
-
         let pts = CMSampleBufferGetPresentationTimeStamp(sampleBuffer)
         let duration = CMSampleBufferGetDuration(sampleBuffer)
 
+        submitLock.lock()
+        defer { submitLock.unlock() }
+        submitFrameLocked(pixelBuffer: pixelBuffer, proposedPTS: pts, duration: duration, isIdleRefresh: false)
+    }
+
+    /// Repeats the last frame, stamped `now`, if the encoder has gone
+    /// `IdleFrameRefreshPolicy.idleInterval` without one. The idle timer calls
+    /// this with the host clock; tests call it directly with their own times.
+    /// Returns true when a frame was submitted.
+    @discardableResult
+    func refreshIfIdle(now: CMTime) -> Bool {
+        submitLock.lock()
+        defer { submitLock.unlock() }
+
         stateLock.lock()
+        let pixelBuffer = lastSubmittedPixelBuffer
+        let isIdle = compressionSession != nil
+            && IdleFrameRefreshPolicy.shouldRefresh(lastSubmittedPTS: lastSubmittedPTS, now: now)
+        stateLock.unlock()
+
+        guard isIdle, let pixelBuffer else { return false }
+        return submitFrameLocked(pixelBuffer: pixelBuffer, proposedPTS: now, duration: .invalid, isIdleRefresh: true)
+    }
+
+    /// Caller must hold `submitLock`.
+    @discardableResult
+    private func submitFrameLocked(
+        pixelBuffer: CVPixelBuffer,
+        proposedPTS: CMTime,
+        duration: CMTime,
+        isIdleRefresh: Bool
+    ) -> Bool {
+        stateLock.lock()
+        guard let session = compressionSession else {
+            stateLock.unlock()
+            return false
+        }
+        let pts = IdleFrameRefreshPolicy.monotonicPTS(proposedPTS, after: lastSubmittedPTS)
+        let requestedKeyframe = forcesKeyframeOnNextFrame
+        let backstopKeyframe = !requestedKeyframe
+            && IdleFrameRefreshPolicy.shouldForceKeyframe(pts: pts, lastKeyframePTS: lastKeyframePTS)
+        let forcesKeyframe = requestedKeyframe || backstopKeyframe
+        forcesKeyframeOnNextFrame = false
+
+        let previousPTS = lastSubmittedPTS
+        let previousPixelBuffer = lastSubmittedPixelBuffer
+        let previousKeyframePTS = lastKeyframePTS
+        if forcesKeyframe {
+            // Counted as soon as it is asked for, so the frames still in
+            // flight before its output arrives do not force another.
+            lastKeyframePTS = pts
+        }
+        lastSubmittedPTS = pts
+        lastSubmittedPixelBuffer = pixelBuffer
         expectedPTSQueue.append(pts)
         encodeCount += 1
         let isFirstFrame = encodeCount == 1
-        let forcesKeyframe = forcesKeyframeOnNextFrame
-        forcesKeyframeOnNextFrame = false
+        if isIdleRefresh {
+            idleRefreshCount += 1
+        }
+        let refreshCount = idleRefreshCount
         stateLock.unlock()
 
         if isFirstFrame {
@@ -220,6 +293,9 @@ public final class VideoEncoder: @unchecked Sendable {
             let width = CVPixelBufferGetWidth(pixelBuffer)
             let height = CVPixelBufferGetHeight(pixelBuffer)
             Self.logger.notice("First input frame: \(width, privacy: .public)x\(height, privacy: .public), pixelFormat=\(format, privacy: .public)")
+        }
+        if isIdleRefresh, refreshCount == 1 || refreshCount % 600 == 0 {
+            Self.logger.debug("Screen idle; repeating last frame (refresh #\(refreshCount, privacy: .public))")
         }
 
         let frameProperties: CFDictionary? = forcesKeyframe
@@ -236,26 +312,63 @@ public final class VideoEncoder: @unchecked Sendable {
             infoFlagsOut: nil
         )
 
-        if status != noErr {
+        guard status == noErr else {
             stateLock.lock()
             _ = expectedPTSQueue.popLast()
-            // The frame never reached the encoder, so a keyframe request that
-            // rode along with it has to carry over to the next one.
-            forcesKeyframeOnNextFrame = forcesKeyframeOnNextFrame || forcesKeyframe
+            // The frame never reached the encoder, so put back what it claimed:
+            // a keyframe request that rode along with it carries over to the
+            // next frame, and the idle clock still runs from the last frame
+            // that did go in.
+            forcesKeyframeOnNextFrame = forcesKeyframeOnNextFrame || requestedKeyframe
+            lastSubmittedPTS = previousPTS
+            lastSubmittedPixelBuffer = previousPixelBuffer
+            lastKeyframePTS = previousKeyframePTS
             stateLock.unlock()
             Self.logger.error("VTCompressionSessionEncodeFrame failed with status \(status)")
+            return false
         }
+        return true
+    }
+
+    private func startIdleRefreshTimer() {
+        let timer = DispatchSource.makeTimerSource(queue: idleRefreshQueue)
+        let interval = IdleFrameRefreshPolicy.checkInterval
+        timer.schedule(deadline: .now() + interval, repeating: interval, leeway: .milliseconds(20))
+        timer.setEventHandler { [weak self] in
+            self?.refreshIfIdle(now: CMClockGetTime(CMClockGetHostTimeClock()))
+        }
+
+        stateLock.lock()
+        let previous = idleRefreshTimer
+        idleRefreshTimer = timer
+        stateLock.unlock()
+
+        previous?.cancel()
+        timer.resume()
     }
 
     public func stop() {
+        // Holding the submit lock means no frame, real or repeated, can be
+        // handed to the session while it is being torn down.
+        submitLock.lock()
+        defer { submitLock.unlock() }
+
         stateLock.lock()
         let session = compressionSession
+        let timer = idleRefreshTimer
+        idleRefreshTimer = nil
         compressionSession = nil
         _currentConfiguration = nil
         expectedPTSQueue.removeAll()
         encodeCount = 0
         forcesKeyframeOnNextFrame = false
+        lastSubmittedPixelBuffer = nil
+        lastSubmittedPTS = .invalid
+        lastKeyframePTS = .invalid
+        idleRefreshCount = 0
         stateLock.unlock()
+
+        timer?.cancel()
 
         guard let session else { return }
         VTCompressionSessionCompleteFrames(session, untilPresentationTimeStamp: .invalid)
@@ -280,6 +393,16 @@ public final class VideoEncoder: @unchecked Sendable {
 
         let outputPTS = CMSampleBufferGetPresentationTimeStamp(sampleBuffer)
 
+        if Self.isKeyframe(sampleBuffer) {
+            let keyframePTS = expectedPTS ?? outputPTS
+            stateLock.lock()
+            if keyframePTS.isNumeric,
+               !lastKeyframePTS.isNumeric || CMTimeCompare(keyframePTS, lastKeyframePTS) > 0 {
+                lastKeyframePTS = keyframePTS
+            }
+            stateLock.unlock()
+        }
+
         if let expectedPTS, expectedPTS.isValid, expectedPTS.seconds > 0 {
             let ptsMatches = outputPTS.isValid && outputPTS.seconds > 0
                 && abs(outputPTS.seconds - expectedPTS.seconds) < 0.00001
@@ -300,6 +423,17 @@ public final class VideoEncoder: @unchecked Sendable {
         }
 
         handler?(sampleBuffer)
+    }
+
+    private static func isKeyframe(_ sampleBuffer: CMSampleBuffer) -> Bool {
+        guard let attachments = CMSampleBufferGetSampleAttachmentsArray(sampleBuffer, createIfNecessary: false),
+              CFArrayGetCount(attachments) > 0 else {
+            return true
+        }
+        let dict = unsafeBitCast(CFArrayGetValueAtIndex(attachments, 0), to: CFDictionary.self)
+        let notSync = CFDictionaryGetValue(dict, Unmanaged.passUnretained(kCMSampleAttachmentKey_NotSync).toOpaque())
+        guard let notSync else { return true }
+        return !CFBooleanGetValue(unsafeBitCast(notSync, to: CFBoolean.self))
     }
 
     private static func retimeSampleBuffer(_ sampleBuffer: CMSampleBuffer, newPTS: CMTime) -> CMSampleBuffer? {

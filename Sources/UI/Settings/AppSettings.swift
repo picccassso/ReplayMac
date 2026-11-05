@@ -745,10 +745,22 @@ public enum AppSettings {
     public static var companionServerPort: Int { Defaults[.companionServerPort] }
     public static var companionCustomServerName: String { Defaults[.companionCustomServerName] }
 
+    /// RAM one audio ring buffer uses per second. Audio is buffered as the raw
+    /// 48 kHz stereo Float32 PCM that ScreenCaptureKit and the microphone path
+    /// deliver (AAC encoding only happens when a clip is saved), so it is far
+    /// heavier than the compressed track that ends up in the file.
+    public static let audioRingBufferBytesPerSecond: Double = 48_000 * 2 * 4
+
+    /// Splits the memory cap between the ring buffers in proportion to how fast
+    /// each one fills, so every buffer holds the same number of seconds. A fixed
+    /// split ran the audio buffers out first: raw PCM is about 3 Mbps per
+    /// source, so 15% of the cap held well under the window the video share
+    /// did, and clips opened on silence where the audio had already been evicted.
     public static func ringBufferMemoryCaps(
         isDualMode: Bool,
         captureSystemAudio: Bool,
         captureMicrophone: Bool,
+        bitrateMbps: Double = bitrateMbps,
         totalCapMB: Double = memoryCapMB
     ) -> (videoPerBuffer: Int, audioPerBuffer: Int) {
         let totalBytes = Int(totalCapMB * 1024 * 1024)
@@ -762,16 +774,20 @@ public enum AppSettings {
             audioBufferCount += 1
         }
 
-        let videoPool = Int(Double(totalBytes) * 0.85)
-        let audioPool = totalBytes - videoPool
+        let videoBytesPerSecond = max(bitrateMbps, 0.1) * 1_000_000 / 8 * Double(videoBufferCount)
+        let audioBytesPerSecond = audioRingBufferBytesPerSecond * Double(audioBufferCount)
+        let audioShare = audioBytesPerSecond / (videoBytesPerSecond + audioBytesPerSecond)
 
         let minimumVideoBytes = 32 * 1024 * 1024
         let minimumAudioBytes = 8 * 1024 * 1024
 
-        let videoPerBuffer = max(minimumVideoBytes, videoPool / videoBufferCount)
         let audioPerBuffer = audioBufferCount > 0
-            ? max(minimumAudioBytes, audioPool / audioBufferCount)
+            ? max(minimumAudioBytes, Int(Double(totalBytes) * audioShare) / audioBufferCount)
             : minimumAudioBytes
+        // Video gets whatever audio leaves, so an audio floor comes out of the
+        // video share rather than pushing the total over the cap.
+        let videoPool = totalBytes - (audioBufferCount > 0 ? audioPerBuffer * audioBufferCount : 0)
+        let videoPerBuffer = max(minimumVideoBytes, videoPool / videoBufferCount)
 
         return (videoPerBuffer, audioPerBuffer)
     }

@@ -87,6 +87,8 @@ extension AppDelegate {
             self?.scheduleRuntimeSettingsReconcile()
         })
         settingsObservations.append(Defaults.observe(.bitrateMbps) { [weak self] _ in
+            // The memory cap is split by data rate, so bitrate moves it too.
+            self?.syncMemoryCapsToSettings()
             self?.scheduleRuntimeSettingsReconcile()
         })
         settingsObservations.append(Defaults.observe(.captureResolution) { [weak self] _ in

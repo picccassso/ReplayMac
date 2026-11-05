@@ -13,8 +13,11 @@ public struct ReplayMemoryEstimate: Equatable {
     /// Buffer lengths at or above this are steered toward extended replay.
     public static let heavyThresholdSeconds = 240
     public static let lightThresholdSeconds = 60
-    /// Matches `estimatedLongBufferDiskGB`: AAC tracks are tiny next to video.
-    static let audioMbpsPerSource = 0.2
+    /// Audio sits in the ring buffers as raw PCM, about 3 Mbps per source. The
+    /// 0.2 Mbps AAC figure `estimatedLongBufferDiskGB` uses only applies once a
+    /// track is written to disk; using it here understated the RAM audio needs
+    /// fifteenfold and hid windows the audio buffers could not hold.
+    static var audioBytesPerSecondPerSource: Double { AppSettings.audioRingBufferBytesPerSecond }
     /// Range and step of the Memory cap slider in Settings → Advanced.
     public static let memoryCapRangeMB: ClosedRange<Double> = 256...4096
     public static let memoryCapStepMB: Double = 64
@@ -24,7 +27,8 @@ public struct ReplayMemoryEstimate: Equatable {
     public let memoryCapMB: Double
     /// RAM the requested window needs, video and audio together.
     public let requiredBytes: Int
-    /// Seconds of video the memory cap holds before older footage is evicted.
+    /// Seconds of the window the memory cap holds, video and audio alike,
+    /// before older footage is evicted.
     public let coveredSeconds: Int
     /// Smallest Memory cap slider value that holds the full window, or nil
     /// when even the maximum is not enough.
@@ -56,7 +60,7 @@ public struct ReplayMemoryEstimate: Equatable {
         let retainedSeconds = Double(bufferSeconds) + AppSettings.ringBufferHeadroomSeconds
 
         let videoBytesPerSecond = max(bitrateMbps, 0.1) * 1_000_000 / 8
-        let audioBytesPerSecond = Double(audioSources) * audioMbpsPerSource * 1_000_000 / 8
+        let audioBytesPerSecond = Double(audioSources) * audioBytesPerSecondPerSource
         let requiredBytes = Int((videoBytesPerSecond * Double(videoStreams) + audioBytesPerSecond) * retainedSeconds)
 
         func coveredSeconds(capMB: Double) -> Int {
@@ -64,11 +68,18 @@ public struct ReplayMemoryEstimate: Equatable {
                 isDualMode: isDualMode,
                 captureSystemAudio: captureSystemAudio,
                 captureMicrophone: captureMicrophone,
+                bitrateMbps: bitrateMbps,
                 totalCapMB: capMB
             )
-            // Eviction drops whole keyframe groups, so the buffer settles a
-            // little under what the cap could hold; the headroom covers that.
-            let seconds = Double(caps.videoPerBuffer) / videoBytesPerSecond - AppSettings.ringBufferHeadroomSeconds
+            // A clip is only whole while every buffer still holds the window,
+            // so whichever runs out first sets the coverage. Eviction drops
+            // whole keyframe groups, so the video buffer settles a little under
+            // what the cap could hold; the headroom covers that.
+            var held = Double(caps.videoPerBuffer) / videoBytesPerSecond
+            if audioSources > 0 {
+                held = min(held, Double(caps.audioPerBuffer) / audioBytesPerSecondPerSource)
+            }
+            let seconds = held - AppSettings.ringBufferHeadroomSeconds
             return max(0, Int(seconds.rounded(.down)))
         }
 
