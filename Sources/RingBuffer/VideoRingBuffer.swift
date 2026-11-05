@@ -100,6 +100,49 @@ public final class VideoRingBuffer: @unchecked Sendable {
         return Array(deque[resultIndex...])
     }
 
+    /// Frames from the keyframe at or before `startPTS` to the newest one: the
+    /// smallest decodable run that covers everything from `startPTS` on. When
+    /// the buffer starts after `startPTS`, it returns the whole buffer.
+    public func samples(coveringFrom startPTS: Double) -> [CMSampleBuffer] {
+        lock.lock()
+        defer { lock.unlock() }
+
+        guard !deque.isEmpty else { return [] }
+        guard !keyframeIndices.isEmpty else { return Array(deque) }
+
+        var resultIndex = keyframeIndices[0]
+        var low = 0
+        var high = keyframeIndices.count - 1
+        while low <= high {
+            let mid = (low + high) / 2
+            let index = keyframeIndices[mid]
+            if presentationTimeStamp(of: deque[index]) <= startPTS {
+                resultIndex = index
+                low = mid + 1
+            } else {
+                high = mid - 1
+            }
+        }
+        return Array(deque[resultIndex...])
+    }
+
+    /// Presentation time of the oldest buffered frame, or nil when empty.
+    public var oldestPTS: Double? {
+        lock.lock()
+        defer { lock.unlock() }
+        return deque.first.map(presentationTimeStamp(of:))
+    }
+
+    /// When the newest buffered frame stops being shown (its presentation
+    /// time plus duration), or nil when empty.
+    public var newestEndPTS: Double? {
+        lock.lock()
+        defer { lock.unlock() }
+        guard let newest = deque.last else { return nil }
+        let duration = CMSampleBufferGetDuration(newest)
+        return presentationTimeStamp(of: newest) + (duration.isNumeric ? max(duration.seconds, 0) : 0)
+    }
+
     public func clear() {
         lock.lock()
         defer { lock.unlock() }

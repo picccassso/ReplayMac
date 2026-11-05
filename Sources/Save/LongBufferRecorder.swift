@@ -139,8 +139,22 @@ public actor LongBufferRecorder {
     private var activeSegmentURL: URL?
     private var activeSegmentStartPTS: Double?
     private var activeSegmentEndPTS: Double?
+
+    private enum AudioTrack: Hashable {
+        case system
+        case microphone
+    }
+
+    /// Where each audio track's last appended buffer ended in the active
+    /// segment. A buffer that starts later than this has silence written
+    /// in front of it: AVAssetWriter closes up gaps in an audio track, which
+    /// would leave everything after a dropout playing early.
+    private var nextAudioPTS: [AudioTrack: Double] = [:]
+
+    /// Gaps shorter than this are capture jitter, not dropouts.
+    private static let audioGapTolerance: Double = 0.02
     private var droppedVideoSamples = 0
-    private var droppedSystemAudioSamples = 0
+    private(set) var droppedSystemAudioSamples = 0
     private var droppedMicSamples = 0
     private let writerFinisher: WriterFinisher
     private let writerBuilder: WriterBuilder
@@ -265,7 +279,7 @@ public actor LongBufferRecorder {
 
     public func appendSystemAudio(_ sample: LongBufferSample) async {
         let sample = sample.buffer
-        if !appendAudio(sample, to: systemAudioInput) {
+        if !appendAudio(sample, to: systemAudioInput, track: .system) {
             droppedSystemAudioSamples += 1
             logDropIfNeeded(label: "system audio", count: droppedSystemAudioSamples)
         }
@@ -273,7 +287,7 @@ public actor LongBufferRecorder {
 
     public func appendMicrophone(_ sample: LongBufferSample) async {
         let sample = sample.buffer
-        if !appendAudio(sample, to: micInput) {
+        if !appendAudio(sample, to: micInput, track: .microphone) {
             droppedMicSamples += 1
             logDropIfNeeded(label: "microphone", count: droppedMicSamples)
         }
@@ -686,6 +700,7 @@ public actor LongBufferRecorder {
         activeSegmentURL = url
         activeSegmentStartPTS = pts
         activeSegmentEndPTS = pts
+        nextAudioPTS = [:]
         installedWriter = true
     }
 
@@ -745,11 +760,37 @@ public actor LongBufferRecorder {
         )
     }
 
-    private func appendAudio(_ sample: CMSampleBuffer, to input: AVAssetWriterInput?) -> Bool {
+    private func appendAudio(_ sample: CMSampleBuffer, to input: AVAssetWriterInput?, track: AudioTrack) -> Bool {
         guard isEnabled, sample.isValid else { return true }
         guard writer != nil else { return true }
-        let appended = append(sample, to: input)
         let pts = presentationTimeStamp(sample)
+
+        // The first buffer of a segment is measured from the segment's start,
+        // later ones from where the previous buffer ended. A segment never
+        // runs much past `segmentSeconds`, which bounds the fill.
+        if let expected = nextAudioPTS[track] ?? activeSegmentStartPTS,
+           pts - expected > Self.audioGapTolerance,
+           pts - expected <= segmentSeconds + keyframeWaitSeconds,
+           let format = sample.formatDescription,
+           let silence = PCMSilence.buffer(
+               formatDescription: format,
+               start: CMTime(seconds: expected, preferredTimescale: 1_000_000_000),
+               seconds: pts - expected
+           ) {
+            if append(silence, to: input) {
+                // The writer lays audio end to end, so the gap is now filled
+                // whether or not the sample below goes in; filling it again
+                // on the next buffer would push the rest of the track late.
+                nextAudioPTS[track] = pts
+            } else {
+                logger.error("Long-buffer could not fill a \(pts - expected, privacy: .public)s audio gap; it will close up in the file")
+            }
+        }
+
+        let appended = append(sample, to: input)
+        if appended, let end = PCMSilence.endTime(of: sample) {
+            nextAudioPTS[track] = max(nextAudioPTS[track] ?? end, end)
+        }
         activeSegmentEndPTS = max(activeSegmentEndPTS ?? pts, pts)
         if !appended {
             discardFailedActiveSegmentIfNeeded()
@@ -842,6 +883,7 @@ public actor LongBufferRecorder {
         activeSegmentURL = nil
         activeSegmentStartPTS = nil
         activeSegmentEndPTS = nil
+        nextAudioPTS = [:]
     }
 
     /// Drops a writer that AVFoundation has moved into a terminal failure

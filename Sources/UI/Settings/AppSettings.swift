@@ -751,16 +751,25 @@ public enum AppSettings {
     /// heavier than the compressed track that ends up in the file.
     public static let audioRingBufferBytesPerSecond: Double = 48_000 * 2 * 4
 
-    /// Splits the memory cap between the ring buffers in proportion to how fast
-    /// each one fills, so every buffer holds the same number of seconds. A fixed
-    /// split ran the audio buffers out first: raw PCM is about 3 Mbps per
-    /// source, so 15% of the cap held well under the window the video share
-    /// did, and clips opened on silence where the audio had already been evicted.
+    /// Extra audio kept beyond the retained window, for the keyframe a clip
+    /// starts on: the encoder keeps keyframes under 3 s apart.
+    public static let audioKeyframeMarginSeconds: TimeInterval = 3.0
+
+    /// Splits the memory cap between the ring buffers, audio first.
+    ///
+    /// Raw PCM audio fills at a fixed 384 kB/s per source, while video fills at
+    /// whatever the encoder actually produces, usually well under the bitrate
+    /// setting. Any split that guesses the video rate leaves audio running out
+    /// first whenever the guess is high, and a clip then opens on silence. So
+    /// each audio buffer gets exactly what the retained window needs (plus
+    /// the keyframe margin) and video gets the rest. If the cap is too small
+    /// for both, video is what comes up short: clips get shorter but keep
+    /// their sound.
     public static func ringBufferMemoryCaps(
         isDualMode: Bool,
         captureSystemAudio: Bool,
         captureMicrophone: Bool,
-        bitrateMbps: Double = bitrateMbps,
+        retainedSeconds: TimeInterval = ringBufferTimeCapSeconds,
         totalCapMB: Double = memoryCapMB
     ) -> (videoPerBuffer: Int, audioPerBuffer: Int) {
         let totalBytes = Int(totalCapMB * 1024 * 1024)
@@ -774,19 +783,17 @@ public enum AppSettings {
             audioBufferCount += 1
         }
 
-        let videoBytesPerSecond = max(bitrateMbps, 0.1) * 1_000_000 / 8 * Double(videoBufferCount)
-        let audioBytesPerSecond = audioRingBufferBytesPerSecond * Double(audioBufferCount)
-        let audioShare = audioBytesPerSecond / (videoBytesPerSecond + audioBytesPerSecond)
-
         let minimumVideoBytes = 32 * 1024 * 1024
         let minimumAudioBytes = 8 * 1024 * 1024
 
-        let audioPerBuffer = audioBufferCount > 0
-            ? max(minimumAudioBytes, Int(Double(totalBytes) * audioShare) / audioBufferCount)
-            : minimumAudioBytes
-        // Video gets whatever audio leaves, so an audio floor comes out of the
-        // video share rather than pushing the total over the cap.
-        let videoPool = totalBytes - (audioBufferCount > 0 ? audioPerBuffer * audioBufferCount : 0)
+        guard audioBufferCount > 0 else {
+            return (max(minimumVideoBytes, totalBytes / videoBufferCount), minimumAudioBytes)
+        }
+
+        let audioNeed = Int((max(retainedSeconds, 0) + audioKeyframeMarginSeconds) * audioRingBufferBytesPerSecond)
+        let affordable = (totalBytes - minimumVideoBytes * videoBufferCount) / audioBufferCount
+        let audioPerBuffer = max(minimumAudioBytes, min(audioNeed, affordable))
+        let videoPool = totalBytes - audioPerBuffer * audioBufferCount
         let videoPerBuffer = max(minimumVideoBytes, videoPool / videoBufferCount)
 
         return (videoPerBuffer, audioPerBuffer)

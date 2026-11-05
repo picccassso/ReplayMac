@@ -34,9 +34,9 @@ final class ReplayMemoryEstimateTests: XCTestCase {
         let result = estimate(seconds: 300, mbps: 50)
 
         XCTAssertTrue(result.isCapLimited)
-        // 1536 MiB shared by 6.25 MB/s of video and 0.768 MB/s of audio, minus
-        // headroom: about 226s for every buffer.
-        XCTAssertEqual(result.coveredSeconds, 226, accuracy: 2)
+        // Both audio buffers take their full 306s first (about 224 MiB); the
+        // remaining 1312 MiB holds about 220s of 6.25 MB/s video, minus headroom.
+        XCTAssertEqual(result.coveredSeconds, 217, accuracy: 2)
         let target = try XCTUnwrap(result.minimumCapMBToFit)
         XCTAssertEqual(target.truncatingRemainder(dividingBy: ReplayMemoryEstimate.memoryCapStepMB), 0)
         XCTAssertFalse(estimate(seconds: 300, mbps: 50, capMB: target).isCapLimited)
@@ -97,7 +97,7 @@ final class ReplayMemoryEstimateTests: XCTestCase {
                     isDualMode: false,
                     captureSystemAudio: true,
                     captureMicrophone: true,
-                    bitrateMbps: mbps,
+                    retainedSeconds: 300 + AppSettings.ringBufferHeadroomSeconds,
                     totalCapMB: capMB
                 )
                 let audioSeconds = Double(caps.audioPerBuffer) / AppSettings.audioRingBufferBytesPerSecond

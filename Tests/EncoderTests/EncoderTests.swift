@@ -46,8 +46,7 @@ final class EncoderTests: XCTestCase {
     }
 
     /// The output callback runs on a VideoToolbox thread while `encode` keeps
-    /// counting frames on the caller's. Zero timestamps take the callback's
-    /// logging path, which reads the counter. Run under
+    /// updating encoder state on the caller's. Run under
     /// `swift test --sanitize=thread` to catch unguarded state.
     func testOutputCallbackDoesNotRaceWithEncode() throws {
         let encoder = VideoEncoder()
@@ -57,8 +56,8 @@ final class EncoderTests: XCTestCase {
         try encoder.start(width: 64, height: 64, fps: 30, codec: .h264, bitrate: 1_000_000)
         defer { encoder.stop() }
 
-        for _ in 0..<30 {
-            encoder.encode(sampleBuffer: try makeFrame(width: 64, height: 64, presentationTime: .zero))
+        for index in 0..<30 {
+            encoder.encode(sampleBuffer: try makeFrame(width: 64, height: 64, presentationTime: Self.time(ms: index * 33)))
         }
         wait(for: [delivered], timeout: 5)
     }
@@ -90,9 +89,9 @@ final class EncoderTests: XCTestCase {
 
     func testIdlePolicyWaitsForTheIdleInterval() {
         let last = CMTime(value: 1_000_000, timescale: 1_000)
-        XCTAssertFalse(IdleFrameRefreshPolicy.shouldRefresh(lastSubmittedPTS: last, now: CMTime(value: 1_000_200, timescale: 1_000)))
-        XCTAssertTrue(IdleFrameRefreshPolicy.shouldRefresh(lastSubmittedPTS: last, now: CMTime(value: 1_000_250, timescale: 1_000)))
-        XCTAssertFalse(IdleFrameRefreshPolicy.shouldRefresh(lastSubmittedPTS: .invalid, now: last))
+        XCTAssertFalse(IdleFrameRefreshPolicy.shouldRefresh(lastSubmitTime: last, now: CMTime(value: 1_000_200, timescale: 1_000)))
+        XCTAssertTrue(IdleFrameRefreshPolicy.shouldRefresh(lastSubmitTime: last, now: CMTime(value: 1_000_250, timescale: 1_000)))
+        XCTAssertFalse(IdleFrameRefreshPolicy.shouldRefresh(lastSubmitTime: .invalid, now: last))
     }
 
     func testIdlePolicyKeepsPresentationTimesIncreasing() {
@@ -115,7 +114,8 @@ final class EncoderTests: XCTestCase {
     /// last frame on the clock, with keyframes no further apart than the ring
     /// buffers' headroom assumes.
     func testStillScreenKeepsStreamOnTheClockWithRegularKeyframes() throws {
-        let encoder = VideoEncoder(idleRefreshEnabled: false)
+        let clock = SimulatedClock(Self.time(ms: 0))
+        let encoder = VideoEncoder(idleRefreshEnabled: false, clock: { clock.now })
         let outputs = Mutex<[(pts: Double, isKeyframe: Bool)]>([])
         encoder.outputHandler = { sample in
             outputs.withLock { $0.append((CMSampleBufferGetPresentationTimeStamp(sample).seconds, Self.isKeyframe(sample))) }
@@ -125,6 +125,7 @@ final class EncoderTests: XCTestCase {
         encoder.encode(sampleBuffer: try makeFrame(width: 64, height: 64, presentationTime: Self.time(ms: 0)))
         XCTAssertFalse(encoder.refreshIfIdle(now: Self.time(ms: 100)), "Refreshed before the screen had gone idle")
         for ms in stride(from: 200, through: 20_000, by: 100) {
+            clock.now = Self.time(ms: ms)
             encoder.refreshIfIdle(now: Self.time(ms: ms))
         }
         encoder.stop()
@@ -148,7 +149,8 @@ final class EncoderTests: XCTestCase {
     /// A real frame captured just before a repeat, but delivered just after it,
     /// must not reach the session out of order.
     func testLateRealFrameAfterRefreshStaysInOrder() throws {
-        let encoder = VideoEncoder(idleRefreshEnabled: false)
+        let clock = SimulatedClock(Self.time(ms: 0))
+        let encoder = VideoEncoder(idleRefreshEnabled: false, clock: { clock.now })
         let times = Mutex<[Double]>([])
         encoder.outputHandler = { sample in
             times.withLock { $0.append(CMSampleBufferGetPresentationTimeStamp(sample).seconds) }
@@ -156,6 +158,7 @@ final class EncoderTests: XCTestCase {
         try encoder.start(width: 64, height: 64, fps: 30, codec: .h264, bitrate: 1_000_000)
 
         encoder.encode(sampleBuffer: try makeFrame(width: 64, height: 64, presentationTime: Self.time(ms: 0)))
+        clock.now = Self.time(ms: 500)
         XCTAssertTrue(encoder.refreshIfIdle(now: Self.time(ms: 500)))
         encoder.encode(sampleBuffer: try makeFrame(width: 64, height: 64, presentationTime: Self.time(ms: 450)))
         encoder.stop()
@@ -164,6 +167,51 @@ final class EncoderTests: XCTestCase {
         XCTAssertEqual(recorded.count, 3)
         XCTAssertEqual(recorded, recorded.sorted())
         XCTAssertEqual(Set(recorded).count, 3)
+    }
+
+    /// Frames that reach the encoder well after capture are a live stream, not
+    /// a still screen: no repeats may be squeezed in between them.
+    func testLateArrivingFramesAreNotTreatedAsIdle() throws {
+        let clock = SimulatedClock(Self.time(ms: 0))
+        let encoder = VideoEncoder(idleRefreshEnabled: false, clock: { clock.now })
+        let times = Mutex<[Double]>([])
+        encoder.outputHandler = { sample in
+            times.withLock { $0.append(CMSampleBufferGetPresentationTimeStamp(sample).seconds) }
+        }
+        try encoder.start(width: 64, height: 64, fps: 60, codec: .h264, bitrate: 1_000_000)
+
+        // 60 fps, each frame delivered 0.3 s after it was captured, with the
+        // idle check running every 0.1 s.
+        var nextTick = 300
+        for index in 0..<120 {
+            let captured = index * 1_000 / 60
+            let delivered = captured + 300
+            while nextTick <= delivered {
+                clock.now = Self.time(ms: nextTick)
+                XCTAssertFalse(encoder.refreshIfIdle(now: Self.time(ms: nextTick)), "repeat at \(nextTick) ms")
+                nextTick += 100
+            }
+            clock.now = Self.time(ms: delivered)
+            encoder.encode(sampleBuffer: try makeFrame(width: 64, height: 64, presentationTime: Self.time(ms: captured)))
+        }
+        encoder.stop()
+
+        let recorded = times.withLock { $0 }
+        XCTAssertEqual(recorded.count, 120)
+        let gaps = zip(recorded, recorded.dropFirst()).map { $1 - $0 }
+        XCTAssertGreaterThan(gaps.min() ?? 0, 0.01, "frames were squeezed together")
+    }
+
+    func testStopIdleRefreshEndsRepeatsButKeepsEncoding() throws {
+        let clock = SimulatedClock(Self.time(ms: 0))
+        let encoder = VideoEncoder(idleRefreshEnabled: false, clock: { clock.now })
+        try encoder.start(width: 64, height: 64, fps: 30, codec: .h264, bitrate: 1_000_000)
+        defer { encoder.stop() }
+
+        encoder.encode(sampleBuffer: try makeFrame(width: 64, height: 64, presentationTime: Self.time(ms: 0)))
+        encoder.stopIdleRefresh()
+        clock.now = Self.time(ms: 1_000)
+        XCTAssertFalse(encoder.refreshIfIdle(now: Self.time(ms: 1_000)))
     }
 
     /// The real timer, on the host clock: frames keep coming with no input, and
@@ -188,6 +236,17 @@ final class EncoderTests: XCTestCase {
 
         Thread.sleep(forTimeInterval: 0.4)
         XCTAssertEqual(times.withLock { $0.count }, whileRunning.count, "Encoder kept emitting after stop()")
+    }
+
+    private final class SimulatedClock: @unchecked Sendable {
+        // @unchecked: only touched under `lock`.
+        private let lock = NSLock()
+        private var _now: CMTime
+        init(_ now: CMTime) { _now = now }
+        var now: CMTime {
+            get { lock.lock(); defer { lock.unlock() }; return _now }
+            set { lock.lock(); _now = newValue; lock.unlock() }
+        }
     }
 
     private static func time(ms: Int) -> CMTime {

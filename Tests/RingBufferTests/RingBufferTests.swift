@@ -242,6 +242,56 @@ final class RingBufferTests: XCTestCase {
         XCTAssertEqual(buffer.duration, 0)
     }
 
+    // MARK: - Shared timeline
+
+    func testSamplesCoveringFromStartAtKeyframeAtOrBeforeTime() {
+        let buffer = VideoRingBuffer(timeCap: 60, memoryCap: 1_500_000_000)
+        for frame in 0..<300 {
+            let t = Double(frame) / 30
+            buffer.append(encodedSample: Self.makeSampleBuffer(pts: t, isKeyframe: frame % 60 == 0))
+        }
+        let covering = buffer.samples(coveringFrom: 5.5)
+        XCTAssertEqual(CMSampleBufferGetPresentationTimeStamp(covering.first!).seconds, 4.0, accuracy: 0.001)
+        XCTAssertEqual(CMSampleBufferGetPresentationTimeStamp(buffer.samples(coveringFrom: -1).first!).seconds, 0, accuracy: 0.001)
+        XCTAssertEqual(buffer.oldestPTS ?? -1, 0, accuracy: 0.001)
+        // Newest frame at 299/30 s, shown for 1/60 s.
+        XCTAssertEqual(buffer.newestEndPTS ?? -1, 299.0 / 30 + 1.0 / 60, accuracy: 0.001)
+    }
+
+    /// Audio must not evict anything the video buffer can still put in a clip,
+    /// even past its own time cap.
+    func testAudioKeepsHistoryBackToRetentionFloor() {
+        let buffer = AudioRingBuffer(timeCap: 5, memoryCap: 50_000_000)
+        let floor = FloorBox(10)
+        buffer.setRetentionFloor { floor.value }
+        for step in 0...400 {
+            buffer.append(Self.makeSampleBuffer(pts: Double(step) * 0.05, isKeyframe: true))
+        }
+        // 20 s appended, cap 5 s, but the floor at 10 s holds everything after it.
+        let oldest = CMSampleBufferGetPresentationTimeStamp(buffer.samples(last: 1_000).first!).seconds
+        XCTAssertLessThanOrEqual(oldest, 10)
+        XCTAssertGreaterThan(oldest, 9.9)
+
+        floor.value = nil
+        buffer.append(Self.makeSampleBuffer(pts: 20.05, isKeyframe: true))
+        XCTAssertLessThanOrEqual(buffer.duration, 5.0001)
+    }
+
+    func testAudioSamplesBetweenToleratesOutOfOrderBuffers() {
+        let buffer = AudioRingBuffer(timeCap: 30, memoryCap: 50_000_000)
+        for pts in [1.0, 2.0, 5.0, 3.0, 4.0] {
+            buffer.append(Self.makeSampleBuffer(pts: pts, isKeyframe: true))
+        }
+        let selected = buffer.samples(between: 2.5, and: 4.5).map { CMSampleBufferGetPresentationTimeStamp($0).seconds }
+        XCTAssertEqual(selected, [3.0, 4.0])
+    }
+
+    private final class FloorBox: @unchecked Sendable {
+        // @unchecked: test-only, touched from one thread.
+        var value: Double?
+        init(_ value: Double?) { self.value = value }
+    }
+
     // MARK: - AudioRingBuffer Tests
 
     func testAudioRingBufferAppendAndRetrieve() {

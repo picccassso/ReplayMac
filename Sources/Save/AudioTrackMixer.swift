@@ -12,9 +12,27 @@ enum AudioTrackMixError: Error {
 }
 
 enum AudioTrackMixer {
+    /// Capture stamps each buffer with the host clock, so consecutive buffers
+    /// land a few microseconds early or late of where the previous one ended.
+    /// Placed literally that rounds into one-sample overlaps (summed) and
+    /// one-sample holes, which click. A buffer starting within this tolerance
+    /// of the previous end is placed right after it. The error this allows
+    /// cannot build up: once a buffer's own time is further off than the
+    /// tolerance, it is placed at its own time again.
+    static let continuityToleranceSeconds = 0.002
+
+    static func continuityToleranceFrames(sampleRate: Int32) -> Double {
+        (continuityToleranceSeconds * Double(sampleRate)).rounded()
+    }
+
+    /// Mixes the tracks onto one continuous timeline from zero (the first
+    /// video frame) to `timelineEnd`, or to the last sample when it is nil.
+    /// Regions no track covers come out as silence, and samples past
+    /// `timelineEnd` are cut.
     static func merge(
         systemAudioSamples: [CMSampleBuffer],
-        micAudioSamples: [CMSampleBuffer]
+        micAudioSamples: [CMSampleBuffer],
+        timelineEnd: CMTime? = nil
     ) throws -> [CMSampleBuffer] {
         guard !systemAudioSamples.isEmpty || !micAudioSamples.isEmpty else {
             throw AudioTrackMixError.noAudioSamples
@@ -33,12 +51,21 @@ enum AudioTrackMixer {
             throw AudioTrackMixError.unsupportedFormat
         }
 
-        let outputChannels = max(systemTrack.channelCount, micTrack.channelCount, 1)
+        // Mono or stereo out, whatever comes in: the clip's AAC track is never
+        // wider, and wider sources are folded down in `mix`.
+        let outputChannels = min(max(systemTrack.channelCount, micTrack.channelCount, 1), 2)
         let formatDescription = try makeFormatDescription(sampleRate: sampleRate, channels: outputChannels)
         let chunks = (systemTrack.chunks + micTrack.chunks)
         guard let firstFrame = chunks.map(\.startFrame).min(),
-              let lastFrame = chunks.map(\.endFrame).max(),
-              lastFrame > firstFrame else {
+              let lastChunkFrame = chunks.map(\.endFrame).max(),
+              lastChunkFrame > firstFrame else {
+            throw AudioTrackMixError.noAudioSamples
+        }
+        var lastFrame = lastChunkFrame
+        if let timelineEnd, timelineEnd.isNumeric {
+            lastFrame = Int64((timelineEnd.seconds * Double(sampleRate)).rounded())
+        }
+        guard lastFrame > min(firstFrame, 0) else {
             throw AudioTrackMixError.noAudioSamples
         }
 
@@ -119,15 +146,29 @@ enum AudioTrackMixer {
                 let sourceOffset = Int(overlapStart - chunk.startFrame)
                 let outputOffset = Int(overlapStart - outputStartFrame)
 
-                for frame in 0..<frameCount {
-                    let sourceFrame = sourceOffset + frame
-                    let outputFrame = outputOffset + frame
-                    for channel in 0..<outputChannels {
-                        let sourceChannel = chunk.channels == 1
-                            ? 0
-                            : min(channel, chunk.channels - 1)
-                        output[(outputFrame * outputChannels) + channel] +=
-                            chunk.samples[(sourceFrame * chunk.channels) + sourceChannel]
+                if chunk.channels > outputChannels {
+                    // Fold extra channels onto the outputs in turn at full
+                    // level (one live input among silent ones must not be
+                    // turned down); the mix is clamped below.
+                    for frame in 0..<frameCount {
+                        let sourceBase = (sourceOffset + frame) * chunk.channels
+                        let outputBase = (outputOffset + frame) * outputChannels
+                        for sourceChannel in 0..<chunk.channels {
+                            output[outputBase + (sourceChannel % outputChannels)] +=
+                                chunk.samples[sourceBase + sourceChannel]
+                        }
+                    }
+                } else {
+                    for frame in 0..<frameCount {
+                        let sourceFrame = sourceOffset + frame
+                        let outputFrame = outputOffset + frame
+                        for channel in 0..<outputChannels {
+                            let sourceChannel = chunk.channels == 1
+                                ? 0
+                                : min(channel, chunk.channels - 1)
+                            output[(outputFrame * outputChannels) + channel] +=
+                                chunk.samples[(sourceFrame * chunk.channels) + sourceChannel]
+                        }
                     }
                 }
             }
@@ -333,9 +374,34 @@ private struct PCMTrack {
             )
         }
 
-        self.chunks = chunks.sorted { $0.startFrame < $1.startFrame }
+        self.chunks = Self.snapToContinuousRuns(chunks.sorted { $0.startFrame < $1.startFrame }, sampleRate: sampleRate)
         self.sampleRate = sampleRate
         channelCount = maxChannelCount
+    }
+
+    private static func snapToContinuousRuns(_ chunks: [PCMChunk], sampleRate: Int32?) -> [PCMChunk] {
+        guard let sampleRate, sampleRate > 0, chunks.count > 1 else { return chunks }
+        let tolerance = Int64(AudioTrackMixer.continuityToleranceFrames(sampleRate: sampleRate))
+        var snapped: [PCMChunk] = []
+        snapped.reserveCapacity(chunks.count)
+        for chunk in chunks {
+            if let previous = snapped.last,
+               chunk.startFrame != previous.endFrame,
+               abs(chunk.startFrame - previous.endFrame) <= tolerance {
+                snapped.append(PCMChunk(
+                    startFrame: previous.endFrame,
+                    frameCount: chunk.frameCount,
+                    channels: chunk.channels,
+                    samples: chunk.samples
+                ))
+            } else {
+                snapped.append(chunk)
+            }
+        }
+        // Moving a chunk forward can carry it past a neighbour that started
+        // within the tolerance; `mix` walks chunks in start order and stops at
+        // the first one past its window, so keep them sorted.
+        return snapped.sorted { $0.startFrame < $1.startFrame }
     }
 
     private static func interleave(

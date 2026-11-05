@@ -46,31 +46,31 @@ final class AppSettingsMemoryCapTests: XCTestCase {
         XCTAssertGreaterThanOrEqual(caps.audioPerBuffer, 8 * 1024 * 1024)
     }
 
-    /// Audio is buffered as raw PCM, so a fixed 15% share ran the audio buffers
-    /// out long before video and clips opened on silence. Every split has to
-    /// leave audio holding at least as long as video.
-    func testAudioBuffersHoldAsLongAsVideoBuffers() {
+    /// Audio fills at a fixed rate and video usually under its bitrate, so
+    /// audio is sized from the window: whenever the cap can afford it, every
+    /// audio buffer holds the whole retained window plus the keyframe margin,
+    /// at any bitrate, and the buffers never add up to more than the cap.
+    func testAudioBuffersHoldTheWholeWindowWhenTheCapAllows() {
         for capMB in [256.0, 512, 1024, 1408, 1536, 4096] {
-            for mbps in [4.0, 10, 25, 50, 100] {
+            for retained in [18.0, 33, 123, 303] {
                 for (system, mic) in [(true, false), (false, true), (true, true)] {
                     for dual in [false, true] {
                         let caps = AppSettings.ringBufferMemoryCaps(
                             isDualMode: dual,
                             captureSystemAudio: system,
                             captureMicrophone: mic,
-                            bitrateMbps: mbps,
+                            retainedSeconds: retained,
                             totalCapMB: capMB
                         )
-                        let videoSeconds = Double(caps.videoPerBuffer) / (mbps * 1_000_000 / 8)
-                        let audioSeconds = Double(caps.audioPerBuffer) / AppSettings.audioRingBufferBytesPerSecond
-                        XCTAssertGreaterThanOrEqual(
-                            audioSeconds, videoSeconds - 0.5,
-                            "cap=\(capMB) mbps=\(mbps) system=\(system) mic=\(mic) dual=\(dual): audio \(audioSeconds)s < video \(videoSeconds)s"
-                        )
-
-                        let buffers = (dual ? 3 : 1) * caps.videoPerBuffer
-                            + caps.audioPerBuffer * ((system ? 1 : 0) + (mic ? 1 : 0))
-                        XCTAssertLessThanOrEqual(buffers, Int(capMB * 1024 * 1024) + 1)
+                        let sources = (system ? 1 : 0) + (mic ? 1 : 0)
+                        let videoBuffers = dual ? 3 : 1
+                        let need = (retained + AppSettings.audioKeyframeMarginSeconds) * AppSettings.audioRingBufferBytesPerSecond
+                        let total = Int(capMB * 1024 * 1024)
+                        let label = "cap=\(capMB) retained=\(retained) system=\(system) mic=\(mic) dual=\(dual)"
+                        if Int(need) * sources + 32 * 1024 * 1024 * videoBuffers <= total {
+                            XCTAssertGreaterThanOrEqual(Double(caps.audioPerBuffer), need - 1, label)
+                        }
+                        XCTAssertLessThanOrEqual(videoBuffers * caps.videoPerBuffer + caps.audioPerBuffer * sources, total + 1, label)
                     }
                 }
             }
@@ -84,11 +84,11 @@ final class AppSettingsMemoryCapTests: XCTestCase {
             isDualMode: false,
             captureSystemAudio: true,
             captureMicrophone: true,
-            bitrateMbps: 20,
+            retainedSeconds: 303,
             totalCapMB: 1408
         )
         let audioSeconds = Double(caps.audioPerBuffer) / AppSettings.audioRingBufferBytesPerSecond
-        XCTAssertGreaterThanOrEqual(audioSeconds, 300 + AppSettings.ringBufferHeadroomSeconds)
+        XCTAssertGreaterThanOrEqual(audioSeconds, 303)
     }
 
     func testAudioRingBufferRateMatchesStereoFloatPCM() {

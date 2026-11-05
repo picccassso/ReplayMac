@@ -18,6 +18,13 @@
 - Fix clips that started with 10 to 20 seconds of silence before the sound came in. While the screen was still (a paused game, a menu, a game on another display), recordings got no new frames, so a replay reached back to before the audio buffer started and ended when the screen stopped changing instead of when you saved. ReplayMac now keeps recording the still screen, so a replay covers exactly the last N seconds with sound all the way through
 - Fix long replay buffers losing the start of their audio. Audio is held in memory uncompressed, about 3 Mbps per source, but only got 15% of the memory cap, so with a long buffer or a lowered cap the sound ran out before the video did. The memory cap is now shared out by how much each track actually needs
 - Saved replays are now exactly the length you set. A clip has to start on a keyframe, which could be up to 2 seconds before the window, so a 30 second replay played as 31 or 32 seconds. That lead-in is still in the file so the first frame decodes, but playback now starts right at the window
+- Fix audio drifting behind the video over a long session, by up to 20 seconds (#16). When the Mac was too busy to encode every frame, each dropped frame pushed the rest of the video one frame earlier, so a clip opened on silence and its sound then played late by the same amount. Frames now keep the time they were captured
+- Fix clips saved with separate audio tracks, and extended replays, going out of sync after an audio dropout. A gap of more than 5 seconds in system audio closed up in the file, so everything after it played early. Every track is now filled with silence across gaps, merged or not, in replays and extended replays
+- Fix saving a clip crashing ReplayMac when the microphone is an audio interface with more than two inputs. Wider inputs are now mixed down to stereo at full level, so a single mic on a multi-input interface is not turned down
+- Fix faint clicks a few times a second in clip audio, where the slightly uneven timestamps on system audio left one-sample overlaps and holes between buffers
+- Dual-display replays saved as separate files now cover exactly the same moments on both displays
+- A replay now ends at the moment you save, and every track is cut to that same span. Audio keeps as much history as the video it is saved with, so the start of a clip is never missing its sound
+- Each save now logs how well its audio and video line up, so a sync problem can be diagnosed from the logs alone
 - Settings now shows the real memory a replay buffer needs, audio included. The old figure assumed audio took a fifteenth of what it does, so it could say a buffer fit when it didn't
 
 ## 2.2.1

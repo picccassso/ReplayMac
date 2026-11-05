@@ -57,6 +57,10 @@ public final class MicCapture: @unchecked Sendable {
     private var timeline = MicrophoneTimeline(resyncThresholdSeconds: MicCapture.resyncThresholdSeconds)
 
     private var converter: AVAudioConverter?
+    /// Device-rate Float32 format the tap buffers are folded into before
+    /// conversion, or nil when the device format cannot be folded and the
+    /// converter takes the tap buffers as they are.
+    private var foldFormat: AVAudioFormat?
     private var outputFormat: AVAudioFormat?
     private var outputFormatDescription: CMAudioFormatDescription?
     private var isRunning = false
@@ -162,6 +166,7 @@ public final class MicCapture: @unchecked Sendable {
         requestedDeviceID = nil
         pinnedChannelCount = nil
         converter = nil
+        foldFormat = nil
         outputFormat = nil
         outputFormatDescription = nil
         lock.unlock()
@@ -250,39 +255,17 @@ public final class MicCapture: @unchecked Sendable {
         let pinned = pinnedChannelCount
         lock.unlock()
 
-        let channelCount = pinned ?? max(1, inputFormat.channelCount)
-        var target = AVAudioFormat(
-            commonFormat: .pcmFormatFloat32,
-            sampleRate: 48000,
-            channels: channelCount,
-            interleaved: true
-        )
-        var newConverter = target.flatMap { AVAudioConverter(from: inputFormat, to: $0) }
-
-        // The pinned channel count is preferred, but a device that cannot be
-        // converted to it must not take the mic down entirely. The save-time
-        // mixer tolerates a mic track whose channel count changes between
-        // chunks; the long-buffer writer is the only consumer that does not.
-        if newConverter == nil, pinned != nil, pinned != inputFormat.channelCount {
-            logger.error(
-                "Microphone cannot convert \(inputFormat.channelCount, privacy: .public)ch to pinned \(pinned!, privacy: .public)ch; following the device instead"
-            )
-            let fallbackChannels = max(1, inputFormat.channelCount)
-            target = AVAudioFormat(
-                commonFormat: .pcmFormatFloat32,
-                sampleRate: 48000,
-                channels: fallbackChannels,
-                interleaved: true
-            )
-            newConverter = target.flatMap { AVAudioConverter(from: inputFormat, to: $0) }
-        }
-
-        guard let target else {
-            throw MicCaptureError.cannotCreateTargetFormat
-        }
-        guard let newConverter else {
+        let channelCount = pinned ?? Self.outputChannelCount(forInputChannels: inputFormat.channelCount)
+        guard let conversion = Self.makeConversion(inputFormat: inputFormat, outputChannels: channelCount) else {
+            if let pinned {
+                logger.error(
+                    "Microphone cannot convert \(inputFormat.channelCount, privacy: .public)ch to pinned \(pinned, privacy: .public)ch"
+                )
+            }
             throw MicCaptureError.cannotCreateConverter
         }
+        let target = conversion.output
+        let newConverter = conversion.converter
 
         var asbd = target.streamDescription.pointee
         var formatDescription: CMAudioFormatDescription?
@@ -302,6 +285,7 @@ public final class MicCapture: @unchecked Sendable {
 
         lock.lock()
         converter = newConverter
+        foldFormat = conversion.fold
         outputFormat = target
         outputFormatDescription = formatDescription
         if pinnedChannelCount == nil {
@@ -334,6 +318,142 @@ public final class MicCapture: @unchecked Sendable {
             input.removeTap(onBus: 0)
             throw MicCaptureError.engineStartFailed(error)
         }
+    }
+
+    /// Mono stays mono; anything wider is mixed down to stereo. Every consumer
+    /// downstream (the AAC writers, the memory budget, the save-time mixer)
+    /// is built for at most two channels: a 4-input interface or a 16-channel
+    /// loopback device passed through at full width crashed the clip writer
+    /// and used several times the memory the audio buffers were sized for.
+    static func outputChannelCount(forInputChannels channels: AVAudioChannelCount) -> AVAudioChannelCount {
+        min(max(1, channels), 2)
+    }
+
+    struct Conversion {
+        /// Device-rate format the tap buffer is folded into first, or nil to
+        /// hand the tap buffer to the converter as it is.
+        let fold: AVAudioFormat?
+        let converter: AVAudioConverter
+        /// 48 kHz interleaved Float32 at the output channel count.
+        let output: AVAudioFormat
+    }
+
+    /// Builds the tap-to-output conversion. Channels are folded down by hand
+    /// and the converter only changes sample rate: asked to change the
+    /// channel count too, AVAudioConverter mixes only channels it can place in
+    /// space (surround layouts) and leaves the numbered inputs an audio
+    /// interface reports silent, or keeps just the first two.
+    static func makeConversion(inputFormat: AVAudioFormat, outputChannels: AVAudioChannelCount) -> Conversion? {
+        guard let output = AVAudioFormat(
+            commonFormat: .pcmFormatFloat32,
+            sampleRate: 48000,
+            channels: outputChannels,
+            interleaved: true
+        ) else { return nil }
+
+        if inputFormat.commonFormat == .pcmFormatFloat32,
+           let fold = AVAudioFormat(
+               commonFormat: .pcmFormatFloat32,
+               sampleRate: inputFormat.sampleRate,
+               channels: outputChannels,
+               interleaved: false
+           ),
+           let converter = AVAudioConverter(from: fold, to: output) {
+            return Conversion(fold: fold, converter: converter, output: output)
+        }
+
+        // Non-float devices are rare; their channels go through the converter.
+        guard let converter = AVAudioConverter(from: inputFormat, to: output) else { return nil }
+        converter.downmix = true
+        return Conversion(fold: nil, converter: converter, output: output)
+    }
+
+    /// Folds a Float32 buffer (interleaved or not) to `format`'s channel
+    /// count at the same rate:
+    /// - mono is copied to every output, and a matching count is copied;
+    /// - stereo into mono is averaged, as Apple's own mixdown does: a stereo
+    ///   mic carries the same signal on both sides, and summing it would be
+    ///   6 dB hot and clip;
+    /// - wider inputs (audio interfaces) are added onto the outputs in turn at
+    ///   full level. An interface usually carries one mic on one input with
+    ///   the rest silent, and scaling by outputs/inputs buried that voice
+    ///   (12 dB down on 8 inputs). Peaks are clamped after the mic volume is
+    ///   applied, in `handleInput`, not here.
+    static func fold(_ buffer: AVAudioPCMBuffer, into format: AVAudioFormat) -> AVAudioPCMBuffer? {
+        guard let source = buffer.floatChannelData,
+              let folded = AVAudioPCMBuffer(pcmFormat: format, frameCapacity: max(buffer.frameLength, 1)),
+              let destination = folded.floatChannelData else {
+            return nil
+        }
+        let frames = Int(buffer.frameLength)
+        let inputChannels = Int(buffer.format.channelCount)
+        let outputChannels = Int(format.channelCount)
+        guard inputChannels > 0, outputChannels > 0 else { return nil }
+        folded.frameLength = buffer.frameLength
+
+        let interleaved = buffer.format.isInterleaved
+        let stride = buffer.stride
+        func sample(_ channel: Int, _ frame: Int) -> Float {
+            interleaved ? source[0][frame * stride + channel] : source[channel][frame * stride]
+        }
+
+        for channel in 0..<outputChannels {
+            destination[channel].update(repeating: 0, count: frames)
+        }
+        if inputChannels == 2 && outputChannels == 1 {
+            for frame in 0..<frames {
+                destination[0][frame] = (sample(0, frame) + sample(1, frame)) * 0.5
+            }
+        } else if inputChannels <= outputChannels {
+            for channel in 0..<outputChannels {
+                let sourceChannel = min(channel, inputChannels - 1)
+                for frame in 0..<frames {
+                    destination[channel][frame] = sample(sourceChannel, frame)
+                }
+            }
+        } else {
+            for channel in 0..<inputChannels {
+                let target = destination[channel % outputChannels]
+                for frame in 0..<frames {
+                    target[frame] += sample(channel, frame)
+                }
+            }
+        }
+        return folded
+    }
+
+    /// Tap buffer in, 48 kHz output out: fold, then convert.
+    static func convert(
+        _ buffer: AVAudioPCMBuffer,
+        fold foldFormat: AVAudioFormat?,
+        converter: AVAudioConverter,
+        output outputFormat: AVAudioFormat
+    ) -> AVAudioPCMBuffer? {
+        var source = buffer
+        if let foldFormat {
+            guard let folded = fold(buffer, into: foldFormat) else { return nil }
+            source = folded
+        }
+
+        let ratio = outputFormat.sampleRate / source.format.sampleRate
+        let outputCapacity = AVAudioFrameCount(Double(source.frameLength) * ratio + 512)
+        guard let outputBuffer = AVAudioPCMBuffer(pcmFormat: outputFormat, frameCapacity: outputCapacity) else {
+            return nil
+        }
+
+        let inputState = AudioConversionInputState()
+        var conversionError: NSError?
+        let status = converter.convert(to: outputBuffer, error: &conversionError) { _, outStatus in
+            if inputState.didReturnInput {
+                outStatus.pointee = .noDataNow
+                return nil
+            }
+            inputState.didReturnInput = true
+            outStatus.pointee = .haveData
+            return source
+        }
+        guard status != .error, outputBuffer.frameLength > 0 else { return nil }
+        return outputBuffer
     }
 
     static func installTapCatchingExceptions(
@@ -502,45 +622,31 @@ public final class MicCapture: @unchecked Sendable {
     private func handleInput(buffer: AVAudioPCMBuffer, time: AVAudioTime) {
         lock.lock()
         let converter = self.converter
+        let foldFormat = self.foldFormat
         let outputFormat = self.outputFormat
         lock.unlock()
 
-        guard let converter, let outputFormat else { return }
-
-        let ratio = outputFormat.sampleRate / buffer.format.sampleRate
-        let outputCapacity = AVAudioFrameCount(Double(buffer.frameLength) * ratio + 512)
-        guard let outputBuffer = AVAudioPCMBuffer(pcmFormat: outputFormat, frameCapacity: outputCapacity) else {
+        guard let converter, let outputFormat,
+              let outputBuffer = Self.convert(buffer, fold: foldFormat, converter: converter, output: outputFormat) else {
             return
         }
-
-        let inputState = AudioConversionInputState()
-        var conversionError: NSError?
-        let status = converter.convert(to: outputBuffer, error: &conversionError) { _, outStatus in
-            if inputState.didReturnInput {
-                outStatus.pointee = .noDataNow
-                return nil
-            }
-            inputState.didReturnInput = true
-            outStatus.pointee = .haveData
-            return buffer
-        }
-        guard status != .error, outputBuffer.frameLength > 0 else { return }
 
         lock.lock()
         let currentVolume = volume
         lock.unlock()
 
-        if currentVolume != 1.0 {
-            let abl = UnsafeMutableAudioBufferListPointer(outputBuffer.mutableAudioBufferList)
-            let volumeFloat = Float(currentVolume)
-            for buffer in abl {
-                guard let data = buffer.mData else { continue }
-                let byteSize = Int(buffer.mDataByteSize)
-                let floatCount = byteSize / MemoryLayout<Float>.size
-                let floatPtr = data.assumingMemoryBound(to: Float.self)
-                for i in 0..<floatCount {
-                    floatPtr[i] *= volumeFloat
-                }
+        // Volume first, then clamp: inputs folded at full level can peak past
+        // full scale, and clamping before the volume slider would leave a
+        // turned-down mic flat-topped instead of simply quieter.
+        let abl = UnsafeMutableAudioBufferListPointer(outputBuffer.mutableAudioBufferList)
+        let volumeFloat = Float(currentVolume)
+        for buffer in abl {
+            guard let data = buffer.mData else { continue }
+            let byteSize = Int(buffer.mDataByteSize)
+            let floatCount = byteSize / MemoryLayout<Float>.size
+            let floatPtr = data.assumingMemoryBound(to: Float.self)
+            for i in 0..<floatCount {
+                floatPtr[i] = min(max(floatPtr[i] * volumeFloat, -1), 1)
             }
         }
 

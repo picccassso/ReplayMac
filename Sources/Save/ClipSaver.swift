@@ -30,27 +30,84 @@ public enum ClipSaveError: LocalizedError {
     }
 }
 
+/// What one save selected, measured against the window it was asked for.
+/// Logged with every save so a sync problem in a user's clip can be read off
+/// their logs, and kept on `ClipSaver.lastSyncReport` for tests.
+public struct ClipSyncReport: Sendable, Equatable {
+    public struct AudioTrack: Sendable, Equatable {
+        public let label: String
+        /// Seconds of silence the clip opens on before this track's first sample.
+        public let leadInSeconds: Double
+        /// Seconds of silence after this track's last sample before the clip ends.
+        public let tailSeconds: Double
+        /// Longest stretch inside the clip with no samples for this track.
+        public let largestGapSeconds: Double
+    }
+
+    public let windowStart: Double
+    public let windowEnd: Double
+    /// True when the window ends at the moment of the save; false when the
+    /// video buffer had gone stale (capture paused) and it ends at the last frame.
+    public let anchoredToClock: Bool
+    /// How far the newest video frame trailed the clock when the save began.
+    public let videoLagSeconds: Double
+    /// How far the first video frame (a keyframe) sits before the window.
+    public let keyframeLeadSeconds: Double
+    public let audioTracks: [AudioTrack]
+
+    /// A clip should open on its own audio, keep it to the end, and have no
+    /// holes. Anything past these marks is worth a warning in the log.
+    public var isInSync: Bool {
+        audioTracks.allSatisfy { track in
+            track.leadInSeconds <= 0.25 && track.tailSeconds <= 0.25 && track.largestGapSeconds <= 0.5
+        } && (!anchoredToClock || videoLagSeconds <= 1.0)
+    }
+}
+
 public actor ClipSaver {
+    /// A video buffer whose newest frame trails the clock by more than this is
+    /// treated as stale (capture paused or stopped): the save then ends at the
+    /// last frame rather than at the clock. Live capture stays well inside it,
+    /// because the encoder repeats its last frame within a fraction of a
+    /// second on a still screen.
+    static let staleVideoToleranceSeconds: Double = 2.0
+
     private let videoRingBuffer: VideoRingBuffer
     private let dualDisplay1VideoRingBuffer: VideoRingBuffer?
     private let dualDisplay2VideoRingBuffer: VideoRingBuffer?
     private let systemAudioRingBuffer: AudioRingBuffer?
     private let micRingBuffer: AudioRingBuffer?
+    private let clock: @Sendable () -> CMTime
     private static let logger = Logger(subsystem: "com.replaycap", category: "Save")
     private var logger: Logger { Self.logger }
 
+    /// Sync measurements from the most recent save.
+    public private(set) var lastSyncReport: ClipSyncReport?
+
+    /// Test seam: runs once both displays' samples are taken in a
+    /// dual-display save, before either file is written.
+    private var afterDualSelection: (@Sendable () -> Void)?
+
+    func setAfterDualSelection(_ hook: (@Sendable () -> Void)?) {
+        afterDualSelection = hook
+    }
+
+    /// - Parameter clock: the host clock that capture stamps every frame and
+    ///   audio buffer with. Tests pass their own.
     public init(
         videoRingBuffer: VideoRingBuffer,
         dualDisplay1VideoRingBuffer: VideoRingBuffer? = nil,
         dualDisplay2VideoRingBuffer: VideoRingBuffer? = nil,
         systemAudioRingBuffer: AudioRingBuffer? = nil,
-        micRingBuffer: AudioRingBuffer? = nil
+        micRingBuffer: AudioRingBuffer? = nil,
+        clock: @escaping @Sendable () -> CMTime = { CMClockGetTime(CMClockGetHostTimeClock()) }
     ) {
         self.videoRingBuffer = videoRingBuffer
         self.dualDisplay1VideoRingBuffer = dualDisplay1VideoRingBuffer
         self.dualDisplay2VideoRingBuffer = dualDisplay2VideoRingBuffer
         self.systemAudioRingBuffer = systemAudioRingBuffer
         self.micRingBuffer = micRingBuffer
+        self.clock = clock
     }
 
     public func saveClip(
@@ -59,9 +116,14 @@ public actor ClipSaver {
         mergeAudioTracks: Bool = true,
         baseName: String? = nil
     ) async throws -> URL {
-        try await saveClip(
-            from: videoRingBuffer,
-            lastSeconds: lastSeconds,
+        let now = clock()
+        guard let newestEnd = videoRingBuffer.newestEndPTS else {
+            throw ClipSaveError.noSamples
+        }
+        let window = Self.saveWindow(now: now, newestVideoEnd: Self.hostTime(newestEnd), lastSeconds: lastSeconds)
+        let selection = try select(from: videoRingBuffer, window: window, now: now)
+        return try await write(
+            selection,
             outputDirectory: outputDirectory,
             fileNameSuffix: nil,
             mergeAudioTracks: mergeAudioTracks,
@@ -79,17 +141,27 @@ public actor ClipSaver {
             throw ClipSaveError.noSamples
         }
 
-        let display1URL = try await saveClip(
-            from: dualDisplay1VideoRingBuffer,
-            lastSeconds: lastSeconds,
+        // One window for both files, and both displays' samples taken before
+        // either file is written: display 2 keeps capturing (and evicting)
+        // while display 1 is saved, and must not lose the start of the window.
+        let now = clock()
+        guard let newestEnd = [dualDisplay1VideoRingBuffer.newestEndPTS, dualDisplay2VideoRingBuffer.newestEndPTS]
+            .compactMap({ $0 }).max() else {
+            throw ClipSaveError.noSamples
+        }
+        let window = Self.saveWindow(now: now, newestVideoEnd: Self.hostTime(newestEnd), lastSeconds: lastSeconds)
+        let display1 = try select(from: dualDisplay1VideoRingBuffer, window: window, now: now)
+        let display2 = try select(from: dualDisplay2VideoRingBuffer, window: window, now: now)
+        afterDualSelection?()
+        let display1URL = try await write(
+            display1,
             outputDirectory: outputDirectory,
             fileNameSuffix: "Display_1",
             mergeAudioTracks: mergeAudioTracks,
             baseName: baseName
         )
-        let display2URL = try await saveClip(
-            from: dualDisplay2VideoRingBuffer,
-            lastSeconds: lastSeconds,
+        let display2URL = try await write(
+            display2,
             outputDirectory: outputDirectory,
             fileNameSuffix: "Display_2",
             mergeAudioTracks: mergeAudioTracks,
@@ -99,15 +171,46 @@ public actor ClipSaver {
         return [display1URL, display2URL]
     }
 
-    private func saveClip(
-        from videoRingBuffer: VideoRingBuffer,
-        lastSeconds: TimeInterval,
-        outputDirectory: URL,
-        fileNameSuffix: String?,
-        mergeAudioTracks: Bool,
-        baseName: String? = nil
-    ) async throws -> URL {
-        let videoSamples = videoRingBuffer.samples(last: lastSeconds)
+    /// The window a save covers, on the capture (host) clock.
+    struct SaveWindow: Equatable {
+        let start: CMTime
+        let end: CMTime
+        let anchoredToClock: Bool
+    }
+
+    /// Ends the window at the moment of the save, so every track is cut to
+    /// the same span of real time no matter how far behind any one buffer's
+    /// newest sample is. A stale video buffer (capture paused) instead ends
+    /// the window at its last frame, so saving while paused still returns the
+    /// last footage recorded.
+    static func saveWindow(now: CMTime, newestVideoEnd: CMTime, lastSeconds: TimeInterval) -> SaveWindow {
+        let length = CMTime(seconds: max(lastSeconds, 0), preferredTimescale: 1_000_000_000)
+        let lag = CMTimeGetSeconds(CMTimeSubtract(now, newestVideoEnd))
+        let anchoredToClock = now.isNumeric && lag <= staleVideoToleranceSeconds
+        // A frame stamped a hair past `now` still belongs in the clip.
+        let end = anchoredToClock ? CMTimeMaximum(now, newestVideoEnd) : newestVideoEnd
+        return SaveWindow(start: CMTimeSubtract(end, length), end: end, anchoredToClock: anchoredToClock)
+    }
+
+    private static func hostTime(_ seconds: Double) -> CMTime {
+        CMTime(seconds: seconds, preferredTimescale: 1_000_000_000)
+    }
+
+    /// Everything one file needs, taken from the ring buffers in one go.
+    private struct Selection {
+        let window: SaveWindow
+        let videoSamples: [CMSampleBuffer]
+        let videoFormatDescription: CMFormatDescription
+        let videoStartPTS: CMTime
+        let systemAudioSamples: [CMSampleBuffer]
+        let micAudioSamples: [CMSampleBuffer]
+    }
+
+    /// Takes the window's video (from the keyframe at or before its start)
+    /// and audio out of the ring buffers, and logs how well they line up.
+    private func select(from videoRingBuffer: VideoRingBuffer, window: SaveWindow, now: CMTime) throws -> Selection {
+        let videoSamples = videoRingBuffer.samples(coveringFrom: window.start.seconds)
+        let newestEnd = videoRingBuffer.newestEndPTS.map(Self.hostTime) ?? window.end
 
         guard !videoSamples.isEmpty else {
             throw ClipSaveError.noSamples
@@ -119,19 +222,47 @@ public actor ClipSaver {
         }
 
         let videoStartPTS = CMSampleBufferGetPresentationTimeStamp(firstVideoSample)
-        let videoEndPTS = CMSampleBufferGetPresentationTimeStamp(videoSamples.last!)
-        let audioRange = Self.audioExtractionRange(videoStartPTS: videoStartPTS, videoEndPTS: videoEndPTS)
-        let presentationStart = Self.presentationStart(
-            videoStartPTS: videoStartPTS,
-            videoEndPTS: videoEndPTS,
-            lastSeconds: lastSeconds
-        )
+        let audioRange = Self.audioExtractionRange(videoStartPTS: videoStartPTS, videoEndPTS: window.end)
 
         let systemAudioSamples = systemAudioRingBuffer?.samples(between: audioRange.startPTS, and: audioRange.endPTS) ?? []
         let micAudioSamples = micRingBuffer?.samples(between: audioRange.startPTS, and: audioRange.endPTS) ?? []
-        logger.debug(
-            "Selected samples video=\(videoSamples.count, privacy: .public) \(Self.ptsRange(videoSamples), privacy: .public) sysAudio=\(systemAudioSamples.count, privacy: .public) \(Self.ptsRange(systemAudioSamples), privacy: .public) mic=\(micAudioSamples.count, privacy: .public) \(Self.ptsRange(micAudioSamples), privacy: .public)"
+
+        let report = Self.makeSyncReport(
+            window: window,
+            now: now,
+            newestVideoEnd: newestEnd,
+            videoStartPTS: videoStartPTS,
+            audioTracks: [("sysAudio", systemAudioSamples), ("mic", micAudioSamples)]
         )
+        lastSyncReport = report
+        logSyncReport(report)
+
+        return Selection(
+            window: window,
+            videoSamples: videoSamples,
+            videoFormatDescription: videoFormatDescription,
+            videoStartPTS: videoStartPTS,
+            systemAudioSamples: systemAudioSamples,
+            micAudioSamples: micAudioSamples
+        )
+    }
+
+    private func write(
+        _ selection: Selection,
+        outputDirectory: URL,
+        fileNameSuffix: String?,
+        mergeAudioTracks: Bool,
+        baseName: String? = nil
+    ) async throws -> URL {
+        let window = selection.window
+        let videoSamples = selection.videoSamples
+        let videoStartPTS = selection.videoStartPTS
+        let systemAudioSamples = selection.systemAudioSamples
+        let micAudioSamples = selection.micAudioSamples
+        // Zero is the first video frame. Playback starts at the window, which
+        // is later whenever the keyframe sits before it; it ends with the window.
+        let presentationStart = Self.presentationStart(videoStartPTS: videoStartPTS, windowStart: window.start)
+        let presentationEnd = CMTimeSubtract(window.end, videoStartPTS)
 
         let fileURL = try ClipMetadata.generateUniqueFileURL(in: outputDirectory, baseName: baseName, suffix: fileNameSuffix)
 
@@ -141,11 +272,10 @@ public actor ClipSaver {
         do {
             writer.metadata = ClipMetadata.makeMetadataItems()
 
-            // Video input
             let videoInput = AVAssetWriterInput(
                 mediaType: .video,
                 outputSettings: nil,
-                sourceFormatHint: videoFormatDescription
+                sourceFormatHint: selection.videoFormatDescription
             )
             videoInput.expectsMediaDataInRealTime = false
 
@@ -154,15 +284,17 @@ public actor ClipSaver {
             }
             writer.add(videoInput)
 
-            let systemAudioStartPTS = systemAudioSamples.first.map { CMSampleBufferGetPresentationTimeStamp($0) }
-            let micAudioStartPTS = micAudioSamples.first.map { CMSampleBufferGetPresentationTimeStamp($0) }
-            let offset = Self.timelineOffset(
-                videoStartPTS: videoStartPTS,
-                systemAudioStartPTS: systemAudioStartPTS,
-                micAudioStartPTS: micAudioStartPTS
-            )
-
-            let retimedVideo = videoSamples.compactMap { retimeSample($0, offset: offset) }
+            // Every track is shifted by the same amount, so whatever lines up
+            // on the capture clock still lines up in the file.
+            let offset = videoStartPTS
+            var retimedVideo = videoSamples.compactMap { retimeSample($0, offset: offset) }
+            // The newest frame stays on screen until the window ends: on a
+            // still screen it can be a few hundred milliseconds older than the
+            // save, and the audio in between still belongs to the clip.
+            if let last = retimedVideo.last,
+               let held = retimeSample(last, offset: .zero, holdingUntil: presentationEnd) {
+                retimedVideo[retimedVideo.count - 1] = held
+            }
             let retimedSystemAudio = systemAudioSamples
                 .compactMap { retimeSample($0, offset: offset) }
                 .filter { CMSampleBufferGetPresentationTimeStamp($0).seconds >= 0 }
@@ -171,26 +303,12 @@ public actor ClipSaver {
                 .filter { CMSampleBufferGetPresentationTimeStamp($0).seconds >= 0 }
 
             logger.info("Saving clip: video=\(retimedVideo.count) audio=\(retimedSystemAudio.count) mic=\(retimedMicAudio.count)")
-            if let audioStart = [systemAudioStartPTS, micAudioStartPTS].compactMap({ $0 }).filter(\.isValid).min(by: { $0 < $1 }) {
-                // Measured from where playback starts: audio missing only
-                // under the trimmed keyframe lead-in is never heard.
-                let delta = audioStart.seconds - videoStartPTS.seconds - presentationStart.seconds
-                if delta > 0.05 {
-                    logger.warning("Audio capture started \(delta, format: .fixed(precision: 3))s after the clip start; lead-in will be padded with silence")
-                }
-            }
-            let earliestTrackStart = [videoStartPTS, systemAudioStartPTS, micAudioStartPTS]
-                .compactMap { $0 }
-                .filter(\.isValid)
-                .min(by: { $0 < $1 }) ?? videoStartPTS
-            logger.debug(
-                "Retimed offset=\(offset.seconds, privacy: .public) earliestTrackStart=\(earliestTrackStart.seconds, privacy: .public) video \(Self.ptsRange(retimedVideo), privacy: .public) sysAudio \(Self.ptsRange(retimedSystemAudio), privacy: .public) mic \(Self.ptsRange(retimedMicAudio), privacy: .public)"
-            )
 
             let audioPlans = try makeAudioAppendPlans(
                 systemAudioSamples: retimedSystemAudio,
                 micAudioSamples: retimedMicAudio,
-                mergeAudioTracks: mergeAudioTracks
+                mergeAudioTracks: mergeAudioTracks,
+                timelineEnd: presentationEnd
             )
             var audioJobs: [TrackAppendJob] = []
             for plan in audioPlans {
@@ -226,6 +344,7 @@ public actor ClipSaver {
                 try await group.waitForAll()
             }
 
+            writer.endSession(atSourceTime: presentationEnd)
             try await finishWriting(writer)
         } catch {
             logger.error(
@@ -239,6 +358,70 @@ public actor ClipSaver {
         NotificationCenter.default.post(name: .replayCapClipSaved, object: fileURL)
 
         return fileURL
+    }
+
+    // MARK: - Sync report
+
+    static func makeSyncReport(
+        window: SaveWindow,
+        now: CMTime,
+        newestVideoEnd: CMTime,
+        videoStartPTS: CMTime,
+        audioTracks: [(label: String, samples: [CMSampleBuffer])]
+    ) -> ClipSyncReport {
+        let windowStart = window.start.seconds
+        let windowEnd = window.end.seconds
+        // Audio under the keyframe lead-in is cut by the edit list, so only
+        // the presented span counts.
+        let presentedStart = max(windowStart, videoStartPTS.seconds)
+
+        let tracks: [ClipSyncReport.AudioTrack] = audioTracks.compactMap { track in
+            let spans = track.samples.compactMap { sample -> (start: Double, end: Double)? in
+                let pts = CMSampleBufferGetPresentationTimeStamp(sample)
+                guard pts.isNumeric else { return nil }
+                let frames = Double(CMSampleBufferGetNumSamples(sample))
+                let rate = sample.formatDescription
+                    .flatMap { CMAudioFormatDescriptionGetStreamBasicDescription($0)?.pointee.mSampleRate } ?? 48_000
+                return (pts.seconds, pts.seconds + (rate > 0 ? frames / rate : 0))
+            }
+            guard let first = spans.first, let last = spans.last else { return nil }
+            var largestGap = 0.0
+            var covered = first.end
+            for span in spans.dropFirst() {
+                largestGap = max(largestGap, span.start - covered)
+                covered = max(covered, span.end)
+            }
+            return ClipSyncReport.AudioTrack(
+                label: track.label,
+                leadInSeconds: max(0, first.start - presentedStart),
+                tailSeconds: max(0, windowEnd - max(covered, last.end)),
+                largestGapSeconds: largestGap
+            )
+        }
+
+        return ClipSyncReport(
+            windowStart: windowStart,
+            windowEnd: windowEnd,
+            anchoredToClock: window.anchoredToClock,
+            videoLagSeconds: max(0, CMTimeGetSeconds(CMTimeSubtract(now, newestVideoEnd))),
+            keyframeLeadSeconds: max(0, windowStart - videoStartPTS.seconds),
+            audioTracks: tracks
+        )
+    }
+
+    private func logSyncReport(_ report: ClipSyncReport) {
+        let tracks = report.audioTracks.map {
+            String(format: "%@ lead=%.3fs tail=%.3fs gap=%.3fs", $0.label, $0.leadInSeconds, $0.tailSeconds, $0.largestGapSeconds)
+        }.joined(separator: " | ")
+        let summary = String(
+            format: "window=%.3f...%.3f clock=%@ videoLag=%.3fs keyframeLead=%.3fs",
+            report.windowStart, report.windowEnd, report.anchoredToClock ? "yes" : "stale", report.videoLagSeconds, report.keyframeLeadSeconds
+        )
+        if report.isInSync {
+            logger.notice("Clip sync OK \(summary, privacy: .public) \(tracks.isEmpty ? "no audio" : tracks, privacy: .public)")
+        } else {
+            logger.warning("Clip sync off \(summary, privacy: .public) \(tracks.isEmpty ? "no audio" : tracks, privacy: .public)")
+        }
     }
 
     // MARK: - Helpers
@@ -257,17 +440,11 @@ public actor ClipSaver {
         )
     }
 
-    /// Where playback should start on the retimed clip timeline (zero is the
-    /// first video frame): the requested window's start, or zero when the
-    /// buffer holds less than the window. Video has to start on a keyframe,
-    /// which can sit up to a GOP before the window.
-    static func presentationStart(
-        videoStartPTS: CMTime,
-        videoEndPTS: CMTime,
-        lastSeconds: TimeInterval
-    ) -> CMTime {
-        guard videoStartPTS.isNumeric, videoEndPTS.isNumeric, lastSeconds > 0 else { return .zero }
-        let windowStart = CMTimeSubtract(videoEndPTS, CMTime(seconds: lastSeconds, preferredTimescale: videoEndPTS.timescale))
+    /// Where playback starts on the clip timeline (zero is the first video
+    /// frame): the window's start, or zero when the buffer starts after it.
+    /// Video has to start on a keyframe, which can sit up to a GOP before.
+    static func presentationStart(videoStartPTS: CMTime, windowStart: CMTime) -> CMTime {
+        guard videoStartPTS.isNumeric, windowStart.isNumeric else { return .zero }
         let lead = CMTimeSubtract(windowStart, videoStartPTS)
         return CMTimeCompare(lead, .zero) > 0 ? lead : .zero
     }
@@ -303,16 +480,23 @@ public actor ClipSaver {
         let samples: [CMSampleBuffer]
     }
 
+    /// Every audio track goes through the mixer, merged or not, so each one is
+    /// a continuous run of samples from the first video frame to the end of
+    /// the clip: silence fills a late start, a dropout in the middle and a
+    /// short tail. Left as holes, those let a track begin late or slide
+    /// against the video wherever the file's audio timeline closes up a gap.
     private func makeAudioAppendPlans(
         systemAudioSamples: [CMSampleBuffer],
         micAudioSamples: [CMSampleBuffer],
-        mergeAudioTracks: Bool
+        mergeAudioTracks: Bool,
+        timelineEnd: CMTime
     ) throws -> [AudioAppendPlan] {
         if mergeAudioTracks, !systemAudioSamples.isEmpty, !micAudioSamples.isEmpty {
             do {
                 let mergedSamples = try AudioTrackMixer.merge(
                     systemAudioSamples: systemAudioSamples,
-                    micAudioSamples: micAudioSamples
+                    micAudioSamples: micAudioSamples,
+                    timelineEnd: timelineEnd
                 )
                 return [AudioAppendPlan(label: "mergedAudio", samples: mergedSamples)]
             } catch {
@@ -321,13 +505,18 @@ public actor ClipSaver {
         }
 
         var plans: [AudioAppendPlan] = []
-        if !systemAudioSamples.isEmpty {
-            let padded = Self.padLeadingSilenceIfNeeded(systemAudioSamples)
-            plans.append(AudioAppendPlan(label: "sysAudio", samples: padded))
-        }
-        if !micAudioSamples.isEmpty {
-            let padded = Self.padLeadingSilenceIfNeeded(micAudioSamples)
-            plans.append(AudioAppendPlan(label: "mic", samples: padded))
+        for (label, samples) in [("sysAudio", systemAudioSamples), ("mic", micAudioSamples)] where !samples.isEmpty {
+            do {
+                let continuous = try AudioTrackMixer.merge(
+                    systemAudioSamples: samples,
+                    micAudioSamples: [],
+                    timelineEnd: timelineEnd
+                )
+                plans.append(AudioAppendPlan(label: label, samples: continuous))
+            } catch {
+                logger.error("Could not make \(label, privacy: .public) continuous (\(String(describing: error), privacy: .public)); writing it as captured")
+                plans.append(AudioAppendPlan(label: label, samples: Self.padLeadingSilenceIfNeeded(samples)))
+            }
         }
         return plans
     }
@@ -411,11 +600,18 @@ public actor ClipSaver {
     }
 
     private func makeAudioInput(for samples: [CMSampleBuffer], writer: AVAssetWriter) throws -> AVAssetWriterInput {
-        let channelCount = channelCountForSamples(samples)
+        // AAC in this writer is mono or stereo. Wider settings with no channel
+        // layout make AVAssetWriterInput raise an Objective-C exception, which
+        // nothing here can catch, so capture mixes wider sources down and the
+        // layout is always spelled out.
+        let channelCount = min(max(channelCountForSamples(samples), 1), 2)
+        var layout = AudioChannelLayout()
+        layout.mChannelLayoutTag = channelCount == 2 ? kAudioChannelLayoutTag_Stereo : kAudioChannelLayoutTag_Mono
         let audioSettings: [String: Any] = [
             AVFormatIDKey: Int(kAudioFormatMPEG4AAC),
             AVSampleRateKey: 48000,
             AVNumberOfChannelsKey: channelCount,
+            AVChannelLayoutKey: Data(bytes: &layout, count: MemoryLayout<AudioChannelLayout>.size),
             AVEncoderBitRateKey: channelCount == 2 ? 192000 : 96000
         ]
         let input = AVAssetWriterInput(mediaType: .audio, outputSettings: audioSettings)
@@ -427,7 +623,9 @@ public actor ClipSaver {
         return input
     }
 
-    private func retimeSample(_ sample: CMSampleBuffer, offset: CMTime) -> CMSampleBuffer? {
+    /// Shifts a sample by `offset`. With `holdingUntil`, a single-timing sample
+    /// (a video frame) is also lengthened so it stays on screen until then.
+    private func retimeSample(_ sample: CMSampleBuffer, offset: CMTime, holdingUntil: CMTime? = nil) -> CMSampleBuffer? {
         var originalTimings: [CMSampleTimingInfo]
         if let timings = try? sample.sampleTimingInfos(), !timings.isEmpty {
             originalTimings = timings
@@ -443,8 +641,15 @@ public actor ClipSaver {
         }
 
         let newTimings = originalTimings.map { timing in
-            CMSampleTimingInfo(
-                duration: timing.duration,
+            var duration = timing.duration
+            if let holdingUntil, originalTimings.count == 1, timing.presentationTimeStamp.isNumeric {
+                let held = CMTimeSubtract(holdingUntil, CMTimeSubtract(timing.presentationTimeStamp, offset))
+                if CMTimeCompare(held, duration.isNumeric ? duration : .zero) > 0 {
+                    duration = held
+                }
+            }
+            return CMSampleTimingInfo(
+                duration: duration,
                 presentationTimeStamp: CMTimeSubtract(timing.presentationTimeStamp, offset),
                 decodeTimeStamp: timing.decodeTimeStamp.isValid
                     ? CMTimeSubtract(timing.decodeTimeStamp, offset)

@@ -122,4 +122,14 @@ final class MicrophoneTimelineTests: XCTestCase {
         let zeroFrames = timeline.stamp(hostTime: hostTime(seconds: 9), frameCount: 0, sampleRate: sampleRate)
         XCTAssertEqual(zeroFrames.presentationTime.seconds, 9, accuracy: 0.0001)
     }
+
+    /// Wider inputs are mixed down to stereo; the clip writer and the memory
+    /// budget only handle mono and stereo.
+    func testMicrophoneOutputIsAtMostStereo() {
+        XCTAssertEqual(MicCapture.outputChannelCount(forInputChannels: 0), 1)
+        XCTAssertEqual(MicCapture.outputChannelCount(forInputChannels: 1), 1)
+        XCTAssertEqual(MicCapture.outputChannelCount(forInputChannels: 2), 2)
+        XCTAssertEqual(MicCapture.outputChannelCount(forInputChannels: 4), 2)
+        XCTAssertEqual(MicCapture.outputChannelCount(forInputChannels: 16), 2)
+    }
 }

@@ -34,7 +34,7 @@ private func compressionOutputCallback(
 ) {
     guard let refCon = outputCallbackRefCon else { return }
     let encoder = Unmanaged<VideoEncoder>.fromOpaque(refCon).takeUnretainedValue()
-    encoder.handleEncodedFrame(status: status, sampleBuffer: sampleBuffer)
+    encoder.handleEncodedFrame(status: status, infoFlags: infoFlags, sampleBuffer: sampleBuffer)
 }
 
 public final class VideoEncoder: @unchecked Sendable {
@@ -46,8 +46,26 @@ public final class VideoEncoder: @unchecked Sendable {
     private let stateLock = NSLock()
     private var _outputHandler: OutputHandler?
     private var _currentConfiguration: VideoEncoderConfiguration?
-    private var expectedPTSQueue: [CMTime] = []
     private var encodeCount: Int64 = 0
+    private var droppedFrameCount: Int64 = 0
+
+    private var _simulatesDroppedFrame: (@Sendable (CMTime) -> Bool)?
+
+    /// Test seam: when set, the output callback treats a frame for which this
+    /// returns true as dropped by VideoToolbox (no sample buffer), the way a
+    /// real-time session reports frames it could not encode in time.
+    var simulatesDroppedFrame: (@Sendable (CMTime) -> Bool)? {
+        get {
+            stateLock.lock()
+            defer { stateLock.unlock() }
+            return _simulatesDroppedFrame
+        }
+        set {
+            stateLock.lock()
+            defer { stateLock.unlock() }
+            _simulatesDroppedFrame = newValue
+        }
+    }
     private var forcesKeyframeOnNextFrame = false
 
     // Idle refresh (see `IdleFrameRefreshPolicy`). The last frame handed to the
@@ -57,6 +75,12 @@ public final class VideoEncoder: @unchecked Sendable {
     private var idleRefreshTimer: DispatchSourceTimer?
     private var lastSubmittedPixelBuffer: CVPixelBuffer?
     private var lastSubmittedPTS: CMTime = .invalid
+    /// Host-clock time the last frame was handed to the session. Idleness is
+    /// judged from this, not from the frame's capture time: frames that reach
+    /// the encoder late are still a live stream, not a still screen.
+    private var lastSubmitClockTime: CMTime = .invalid
+    private var idleRefreshSuspended = false
+    private let clock: @Sendable () -> CMTime
     private var lastKeyframePTS: CMTime = .invalid
     private var idleRefreshCount: Int64 = 0
 
@@ -81,8 +105,14 @@ public final class VideoEncoder: @unchecked Sendable {
     /// - Parameter idleRefreshEnabled: repeat the last frame on a timer while
     ///   no new frame arrives. Tests turn it off and drive `refreshIfIdle(now:)`
     ///   with their own clock.
-    public init(idleRefreshEnabled: Bool = true) {
+    /// - Parameter clock: the host clock capture stamps frames with. Tests
+    ///   pass a simulated one.
+    public init(
+        idleRefreshEnabled: Bool = true,
+        clock: @escaping @Sendable () -> CMTime = { CMClockGetTime(CMClockGetHostTimeClock()) }
+    ) {
         self.idleRefreshEnabled = idleRefreshEnabled
+        self.clock = clock
     }
 
     public var currentConfiguration: VideoEncoderConfiguration? {
@@ -227,13 +257,16 @@ public final class VideoEncoder: @unchecked Sendable {
 
         submitLock.lock()
         defer { submitLock.unlock() }
-        submitFrameLocked(pixelBuffer: pixelBuffer, proposedPTS: pts, duration: duration, isIdleRefresh: false)
+        submitFrameLocked(pixelBuffer: pixelBuffer, proposedPTS: pts, duration: duration, submittedAt: clock(), isIdleRefresh: false)
     }
 
-    /// Repeats the last frame, stamped `now`, if the encoder has gone
-    /// `IdleFrameRefreshPolicy.idleInterval` without one. The idle timer calls
-    /// this with the host clock; tests call it directly with their own times.
-    /// Returns true when a frame was submitted.
+    /// Repeats the last frame if the encoder has gone
+    /// `IdleFrameRefreshPolicy.idleInterval` without one. The repeat is
+    /// stamped the last frame's capture time plus the time since it was
+    /// submitted, which is `now` for a stream without latency and keeps any
+    /// steady capture latency intact otherwise. The idle timer calls this with
+    /// the encoder's clock; tests call it directly. Returns true when a frame
+    /// was submitted.
     @discardableResult
     func refreshIfIdle(now: CMTime) -> Bool {
         submitLock.lock()
@@ -242,7 +275,9 @@ public final class VideoEncoder: @unchecked Sendable {
         stateLock.lock()
         let pixelBuffer = lastSubmittedPixelBuffer
         let isIdle = compressionSession != nil
-            && IdleFrameRefreshPolicy.shouldRefresh(lastSubmittedPTS: lastSubmittedPTS, now: now)
+            && !idleRefreshSuspended
+            && IdleFrameRefreshPolicy.shouldRefresh(lastSubmitTime: lastSubmitClockTime, now: now)
+        let refreshPTS = CMTimeAdd(lastSubmittedPTS, CMTimeSubtract(now, lastSubmitClockTime))
         let fps = _currentConfiguration?.fps ?? 60
         stateLock.unlock()
 
@@ -251,7 +286,7 @@ public final class VideoEncoder: @unchecked Sendable {
         // writer stretches a clip's final frame over the whole gap before it,
         // so a save taken on a still screen ran a quarter second long.
         let duration = CMTime(value: 1, timescale: CMTimeScale(max(fps, 1)))
-        return submitFrameLocked(pixelBuffer: pixelBuffer, proposedPTS: now, duration: duration, isIdleRefresh: true)
+        return submitFrameLocked(pixelBuffer: pixelBuffer, proposedPTS: refreshPTS, duration: duration, submittedAt: now, isIdleRefresh: true)
     }
 
     /// Caller must hold `submitLock`.
@@ -260,8 +295,17 @@ public final class VideoEncoder: @unchecked Sendable {
         pixelBuffer: CVPixelBuffer,
         proposedPTS: CMTime,
         duration: CMTime,
+        submittedAt: CMTime,
         isIdleRefresh: Bool
     ) -> Bool {
+        // Every frame keeps the capture time it arrived with; nothing later in
+        // the pipeline re-stamps it. A frame with no usable time cannot be
+        // placed against the audio, so it is dropped rather than guessed at.
+        guard proposedPTS.isNumeric, proposedPTS.seconds > 0 else {
+            Self.logger.error("Dropping frame with unusable timestamp \(proposedPTS.seconds, privacy: .public)")
+            return false
+        }
+
         stateLock.lock()
         guard let session = compressionSession else {
             stateLock.unlock()
@@ -275,6 +319,7 @@ public final class VideoEncoder: @unchecked Sendable {
         forcesKeyframeOnNextFrame = false
 
         let previousPTS = lastSubmittedPTS
+        let previousSubmitClockTime = lastSubmitClockTime
         let previousPixelBuffer = lastSubmittedPixelBuffer
         let previousKeyframePTS = lastKeyframePTS
         if forcesKeyframe {
@@ -283,8 +328,8 @@ public final class VideoEncoder: @unchecked Sendable {
             lastKeyframePTS = pts
         }
         lastSubmittedPTS = pts
+        lastSubmitClockTime = submittedAt
         lastSubmittedPixelBuffer = pixelBuffer
-        expectedPTSQueue.append(pts)
         encodeCount += 1
         let isFirstFrame = encodeCount == 1
         if isIdleRefresh {
@@ -319,13 +364,13 @@ public final class VideoEncoder: @unchecked Sendable {
 
         guard status == noErr else {
             stateLock.lock()
-            _ = expectedPTSQueue.popLast()
             // The frame never reached the encoder, so put back what it claimed:
             // a keyframe request that rode along with it carries over to the
             // next frame, and the idle clock still runs from the last frame
             // that did go in.
             forcesKeyframeOnNextFrame = forcesKeyframeOnNextFrame || requestedKeyframe
             lastSubmittedPTS = previousPTS
+            lastSubmitClockTime = previousSubmitClockTime
             lastSubmittedPixelBuffer = previousPixelBuffer
             lastKeyframePTS = previousKeyframePTS
             stateLock.unlock()
@@ -340,7 +385,8 @@ public final class VideoEncoder: @unchecked Sendable {
         let interval = IdleFrameRefreshPolicy.checkInterval
         timer.schedule(deadline: .now() + interval, repeating: interval, leeway: .milliseconds(20))
         timer.setEventHandler { [weak self] in
-            self?.refreshIfIdle(now: CMClockGetTime(CMClockGetHostTimeClock()))
+            guard let self else { return }
+            self.refreshIfIdle(now: self.clock())
         }
 
         stateLock.lock()
@@ -350,6 +396,23 @@ public final class VideoEncoder: @unchecked Sendable {
 
         previous?.cancel()
         timer.resume()
+    }
+
+    /// Stops repeating frames without stopping the session. Capture teardown
+    /// calls this first: between the screen stream stopping and the encoder
+    /// being stopped (several awaits later), repeats would otherwise keep
+    /// arriving, and a repeated keyframe could open a recorder segment that
+    /// holds nothing but the frozen last frame. Cleared by the next `start`.
+    public func stopIdleRefresh() {
+        submitLock.lock()
+        defer { submitLock.unlock() }
+        stateLock.lock()
+        let timer = idleRefreshTimer
+        idleRefreshTimer = nil
+        idleRefreshSuspended = true
+        lastSubmittedPixelBuffer = nil
+        stateLock.unlock()
+        timer?.cancel()
     }
 
     public func stop() {
@@ -364,11 +427,13 @@ public final class VideoEncoder: @unchecked Sendable {
         idleRefreshTimer = nil
         compressionSession = nil
         _currentConfiguration = nil
-        expectedPTSQueue.removeAll()
         encodeCount = 0
+        droppedFrameCount = 0
         forcesKeyframeOnNextFrame = false
         lastSubmittedPixelBuffer = nil
         lastSubmittedPTS = .invalid
+        lastSubmitClockTime = .invalid
+        idleRefreshSuspended = false
         lastKeyframePTS = .invalid
         idleRefreshCount = 0
         stateLock.unlock()
@@ -380,52 +445,49 @@ public final class VideoEncoder: @unchecked Sendable {
         VTCompressionSessionInvalidate(session)
     }
 
-    fileprivate func handleEncodedFrame(status: OSStatus, sampleBuffer: CMSampleBuffer?) {
+    /// VideoToolbox stamps each output with the presentation time of the frame
+    /// it encoded, so outputs are passed on exactly as they come. Matching
+    /// outputs to inputs by order instead (an earlier design) broke on the
+    /// first dropped frame: a real-time session reports a drop as a callback
+    /// with no sample, every later output took an older frame's time, and
+    /// video fell further behind audio with each drop.
+    fileprivate func handleEncodedFrame(status: OSStatus, infoFlags: VTEncodeInfoFlags, sampleBuffer: CMSampleBuffer?) {
+        var sampleBuffer = sampleBuffer
+        if let candidate = sampleBuffer,
+           let dropsFrame = simulatesDroppedFrame,
+           dropsFrame(CMSampleBufferGetPresentationTimeStamp(candidate)) {
+            sampleBuffer = nil
+        }
+
         guard status == noErr, let sampleBuffer else {
             if status != noErr {
                 Self.logger.error("Output callback error \(status)")
+            } else {
+                stateLock.lock()
+                droppedFrameCount += 1
+                let dropped = droppedFrameCount
+                stateLock.unlock()
+                if dropped == 1 || dropped % 300 == 0 {
+                    let flagged = infoFlags.contains(.frameDropped)
+                    Self.logger.notice("Encoder dropped a frame (total \(dropped, privacy: .public), flagged=\(flagged, privacy: .public))")
+                }
             }
+            return
+        }
+
+        let outputPTS = CMSampleBufferGetPresentationTimeStamp(sampleBuffer)
+        guard outputPTS.isNumeric else {
+            Self.logger.error("Encoder output has no presentation time; dropping it")
             return
         }
 
         stateLock.lock()
         let handler = _outputHandler
-        let expectedPTS = expectedPTSQueue.isEmpty ? nil : expectedPTSQueue.removeFirst()
-        // Read here: this callback runs on a VideoToolbox thread while
-        // `encode` keeps incrementing the count on the capture thread.
-        let encodeCount = self.encodeCount
+        if Self.isKeyframe(sampleBuffer),
+           !lastKeyframePTS.isNumeric || CMTimeCompare(outputPTS, lastKeyframePTS) > 0 {
+            lastKeyframePTS = outputPTS
+        }
         stateLock.unlock()
-
-        let outputPTS = CMSampleBufferGetPresentationTimeStamp(sampleBuffer)
-
-        if Self.isKeyframe(sampleBuffer) {
-            let keyframePTS = expectedPTS ?? outputPTS
-            stateLock.lock()
-            if keyframePTS.isNumeric,
-               !lastKeyframePTS.isNumeric || CMTimeCompare(keyframePTS, lastKeyframePTS) > 0 {
-                lastKeyframePTS = keyframePTS
-            }
-            stateLock.unlock()
-        }
-
-        if let expectedPTS, expectedPTS.isValid, expectedPTS.seconds > 0 {
-            let ptsMatches = outputPTS.isValid && outputPTS.seconds > 0
-                && abs(outputPTS.seconds - expectedPTS.seconds) < 0.00001
-
-            if !ptsMatches {
-                if encodeCount <= 5 || encodeCount % 300 == 0 {
-                    Self.logger.debug("PTS mismatch — input=\(expectedPTS.seconds) output=\(outputPTS.seconds) (valid=\(outputPTS.isValid)) — retiming")
-                }
-                if let retimed = Self.retimeSampleBuffer(sampleBuffer, newPTS: expectedPTS) {
-                    handler?(retimed)
-                    return
-                }
-            }
-        } else if !outputPTS.isValid || outputPTS.seconds == 0 {
-            if encodeCount <= 5 || encodeCount % 300 == 0 {
-                Self.logger.debug("Output PTS invalid/zero (\(outputPTS.seconds)) and no expected PTS to fix with")
-            }
-        }
 
         handler?(sampleBuffer)
     }
@@ -439,28 +501,5 @@ public final class VideoEncoder: @unchecked Sendable {
         let notSync = CFDictionaryGetValue(dict, Unmanaged.passUnretained(kCMSampleAttachmentKey_NotSync).toOpaque())
         guard let notSync else { return true }
         return !CFBooleanGetValue(unsafeBitCast(notSync, to: CFBoolean.self))
-    }
-
-    private static func retimeSampleBuffer(_ sampleBuffer: CMSampleBuffer, newPTS: CMTime) -> CMSampleBuffer? {
-        let originalDuration = CMSampleBufferGetDuration(sampleBuffer)
-        let timing = CMSampleTimingInfo(
-            duration: originalDuration.isValid ? originalDuration : CMTime(value: 1, timescale: 60),
-            presentationTimeStamp: newPTS,
-            decodeTimeStamp: .invalid
-        )
-        var retimed: CMSampleBuffer?
-        var mutableTiming = timing
-        let status = CMSampleBufferCreateCopyWithNewTiming(
-            allocator: kCFAllocatorDefault,
-            sampleBuffer: sampleBuffer,
-            sampleTimingEntryCount: 1,
-            sampleTimingArray: &mutableTiming,
-            sampleBufferOut: &retimed
-        )
-        if status != noErr {
-            Self.logger.error("CMSampleBufferCreateCopyWithNewTiming failed with status \(status)")
-            return nil
-        }
-        return retimed
     }
 }

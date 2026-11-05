@@ -13,6 +13,7 @@ public final class AudioRingBuffer: @unchecked Sendable {
     // settings while capture threads read them during append/eviction.
     private var _timeCap: TimeInterval
     private var _memoryCap: Int
+    private var _retentionFloor: (@Sendable () -> Double?)?
 
     /// Maximum buffered duration. Setting it does not evict on its own; the
     /// next append (or an explicit `trimToDuration`) applies the new cap.
@@ -38,6 +39,29 @@ public final class AudioRingBuffer: @unchecked Sendable {
     public init(timeCap: TimeInterval = 30.0, memoryCap: Int = 50_000_000) {
         self._timeCap = timeCap
         self._memoryCap = memoryCap
+    }
+
+    /// Oldest presentation time something else still needs audio for: the
+    /// oldest buffered video frame. Time-based eviction never drops audio at
+    /// or after it, so the audio buffer reaches back as far as any clip the
+    /// video buffer can produce. Video only evicts whole keyframe groups and
+    /// so routinely holds more than `timeCap`; audio trimmed to `timeCap` on
+    /// its own left clips opening on silence. The memory cap still applies.
+    ///
+    /// Called under this buffer's lock, so it must not call back into it.
+    public func setRetentionFloor(_ floor: (@Sendable () -> Double?)?) {
+        lock.lock()
+        defer { lock.unlock() }
+        _retentionFloor = floor
+    }
+
+    /// Keeps this buffer's audio back to the oldest frame held by any of
+    /// `videoBuffers` (empty buffers are ignored), the video a clip can be
+    /// saved against.
+    public func retainHistory(coveredBy videoBuffers: [VideoRingBuffer]) {
+        setRetentionFloor {
+            videoBuffers.compactMap(\.oldestPTS).min()
+        }
     }
 
     public func setMemoryCap(_ bytes: Int) {
@@ -84,16 +108,16 @@ public final class AudioRingBuffer: @unchecked Sendable {
         var result: [CMSampleBuffer] = []
         result.reserveCapacity(deque.count)
 
+        // A full scan rather than stopping at the first sample past `endPTS`:
+        // capture is meant to append in time order, but a stray out-of-order
+        // buffer must not hide the samples after it.
         for sample in deque {
             let pts = presentationTimeStamp(of: sample)
-            if pts < startPTS {
-                continue
+            if pts >= startPTS && pts <= endPTS {
+                result.append(sample)
             }
-            if pts > endPTS {
-                break
-            }
-            result.append(sample)
         }
+        result.sort { presentationTimeStamp(of: $0) < presentationTimeStamp(of: $1) }
 
         return result
     }
@@ -136,7 +160,7 @@ public final class AudioRingBuffer: @unchecked Sendable {
             guard let oldest = deque.first, let newest = deque.last else { break }
             let duration = presentationTimeStamp(of: newest) - presentationTimeStamp(of: oldest)
             guard duration > maxSeconds else { break }
-            guard deque.count > 1 else { break }
+            guard deque.count > 1, oldestIsBelowRetentionFloor() else { break }
             evictOldest()
         }
         return max(0, startingBytes - _currentMemoryBytes)
@@ -148,7 +172,7 @@ public final class AudioRingBuffer: @unchecked Sendable {
         while true {
             guard let oldest = deque.first, let newest = deque.last else { break }
             let duration = presentationTimeStamp(of: newest) - presentationTimeStamp(of: oldest)
-            if duration > _timeCap {
+            if duration > _timeCap, deque.count > 1, oldestIsBelowRetentionFloor() {
                 evictOldest()
             } else {
                 break
@@ -159,6 +183,15 @@ public final class AudioRingBuffer: @unchecked Sendable {
             guard deque.count > 1 else { break }
             evictOldest()
         }
+    }
+
+    /// True when the oldest sample ends before the retention floor, so
+    /// dropping it cannot cut into audio a clip may still need. The next
+    /// sample's start stands in for the oldest one's end.
+    private func oldestIsBelowRetentionFloor() -> Bool {
+        guard let floor = _retentionFloor?() else { return true }
+        guard deque.count > 1 else { return false }
+        return presentationTimeStamp(of: deque[deque.index(after: deque.startIndex)]) <= floor
     }
 
     private func evictOldest() {

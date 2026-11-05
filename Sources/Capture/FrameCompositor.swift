@@ -97,8 +97,6 @@ public final class FrameCompositor: @unchecked Sendable {
     private static let maxStaleFrames = 3
 
     private var compositeFrameCount: Int64 = 0
-    private var syntheticPTSBasis: CMTime?
-    private var lastSyntheticPTS: CMTime = .zero
     private var lastOutputPTS: CMTime?
     /// true when the last emitted composite was a camera refresh (the screen
     /// was idle), false when it came from a screen frame.
@@ -150,8 +148,6 @@ public final class FrameCompositor: @unchecked Sendable {
         pixelBufferPool = Self.makePixelBufferPool(width: totalWidth, height: maxHeight)
         lastOutputPTS = nil
         lastEmitWasCameraRefresh = false
-        lastSyntheticPTS = .zero
-        syntheticPTSBasis = nil
     }
 
     /// Single-display mode: the canvas is exactly `width` x `height` and every
@@ -169,8 +165,6 @@ public final class FrameCompositor: @unchecked Sendable {
         pixelBufferPool = Self.makePixelBufferPool(width: width, height: height)
         lastOutputPTS = nil
         lastEmitWasCameraRefresh = false
-        lastSyntheticPTS = .zero
-        syntheticPTSBasis = nil
     }
 
     /// Shared 32BGRA pool creation (IOSurface + Metal compatible, min 8
@@ -761,8 +755,6 @@ public final class FrameCompositor: @unchecked Sendable {
         primaryTimeoutCounter = 0
         secondaryTimeoutCounter = 0
         compositeFrameCount = 0
-        syntheticPTSBasis = nil
-        lastSyntheticPTS = .zero
         lastOutputPTS = nil
         lastEmitWasCameraRefresh = false
         // Also drop the camera frame and the cached overlay images.
@@ -802,11 +794,11 @@ public final class FrameCompositor: @unchecked Sendable {
         return pts
     }
 
+    /// Stands in for a frame that arrived without a usable timestamp. It has
+    /// to come from the host clock: audio is stamped on that clock, and a
+    /// stand-in counted up from zero (as this once did) landed the frame
+    /// decades away from every audio sample.
     private func nextSyntheticPTSCandidate() -> CMTime {
-        if syntheticPTSBasis == nil {
-            syntheticPTSBasis = CMTime(seconds: ProcessInfo.processInfo.systemUptime, preferredTimescale: 1000000000)
-        }
-        lastSyntheticPTS = CMTimeAdd(lastSyntheticPTS, targetFrameDuration)
-        return lastSyntheticPTS
+        CMClockGetTime(CMClockGetHostTimeClock())
     }
 }

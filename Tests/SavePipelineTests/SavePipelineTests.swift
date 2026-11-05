@@ -338,6 +338,117 @@ final class SavePipelineTests: XCTestCase {
         XCTAssertEqual(merged.count, 1)
     }
 
+    /// A four-channel source comes out as stereo, each input at full level.
+    func testAudioTrackMixerFoldsWideSourcesToStereo() throws {
+        let frames = 4
+        var samples: [Float] = []
+        for _ in 0..<frames { samples += [0.4, 0.2, 0.4, 0.2] }
+        let wide = try makePCMSampleBuffer(samples: samples, channels: 4, startFrame: 0)
+
+        let merged = try AudioTrackMixer.merge(systemAudioSamples: [], micAudioSamples: [wide])
+        let output = try XCTUnwrap(merged.first)
+        XCTAssertEqual(channelCount(for: output), 2)
+        let values = floatSamples(in: output)
+        XCTAssertEqual(values.count, frames * 2)
+        // Each output channel sums two sources at full level.
+        XCTAssertEqual(values[0], 0.8, accuracy: 0.0001)
+        XCTAssertEqual(values[1], 0.4, accuracy: 0.0001)
+    }
+
+    /// Host-clock stamps land microseconds off the previous buffer's end.
+    /// The mixed track must stay one continuous tone, with no summed or
+    /// missing samples where buffers meet.
+    func testAudioTrackMixerJoinsJitteredBuffersSeamlessly() throws {
+        let frames = 1_024
+        var buffers: [CMSampleBuffer] = []
+        var phase = 0.0
+        for index in 0..<200 {
+            var samples: [Float] = []
+            for _ in 0..<frames {
+                let value = Float(sin(phase) * 0.5)
+                samples += [value, value]
+                phase += 2 * Double.pi * 1_000 / 48_000
+            }
+            // Alternate a few microseconds early and late, as host stamps do.
+            let jitter = index % 2 == 0 ? -3e-6 : 2e-6
+            let seconds = Double(index * frames) / 48_000 + 0.45 / 48_000 + jitter
+            buffers.append(try makePCMSampleBuffer(
+                samples: samples,
+                channels: 2,
+                startTime: CMTime(seconds: seconds, preferredTimescale: 1_000_000_000)
+            ))
+        }
+
+        let merged = try AudioTrackMixer.merge(systemAudioSamples: buffers, micAudioSamples: [])
+        let mono = merged.flatMap { floatSamples(in: $0) }.enumerated().filter { $0.offset % 2 == 0 }.map(\.element)
+        // A 1 kHz tone at 48 kHz moves at most 0.5 * 2π/48 ≈ 0.066 per sample.
+        var discontinuities = 0
+        for index in 1..<mono.count where abs(mono[index] - mono[index - 1]) > 0.08 {
+            discontinuities += 1
+        }
+        XCTAssertEqual(discontinuities, 0)
+    }
+
+    /// A short buffer snapped forward can pass a neighbour that started within
+    /// the tolerance; that neighbour must still be mixed in full.
+    func testAudioTrackMixerKeepsChunksInOrderAfterSnapping() throws {
+        let first = try makePCMSampleBuffer(samples: [Float](repeating: 0.1, count: 1_024 * 2), channels: 2, startFrame: 1_034)
+        let short = try makePCMSampleBuffer(samples: [Float](repeating: 0.1, count: 200 * 2), channels: 2, startFrame: 2_034)
+        let third = try makePCMSampleBuffer(samples: [Float](repeating: 0.3, count: 1_024 * 2), channels: 2, startFrame: 2_040)
+
+        let merged = try AudioTrackMixer.merge(systemAudioSamples: [first, short, third], micAudioSamples: [])
+        let mono = merged.flatMap { floatSamples(in: $0) }.enumerated().filter { $0.offset % 2 == 0 }.map(\.element)
+        // Frames 2040-2047 sit under both `short` (snapped to 2058...) and
+        // `third`; at least `third` must be there.
+        for frame in 2_040..<2_048 {
+            XCTAssertGreaterThanOrEqual(mono[frame], 0.3 - 0.0001, "frame \(frame)")
+        }
+    }
+
+    /// Snapping must not let a slow clock difference build up: a source
+    /// running 100 ppm fast stays within the tolerance of its own timestamps.
+    func testAudioTrackMixerSnappingDoesNotAccumulateDrift() throws {
+        let frames = 1_024
+        var buffers: [CMSampleBuffer] = []
+        for index in 0..<2_000 {
+            let marker: Float = index == 1_999 ? 1 : 0.1
+            let samples = [Float](repeating: marker, count: frames * 2)
+            let seconds = Double(index * frames) / 48_000 * 1.0001
+            buffers.append(try makePCMSampleBuffer(
+                samples: samples,
+                channels: 2,
+                startTime: CMTime(seconds: seconds, preferredTimescale: 1_000_000_000)
+            ))
+        }
+        let merged = try AudioTrackMixer.merge(systemAudioSamples: buffers, micAudioSamples: [])
+        let mono = merged.flatMap { floatSamples(in: $0) }.enumerated().filter { $0.offset % 2 == 0 }.map(\.element)
+        let markerFrame = try XCTUnwrap(mono.firstIndex { $0 > 0.5 })
+        let expected = Double(1_999 * frames) * 1.0001
+        XCTAssertEqual(Double(markerFrame), expected, accuracy: AudioTrackMixer.continuityToleranceFrames(sampleRate: 48_000) + 1)
+    }
+
+    private func makePCMSampleBuffer(
+        samples: [Float],
+        channels: Int,
+        startTime: CMTime
+    ) throws -> CMSampleBuffer {
+        let buffer = try makePCMSampleBuffer(samples: samples, channels: channels, startFrame: 0)
+        var timing = CMSampleTimingInfo(
+            duration: CMTime(value: 1, timescale: 48_000),
+            presentationTimeStamp: startTime,
+            decodeTimeStamp: .invalid
+        )
+        var retimed: CMSampleBuffer?
+        XCTAssertEqual(CMSampleBufferCreateCopyWithNewTiming(
+            allocator: kCFAllocatorDefault,
+            sampleBuffer: buffer,
+            sampleTimingEntryCount: 1,
+            sampleTimingArray: &timing,
+            sampleBufferOut: &retimed
+        ), noErr)
+        return try XCTUnwrap(retimed)
+    }
+
     private func makePCMSampleBuffer(
         samples: [Float],
         channels: Int,

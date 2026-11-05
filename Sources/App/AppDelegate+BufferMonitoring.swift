@@ -30,6 +30,8 @@ extension AppDelegate {
         // leaves the buffer short of a full "Save Last N Seconds" (see
         // AppSettings.ringBufferHeadroomSeconds).
         let cap = AppSettings.ringBufferTimeCapSeconds
+        // Audio's share of the memory cap is sized from the window.
+        syncMemoryCapsToSettings()
         videoRingBuffer.timeCap = cap
         dualDisplay1VideoRingBuffer.timeCap = cap
         dualDisplay2VideoRingBuffer.timeCap = cap

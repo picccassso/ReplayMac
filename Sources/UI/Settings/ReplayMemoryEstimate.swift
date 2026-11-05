@@ -68,7 +68,7 @@ public struct ReplayMemoryEstimate: Equatable {
                 isDualMode: isDualMode,
                 captureSystemAudio: captureSystemAudio,
                 captureMicrophone: captureMicrophone,
-                bitrateMbps: bitrateMbps,
+                retainedSeconds: retainedSeconds,
                 totalCapMB: capMB
             )
             // A clip is only whole while every buffer still holds the window,

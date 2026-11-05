@@ -40,7 +40,8 @@ final class StillScreenAudioSyncTests: XCTestCase {
         let videoBuffer = VideoRingBuffer(timeCap: timeCap)
         let audioBuffer = AudioRingBuffer(timeCap: timeCap, memoryCap: 200_000_000)
 
-        let encoder = VideoEncoder(idleRefreshEnabled: false)
+        let clock = SimulatedClock(Self.time(ms: 0))
+        let encoder = VideoEncoder(idleRefreshEnabled: false, clock: { clock.now })
         encoder.outputHandler = { videoBuffer.append(encodedSample: $0) }
         try encoder.start(width: 64, height: 64, fps: 30, codec: .h264, bitrate: 1_000_000)
 
@@ -48,6 +49,7 @@ final class StillScreenAudioSyncTests: XCTestCase {
         var frameIndex = 0
         var ms = 0
         while ms < 30_000 {
+            clock.now = Self.time(ms: ms)
             encoder.encode(sampleBuffer: try Self.makeFrame(seed: frameIndex, at: Self.time(ms: ms)))
             frameIndex += 1
             ms += 33
@@ -55,6 +57,7 @@ final class StillScreenAudioSyncTests: XCTestCase {
         // Still screen: no frames at all, only the idle clock ticking, as the
         // encoder's timer would.
         while ms <= 60_000 {
+            clock.now = Self.time(ms: ms)
             encoder.refreshIfIdle(now: Self.time(ms: ms))
             ms += 100
         }
@@ -77,8 +80,11 @@ final class StillScreenAudioSyncTests: XCTestCase {
             "The video buffer has to keep pace with the clock while the screen is still"
         )
 
-        let saver = ClipSaver(videoRingBuffer: videoBuffer, systemAudioRingBuffer: audioBuffer)
+        let saveTime = Self.time(ms: 60_000)
+        let saver = ClipSaver(videoRingBuffer: videoBuffer, systemAudioRingBuffer: audioBuffer, clock: { saveTime })
         let url = try await saver.saveClip(lastSeconds: 30, outputDirectory: outputDirectory)
+        let savedReport = await saver.lastSyncReport
+        XCTAssertEqual(savedReport?.anchoredToClock, true)
 
         let asset = AVURLAsset(url: url)
         let duration = try await asset.load(.duration).seconds
@@ -95,13 +101,15 @@ final class StillScreenAudioSyncTests: XCTestCase {
         let videoBuffer = VideoRingBuffer(timeCap: 30 + AppSettings.ringBufferHeadroomSeconds)
         let audioBuffer = AudioRingBuffer(timeCap: 30 + AppSettings.ringBufferHeadroomSeconds, memoryCap: 200_000_000)
 
-        let encoder = VideoEncoder(idleRefreshEnabled: false)
+        let clock = SimulatedClock(Self.time(ms: 0))
+        let encoder = VideoEncoder(idleRefreshEnabled: false, clock: { clock.now })
         encoder.outputHandler = { videoBuffer.append(encodedSample: $0) }
         try encoder.start(width: 64, height: 64, fps: 30, codec: .h264, bitrate: 1_000_000)
         // 41.3 s of motion, so the 30 s window starts mid-GOP.
         var frameIndex = 0
         var ms = 0
         while ms <= 41_300 {
+            clock.now = Self.time(ms: ms)
             encoder.encode(sampleBuffer: try Self.makeFrame(seed: frameIndex, at: Self.time(ms: ms)))
             frameIndex += 1
             ms += 33
@@ -120,7 +128,8 @@ final class StillScreenAudioSyncTests: XCTestCase {
             - CMSampleBufferGetPresentationTimeStamp(snapped.first!).seconds
         XCTAssertGreaterThan(snappedLength, 30.2, "Window should start mid-GOP for this test to mean anything")
 
-        let saver = ClipSaver(videoRingBuffer: videoBuffer, systemAudioRingBuffer: audioBuffer)
+        let saveTime = Self.time(ms: 41_300)
+        let saver = ClipSaver(videoRingBuffer: videoBuffer, systemAudioRingBuffer: audioBuffer, clock: { saveTime })
         let url = try await saver.saveClip(lastSeconds: 30, outputDirectory: outputDirectory)
         let asset = AVURLAsset(url: url)
 
@@ -143,11 +152,10 @@ final class StillScreenAudioSyncTests: XCTestCase {
 
     func testPresentationStartSkipsTheKeyframeLeadIn() {
         let start = CMTime(value: 10_000, timescale: 1_000)
-        let end = CMTime(value: 41_500, timescale: 1_000)
-        XCTAssertEqual(ClipSaver.presentationStart(videoStartPTS: start, videoEndPTS: end, lastSeconds: 30).seconds, 1.5, accuracy: 0.001)
-        // Buffer holds less than the window: play from the first frame.
-        XCTAssertEqual(ClipSaver.presentationStart(videoStartPTS: start, videoEndPTS: end, lastSeconds: 60), .zero)
-        XCTAssertEqual(ClipSaver.presentationStart(videoStartPTS: .invalid, videoEndPTS: end, lastSeconds: 30), .zero)
+        XCTAssertEqual(ClipSaver.presentationStart(videoStartPTS: start, windowStart: CMTime(value: 11_500, timescale: 1_000)).seconds, 1.5, accuracy: 0.001)
+        // Buffer starts after the window: play from the first frame.
+        XCTAssertEqual(ClipSaver.presentationStart(videoStartPTS: start, windowStart: CMTime(value: 9_000, timescale: 1_000)), .zero)
+        XCTAssertEqual(ClipSaver.presentationStart(videoStartPTS: .invalid, windowStart: start), .zero)
     }
 
     /// A save starts on the keyframe at or before its window; the audio buffers'
@@ -300,6 +308,17 @@ final class StillScreenAudioSyncTests: XCTestCase {
         }
         guard let first else { throw TestFailure("clip is silent") }
         return (first, last)
+    }
+
+    private final class SimulatedClock: @unchecked Sendable {
+        // @unchecked: only touched under `lock`.
+        private let lock = NSLock()
+        private var _now: CMTime
+        init(_ now: CMTime) { _now = now }
+        var now: CMTime {
+            get { lock.lock(); defer { lock.unlock() }; return _now }
+            set { lock.lock(); _now = newValue; lock.unlock() }
+        }
     }
 
     private struct TestFailure: Error, CustomStringConvertible {

@@ -63,6 +63,11 @@ extension AppDelegate {
             replayBufferGate: replayBufferGate
         )
         micAudioCapture.setHandler(replayCapAudioEncodeHandler(micAudioEncoder))
+
+        // Audio keeps as much history as the video it will be saved against.
+        let videoBuffers = [videoRingBuffer, dualDisplay1VideoRingBuffer, dualDisplay2VideoRingBuffer]
+        systemAudioRingBuffer.retainHistory(coveredBy: videoBuffers)
+        micAudioRingBuffer.retainHistory(coveredBy: videoBuffers)
     }
 
     func startCapturePipeline(userInitiated: Bool = true) {
@@ -360,6 +365,7 @@ extension AppDelegate {
         workspaceAudioFilterRefreshTask?.cancel()
         workspaceAudioFilterRefreshTask = nil
         menuBarState.setCapturedDisplay(name: nil, isFallback: false)
+        stopVideoEncoderIdleRefresh()
         await captureManager.stop()
         await perAppAudioCapture.stop()
         longBufferAppendPump.reset()
@@ -448,6 +454,14 @@ extension AppDelegate {
         capturePipelineLogger.info("Single capture started: Display=\(self.originalDisplay.width)x\(self.originalDisplay.height) @\(self.originalDisplay.pointPixelScale)x -> \(scaled.width)x\(scaled.height)")
     }
 
+    /// Ends the encoders' still-screen repeats before any teardown await, so
+    /// nothing but the final flush reaches the recorders once capture stops.
+    func stopVideoEncoderIdleRefresh() {
+        videoEncoder.stopIdleRefresh()
+        dualDisplay1VideoEncoder.stopIdleRefresh()
+        dualDisplay2VideoEncoder.stopIdleRefresh()
+    }
+
     func stopCapturePipeline() {
         Task {
             await stopCapturePipelineAsync()
@@ -496,6 +510,7 @@ extension AppDelegate {
             captureRecoveryAttempts = 0
         }
 
+        stopVideoEncoderIdleRefresh()
         await captureManager.stop()
         await perAppAudioCapture.stop()
         longBufferAppendPump.reset()

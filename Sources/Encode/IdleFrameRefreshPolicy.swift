@@ -40,10 +40,10 @@ public enum IdleFrameRefreshPolicy {
     /// Smallest step used to keep presentation times strictly increasing.
     static let minimumPTSStep = CMTime(value: 1, timescale: 1_000)
 
-    /// True when the encoder has gone `idleInterval` without a frame.
-    public static func shouldRefresh(lastSubmittedPTS: CMTime, now: CMTime) -> Bool {
-        guard lastSubmittedPTS.isNumeric, now.isNumeric else { return false }
-        return CMTimeCompare(CMTimeSubtract(now, lastSubmittedPTS), idleInterval) >= 0
+    /// True when `idleInterval` has passed since the last frame was submitted.
+    public static func shouldRefresh(lastSubmitTime: CMTime, now: CMTime) -> Bool {
+        guard lastSubmitTime.isNumeric, now.isNumeric else { return false }
+        return CMTimeCompare(CMTimeSubtract(now, lastSubmitTime), idleInterval) >= 0
     }
 
     /// A repeated frame is stamped with the current host time, and a real frame
