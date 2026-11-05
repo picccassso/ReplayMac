@@ -17,6 +17,8 @@ import CoreVideo
 final class StillScreenAudioSyncTests: XCTestCase {
     private static let sampleRate = 48_000.0
     private static let start = 1_000.0
+    /// A saved clip runs one frame past its window; allow for that and AAC framing.
+    private static let lengthTolerance = 0.1
 
     private var outputDirectory: URL!
 
@@ -80,12 +82,72 @@ final class StillScreenAudioSyncTests: XCTestCase {
 
         let asset = AVURLAsset(url: url)
         let duration = try await asset.load(.duration).seconds
-        XCTAssertGreaterThanOrEqual(duration, 29.5)
-        XCTAssertLessThanOrEqual(duration, 30 + IdleFrameRefreshPolicy.worstCaseKeyframeSpacing + 0.5)
+        XCTAssertEqual(duration, 30, accuracy: Self.lengthTolerance)
 
         let audible = try await Self.audibleRange(of: asset)
         XCTAssertLessThan(audible.first, 0.25, "Clip opens on \(audible.first)s of silence")
         XCTAssertGreaterThan(audible.last, duration - 0.5, "Clip loses its audio at \(audible.last)s of \(duration)s")
+    }
+
+    /// Video has to start on a keyframe, up to a GOP before the window. The
+    /// lead-in is written for decoding but must not play: a 30 s save is 30 s.
+    func testClipPlaysExactlyTheRequestedLength() async throws {
+        let videoBuffer = VideoRingBuffer(timeCap: 30 + AppSettings.ringBufferHeadroomSeconds)
+        let audioBuffer = AudioRingBuffer(timeCap: 30 + AppSettings.ringBufferHeadroomSeconds, memoryCap: 200_000_000)
+
+        let encoder = VideoEncoder(idleRefreshEnabled: false)
+        encoder.outputHandler = { videoBuffer.append(encodedSample: $0) }
+        try encoder.start(width: 64, height: 64, fps: 30, codec: .h264, bitrate: 1_000_000)
+        // 41.3 s of motion, so the 30 s window starts mid-GOP.
+        var frameIndex = 0
+        var ms = 0
+        while ms <= 41_300 {
+            encoder.encode(sampleBuffer: try Self.makeFrame(seed: frameIndex, at: Self.time(ms: ms)))
+            frameIndex += 1
+            ms += 33
+        }
+        encoder.stop()
+
+        var phase = 0.0
+        var frame: Int64 = 0
+        while frame < Int64(41.3 * Self.sampleRate) {
+            audioBuffer.append(try Self.makeToneSample(startFrame: frame, frameCount: 1_024, phase: &phase))
+            frame += 1_024
+        }
+
+        let snapped = videoBuffer.samples(last: 30)
+        let snappedLength = CMSampleBufferGetPresentationTimeStamp(snapped.last!).seconds
+            - CMSampleBufferGetPresentationTimeStamp(snapped.first!).seconds
+        XCTAssertGreaterThan(snappedLength, 30.2, "Window should start mid-GOP for this test to mean anything")
+
+        let saver = ClipSaver(videoRingBuffer: videoBuffer, systemAudioRingBuffer: audioBuffer)
+        let url = try await saver.saveClip(lastSeconds: 30, outputDirectory: outputDirectory)
+        let asset = AVURLAsset(url: url)
+
+        let duration = try await asset.load(.duration).seconds
+        XCTAssertEqual(duration, 30, accuracy: Self.lengthTolerance)
+        let videoTracks = try await asset.loadTracks(withMediaType: .video)
+        let videoTrack = try XCTUnwrap(videoTracks.first)
+        let videoDuration = try await videoTrack.load(.timeRange).duration.seconds
+        XCTAssertEqual(videoDuration, 30, accuracy: Self.lengthTolerance)
+
+        let audible = try await Self.audibleRange(of: asset)
+        XCTAssertLessThan(audible.first, 0.25)
+
+        // The first presented frame sits after the keyframe and must still decode.
+        let generator = AVAssetImageGenerator(asset: asset)
+        generator.requestedTimeToleranceBefore = .zero
+        generator.requestedTimeToleranceAfter = CMTime(value: 1, timescale: 10)
+        _ = try await generator.image(at: .zero)
+    }
+
+    func testPresentationStartSkipsTheKeyframeLeadIn() {
+        let start = CMTime(value: 10_000, timescale: 1_000)
+        let end = CMTime(value: 41_500, timescale: 1_000)
+        XCTAssertEqual(ClipSaver.presentationStart(videoStartPTS: start, videoEndPTS: end, lastSeconds: 30).seconds, 1.5, accuracy: 0.001)
+        // Buffer holds less than the window: play from the first frame.
+        XCTAssertEqual(ClipSaver.presentationStart(videoStartPTS: start, videoEndPTS: end, lastSeconds: 60), .zero)
+        XCTAssertEqual(ClipSaver.presentationStart(videoStartPTS: .invalid, videoEndPTS: end, lastSeconds: 30), .zero)
     }
 
     /// A save starts on the keyframe at or before its window; the audio buffers'

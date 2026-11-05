@@ -17,6 +17,7 @@
 
 - Fix clips that started with 10 to 20 seconds of silence before the sound came in. While the screen was still (a paused game, a menu, a game on another display), recordings got no new frames, so a replay reached back to before the audio buffer started and ended when the screen stopped changing instead of when you saved. ReplayMac now keeps recording the still screen, so a replay covers exactly the last N seconds with sound all the way through
 - Fix long replay buffers losing the start of their audio. Audio is held in memory uncompressed, about 3 Mbps per source, but only got 15% of the memory cap, so with a long buffer or a lowered cap the sound ran out before the video did. The memory cap is now shared out by how much each track actually needs
+- Saved replays are now exactly the length you set. A clip has to start on a keyframe, which could be up to 2 seconds before the window, so a 30 second replay played as 31 or 32 seconds. That lead-in is still in the file so the first frame decodes, but playback now starts right at the window
 - Settings now shows the real memory a replay buffer needs, audio included. The old figure assumed audio took a fifteenth of what it does, so it could say a buffer fit when it didn't
 
 ## 2.2.1

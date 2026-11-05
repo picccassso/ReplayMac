@@ -243,10 +243,15 @@ public final class VideoEncoder: @unchecked Sendable {
         let pixelBuffer = lastSubmittedPixelBuffer
         let isIdle = compressionSession != nil
             && IdleFrameRefreshPolicy.shouldRefresh(lastSubmittedPTS: lastSubmittedPTS, now: now)
+        let fps = _currentConfiguration?.fps ?? 60
         stateLock.unlock()
 
         guard isIdle, let pixelBuffer else { return false }
-        return submitFrameLocked(pixelBuffer: pixelBuffer, proposedPTS: now, duration: .invalid, isIdleRefresh: true)
+        // One frame's worth, like a captured frame. Without a duration the
+        // writer stretches a clip's final frame over the whole gap before it,
+        // so a save taken on a still screen ran a quarter second long.
+        let duration = CMTime(value: 1, timescale: CMTimeScale(max(fps, 1)))
+        return submitFrameLocked(pixelBuffer: pixelBuffer, proposedPTS: now, duration: duration, isIdleRefresh: true)
     }
 
     /// Caller must hold `submitLock`.

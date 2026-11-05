@@ -121,6 +121,11 @@ public actor ClipSaver {
         let videoStartPTS = CMSampleBufferGetPresentationTimeStamp(firstVideoSample)
         let videoEndPTS = CMSampleBufferGetPresentationTimeStamp(videoSamples.last!)
         let audioRange = Self.audioExtractionRange(videoStartPTS: videoStartPTS, videoEndPTS: videoEndPTS)
+        let presentationStart = Self.presentationStart(
+            videoStartPTS: videoStartPTS,
+            videoEndPTS: videoEndPTS,
+            lastSeconds: lastSeconds
+        )
 
         let systemAudioSamples = systemAudioRingBuffer?.samples(between: audioRange.startPTS, and: audioRange.endPTS) ?? []
         let micAudioSamples = micRingBuffer?.samples(between: audioRange.startPTS, and: audioRange.endPTS) ?? []
@@ -167,9 +172,11 @@ public actor ClipSaver {
 
             logger.info("Saving clip: video=\(retimedVideo.count) audio=\(retimedSystemAudio.count) mic=\(retimedMicAudio.count)")
             if let audioStart = [systemAudioStartPTS, micAudioStartPTS].compactMap({ $0 }).filter(\.isValid).min(by: { $0 < $1 }) {
-                let delta = audioStart.seconds - videoStartPTS.seconds
+                // Measured from where playback starts: audio missing only
+                // under the trimmed keyframe lead-in is never heard.
+                let delta = audioStart.seconds - videoStartPTS.seconds - presentationStart.seconds
                 if delta > 0.05 {
-                    logger.warning("Audio capture started \(delta, format: .fixed(precision: 3))s after video start; lead-in will be padded with silence")
+                    logger.warning("Audio capture started \(delta, format: .fixed(precision: 3))s after the clip start; lead-in will be padded with silence")
                 }
             }
             let earliestTrackStart = [videoStartPTS, systemAudioStartPTS, micAudioStartPTS]
@@ -195,7 +202,12 @@ public actor ClipSaver {
                 throw ClipSaveError.cannotStartWriting
             }
 
-            writer.startSession(atSourceTime: .zero)
+            // Everything from the keyframe on is written so the first frames
+            // can be decoded, but playback starts at the requested window.
+            // Samples before the session start stay in the file and are left
+            // out of the presentation by an edit list, so a 30 s save plays
+            // as 30 s instead of 30 s plus however far back the keyframe was.
+            writer.startSession(atSourceTime: presentationStart)
 
             // Append all tracks concurrently. AVAssetWriter stalls one input if
             // another input's timeline falls too far behind, so a purely sequential
@@ -243,6 +255,21 @@ public actor ClipSaver {
             startPTS: videoStartPTS.isValid ? videoStartPTS.seconds : 0,
             endPTS: videoEndPTS.isValid ? videoEndPTS.seconds : 0
         )
+    }
+
+    /// Where playback should start on the retimed clip timeline (zero is the
+    /// first video frame): the requested window's start, or zero when the
+    /// buffer holds less than the window. Video has to start on a keyframe,
+    /// which can sit up to a GOP before the window.
+    static func presentationStart(
+        videoStartPTS: CMTime,
+        videoEndPTS: CMTime,
+        lastSeconds: TimeInterval
+    ) -> CMTime {
+        guard videoStartPTS.isNumeric, videoEndPTS.isNumeric, lastSeconds > 0 else { return .zero }
+        let windowStart = CMTimeSubtract(videoEndPTS, CMTime(seconds: lastSeconds, preferredTimescale: videoEndPTS.timescale))
+        let lead = CMTimeSubtract(windowStart, videoStartPTS)
+        return CMTimeCompare(lead, .zero) > 0 ? lead : .zero
     }
 
     static func timelineOffset(
