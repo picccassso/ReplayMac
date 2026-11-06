@@ -262,6 +262,10 @@ public struct CompanionStateSnapshot: Codable, Sendable, Equatable {
     public let perAppAudioEnabled: Bool
     /// Absent from builds that predate the camera overlay; decodes as off.
     public let isCameraOverlayEnabled: Bool
+    /// Whether Camera Overlay is switched on in Customise Features, so phones
+    /// only show a camera control the Mac will act on. Absent from builds that
+    /// predate it; decodes as unavailable.
+    public let isCameraOverlayAvailable: Bool
     public let audioApps: [CompanionAudioApp]
     public let displays: [CompanionDisplayInfo]
     public let profiles: [CompanionProfileSummary]
@@ -293,6 +297,7 @@ public struct CompanionStateSnapshot: Codable, Sendable, Equatable {
         systemAudioVolume: Double = 1.0,
         perAppAudioEnabled: Bool = false,
         isCameraOverlayEnabled: Bool = false,
+        isCameraOverlayAvailable: Bool = false,
         audioApps: [CompanionAudioApp] = [],
         displays: [CompanionDisplayInfo] = [],
         profiles: [CompanionProfileSummary] = [],
@@ -322,6 +327,7 @@ public struct CompanionStateSnapshot: Codable, Sendable, Equatable {
         self.systemAudioVolume = systemAudioVolume
         self.perAppAudioEnabled = perAppAudioEnabled
         self.isCameraOverlayEnabled = isCameraOverlayEnabled
+        self.isCameraOverlayAvailable = isCameraOverlayAvailable
         self.audioApps = audioApps
         self.displays = displays
         self.profiles = profiles
@@ -335,7 +341,7 @@ public struct CompanionStateSnapshot: Codable, Sendable, Equatable {
         case bufferedSeconds, bufferDurationSeconds, bufferMemoryBytes, bufferMemoryFormatted
         case longBufferEnabled, longBufferDurationSeconds, capturedDisplayName, isUsingFallbackDisplay
         case isMicrophoneEnabled, isMicrophoneMuted, isSystemAudioEnabled, isSystemAudioMuted
-        case microphoneVolume, systemAudioVolume, perAppAudioEnabled, isCameraOverlayEnabled
+        case microphoneVolume, systemAudioVolume, perAppAudioEnabled, isCameraOverlayEnabled, isCameraOverlayAvailable
         case audioApps, displays, profiles, recentClips, theme
     }
 
@@ -364,6 +370,7 @@ public struct CompanionStateSnapshot: Codable, Sendable, Equatable {
         self.systemAudioVolume = try container.decodeIfPresent(Double.self, forKey: .systemAudioVolume) ?? 1.0
         self.perAppAudioEnabled = try container.decodeIfPresent(Bool.self, forKey: .perAppAudioEnabled) ?? false
         self.isCameraOverlayEnabled = try container.decodeIfPresent(Bool.self, forKey: .isCameraOverlayEnabled) ?? false
+        self.isCameraOverlayAvailable = try container.decodeIfPresent(Bool.self, forKey: .isCameraOverlayAvailable) ?? false
         self.audioApps = try container.decodeIfPresent([CompanionAudioApp].self, forKey: .audioApps) ?? []
         self.displays = try container.decodeIfPresent([CompanionDisplayInfo].self, forKey: .displays) ?? []
         self.profiles = try container.decodeIfPresent([CompanionProfileSummary].self, forKey: .profiles) ?? []

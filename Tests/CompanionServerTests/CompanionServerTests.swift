@@ -160,6 +160,7 @@ final class CompanionServerProtocolTests: XCTestCase {
             systemAudioVolume: 0.65,
             perAppAudioEnabled: false,
             isCameraOverlayEnabled: true,
+            isCameraOverlayAvailable: true,
             audioApps: [app],
             displays: [display],
             profiles: [profile],
@@ -172,6 +173,7 @@ final class CompanionServerProtocolTests: XCTestCase {
         XCTAssertEqual(decoded.systemAudioVolume, 0.65, accuracy: 0.001)
         XCTAssertFalse(decoded.perAppAudioEnabled)
         XCTAssertTrue(decoded.isCameraOverlayEnabled)
+        XCTAssertTrue(decoded.isCameraOverlayAvailable)
         XCTAssertEqual(decoded.audioApps, [app])
         XCTAssertEqual(decoded.displays, [display])
         XCTAssertEqual(decoded.profiles, [profile])
@@ -190,6 +192,7 @@ final class CompanionServerProtocolTests: XCTestCase {
         XCTAssertEqual(legacy.systemAudioVolume, 1.0)
         XCTAssertFalse(legacy.perAppAudioEnabled)
         XCTAssertFalse(legacy.isCameraOverlayEnabled)
+        XCTAssertFalse(legacy.isCameraOverlayAvailable)
         XCTAssertTrue(legacy.audioApps.isEmpty)
         XCTAssertTrue(legacy.displays.isEmpty)
         XCTAssertTrue(legacy.profiles.isEmpty)

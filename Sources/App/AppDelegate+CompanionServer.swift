@@ -227,6 +227,7 @@ extension AppDelegate {
             systemAudioVolume: AppSettings.systemAudioVolume,
             perAppAudioEnabled: AppSettings.perAppAudioEnabled,
             isCameraOverlayEnabled: AppSettings.cameraOverlayEnabled,
+            isCameraOverlayAvailable: AppSettings.isFeatureEnabled(.cameraOverlay),
             audioApps: audioApps,
             displays: displays,
             profiles: profiles,
