@@ -77,7 +77,7 @@ public struct BitrateGuide: Equatable {
             }
             return "In the sweet spot for this size and frame rate (\(low)–\(high) Mbps)."
         case .high:
-            return "Above \(high) Mbps, clips get bigger without looking better."
+            return "Above \(high) Mbps, clips get bigger, and the extra detail mostly shows on a large, sharp display."
         }
     }
 
