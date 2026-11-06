@@ -1,6 +1,12 @@
 # Changelog
 
-## Unreleased
+## 2.3.0
+
+### Customise Features
+
+- Choose how much of ReplayMac you see: Simple, Balanced or Full, or switch individual features on and off under Custom. Features are grouped into five categories (Interface & Themes, Video & Recording, Audio & Mixing, Shortcuts & Automations, Advanced & Ecosystem) in a sidebar, each with a short description. Open it from Settings → General or the sidebar footer
+- Turning a feature off hides its controls and pauses anything it runs in the background, but keeps its settings, so turning it back on picks up where you left off. Switching features on or off no longer restarts the replay buffer
+- Upgrading keeps every feature you were already using, and new installs start in Simple
 
 ### Camera overlay
 
@@ -21,11 +27,17 @@
 - Fix audio drifting behind the video over a long session, by up to 20 seconds (#16). When the Mac was too busy to encode every frame, each dropped frame pushed the rest of the video one frame earlier, so a clip opened on silence and its sound then played late by the same amount. Frames now keep the time they were captured
 - Fix clips saved with separate audio tracks, and extended replays, going out of sync after an audio dropout. A gap of more than 5 seconds in system audio closed up in the file, so everything after it played early. Every track is now filled with silence across gaps, merged or not, in replays and extended replays
 - Fix saving a clip crashing ReplayMac when the microphone is an audio interface with more than two inputs. Wider inputs are now mixed down to stereo at full level, so a single mic on a multi-input interface is not turned down
+- Fix system audio sounding choppy or cutting out on some setups (#15). A system audio buffer that started a few microseconds early was thrown away and replaced with 20 ms of silence, several times a second. Only audio that is genuinely repeated is dropped now
 - Fix faint clicks a few times a second in clip audio, where the slightly uneven timestamps on system audio left one-sample overlaps and holes between buffers
 - Dual-display replays saved as separate files now cover exactly the same moments on both displays
 - A replay now ends at the moment you save, and every track is cut to that same span. Audio keeps as much history as the video it is saved with, so the start of a clip is never missing its sound
 - Each save now logs how well its audio and video line up, so a sync problem can be diagnosed from the logs alone
 - Settings now shows the real memory a replay buffer needs, audio included. The old figure assumed audio took a fifteenth of what it does, so it could say a buffer fit when it didn't
+
+### Settings and interface
+
+- The Bitrate slider in Settings → Video now shades a sweet spot for your size, frame rate and codec, says whether you're below, in or above it, and explains what bitrate does: what too little looks like, and when going higher is worth it. In Custom, "Recommended" no longer just repeats whatever you picked
+- Remove the grey band behind the clip bar and other floating bottom bars on macOS 26, which looked like a grey strip over the clip grid
 
 ## 2.2.1
 

@@ -23,6 +23,8 @@ ReplayMac is a macOS menu bar instant-replay clipper. It continuously buffers re
 - **Flexible resolutions and Retina**: Record at native Retina backing-pixel resolution, logical size, half size, or custom dimensions.
 - **Dual-display setups**: Capture two monitors as a side-by-side composite or as separate video files, with independent per-display Retina scaling.
 - **System audio and microphone**: Capture system sound and microphone together, with options to record selected apps, monitor live level meters, and save audio as separate MP4 tracks.
+- **Camera overlay**: Add your webcam to recordings in any corner, at 720p or 1080p, with optional border and rounded corners. Uses the built-in camera, a USB webcam or Continuity Camera.
+- **Customise Features**: Pick Simple, Balanced or Full, or switch individual features on and off, so ReplayMac shows only what you use.
 
 ### Clip Library & Export
 
