@@ -83,6 +83,11 @@ extension AppDelegate {
         settingsObservations.append(Defaults.observe(.captureHDR) { [weak self] _ in
             self?.scheduleRuntimeSettingsReconcile(needsFullRestart: true)
         })
+        settingsObservations.append(Defaults.observe(.showCursorInRecording) { [weak self] _ in
+            Task { @MainActor [weak self] in
+                await self?.applyCursorVisibilitySettingIfNeeded()
+            }
+        })
         settingsObservations.append(Defaults.observe(.videoCodec) { [weak self] _ in
             self?.scheduleRuntimeSettingsReconcile()
         })
@@ -465,6 +470,15 @@ extension AppDelegate {
                 bitrate: bitrate,
                 captureHDR: captureHDR
             )
+        }
+    }
+
+    func applyCursorVisibilitySettingIfNeeded() async {
+        guard isCaptureRunning else { return }
+        do {
+            try await captureManager.updateCursorVisibility(AppSettings.showCursorInRecording)
+        } catch {
+            runtimeSettingsLogger.error("Failed to update cursor visibility: \(String(describing: error), privacy: .public)")
         }
     }
 

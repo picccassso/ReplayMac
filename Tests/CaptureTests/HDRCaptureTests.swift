@@ -7,7 +7,7 @@ import CoreGraphics
 final class HDRCaptureTests: XCTestCase {
     func testHDRStreamUsesTenBitHLGMatchingEncoder() throws {
         guard CaptureManager.supportsHDRCapture else { throw XCTSkip("HDR requires Apple silicon") }
-        let config = CaptureManager.makeStreamConfiguration(captureHDR: true)
+        let config = CaptureManager.makeStreamConfiguration(captureHDR: true, showsCursor: true)
         XCTAssertEqual(config.captureDynamicRange, .hdrCanonicalDisplay)
         XCTAssertEqual(config.pixelFormat, kCVPixelFormatType_420YpCbCr10BiPlanarVideoRange)
         XCTAssertEqual(config.colorSpaceName, CGColorSpace.itur_2100_HLG)
@@ -16,7 +16,7 @@ final class HDRCaptureTests: XCTestCase {
 
     func testStreamUpdatesPreserveHDRColorConfiguration() throws {
         guard CaptureManager.supportsHDRCapture else { throw XCTSkip("HDR requires Apple silicon") }
-        let original = CaptureManager.makeStreamConfiguration(captureHDR: true)
+        let original = CaptureManager.makeStreamConfiguration(captureHDR: true, showsCursor: true)
         let updated = SCStreamConfiguration()
         CaptureManager.copyColorConfiguration(from: original, to: updated)
         XCTAssertEqual(updated.captureDynamicRange, original.captureDynamicRange)
@@ -26,7 +26,7 @@ final class HDRCaptureTests: XCTestCase {
     }
 
     func testSDRStillUsesOriginalCaptureFormat() {
-        let config = CaptureManager.makeStreamConfiguration(captureHDR: false)
+        let config = CaptureManager.makeStreamConfiguration(captureHDR: false, showsCursor: true)
         XCTAssertEqual(config.captureDynamicRange, .SDR)
         XCTAssertEqual(config.pixelFormat, kCVPixelFormatType_420YpCbCr8BiPlanarFullRange)
         XCTAssertEqual(config.colorSpaceName, CGColorSpace.sRGB)

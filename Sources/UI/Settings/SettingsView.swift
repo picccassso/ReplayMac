@@ -16,6 +16,7 @@ public struct SettingsView: View {
     @Default(.autoRecordExcludedBundleIDs) var autoRecordExcludedBundleIDs
 
     @Default(.captureHDR) var captureHDR
+    @Default(.showCursorInRecording) var showCursorInRecording
     @Default(.videoCodec) var videoCodecRawValue
     @Default(.captureMode) var captureModeRawValue
     @Default(.captureDisplayID) var captureDisplayID

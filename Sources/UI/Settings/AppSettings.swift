@@ -563,6 +563,7 @@ public enum AppSettings {
             && (captureMode != CaptureMode.dualSideBySide.rawValue || dualCaptureSaveModeEnum == .separateFiles)
     }
     public static var effectiveVideoCodec: String { isHDRCaptureActive ? "hevc" : videoCodec }
+    public static var showCursorInRecording: Bool { Defaults[.showCursorInRecording] }
 
     public static var videoCodec: String {
         isFeatureEnabled(.proVideo) ? Defaults[.videoCodec] : VideoCodec.hevc.rawValue
@@ -859,6 +860,7 @@ public extension Defaults.Keys {
     static let autoRecordExcludedBundleIDs = Key<[String]>("autoRecordExcludedBundleIDs", default: [])
 
     static let captureHDR = Key<Bool>("captureHDR", default: false)
+    static let showCursorInRecording = Key<Bool>("showCursorInRecording", default: true)
     static let videoCodec = Key<String>("videoCodec", default: VideoCodec.hevc.rawValue)
     static let captureMode = Key<String>("captureMode", default: "single")
     static let captureDisplayID = Key<String>("captureDisplayID", default: "")

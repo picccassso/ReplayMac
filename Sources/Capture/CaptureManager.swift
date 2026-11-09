@@ -84,15 +84,17 @@ public actor CaptureManager {
 
     // Canonical HDR is portable across displays. Pin Rec.2020 HLG explicitly
     // so capture and the HEVC encoder agree even if Apple's preset changes.
-    nonisolated static func makeStreamConfiguration(captureHDR: Bool) -> SCStreamConfiguration {
+    nonisolated static func makeStreamConfiguration(captureHDR: Bool, showsCursor: Bool) -> SCStreamConfiguration {
         if captureHDR && supportsHDRCapture {
             let config = SCStreamConfiguration(preset: .captureHDRStreamCanonicalDisplay)
             config.pixelFormat = kCVPixelFormatType_420YpCbCr10BiPlanarVideoRange
             config.colorSpaceName = CGColorSpace.itur_2100_HLG
             config.colorMatrix = kCVImageBufferYCbCrMatrix_ITU_R_2020
+            config.showsCursor = showsCursor
             return config
         }
         let config = SCStreamConfiguration()
+        config.showsCursor = showsCursor
         config.pixelFormat = screenPixelFormat
         config.colorSpaceName = screenColorSpace
         return config
@@ -124,6 +126,7 @@ public actor CaptureManager {
         config.minimumFrameInterval = CMTime(value: 1, timescale: CMTimeScale(fps))
         config.queueDepth = queueDepth
         Self.copyColorConfiguration(from: currentConfig, to: config)
+        config.showsCursor = currentConfig.showsCursor
         config.capturesAudio = currentConfig.capturesAudio
         config.excludesCurrentProcessAudio = excludeOwnAppAudio
 
@@ -161,6 +164,7 @@ public actor CaptureManager {
         config1.minimumFrameInterval = CMTime(value: 1, timescale: CMTimeScale(fps))
         config1.queueDepth = queueDepth
         Self.copyColorConfiguration(from: currentConfig1, to: config1)
+        config1.showsCursor = currentConfig1.showsCursor
         config1.capturesAudio = currentConfig1.capturesAudio
         config1.excludesCurrentProcessAudio = excludeOwnAppAudio
 
@@ -170,6 +174,7 @@ public actor CaptureManager {
         config2.minimumFrameInterval = CMTime(value: 1, timescale: CMTimeScale(fps))
         config2.queueDepth = queueDepth
         Self.copyColorConfiguration(from: currentConfig2, to: config2)
+        config2.showsCursor = currentConfig2.showsCursor
         config2.capturesAudio = currentConfig2.capturesAudio
         config2.excludesCurrentProcessAudio = excludeOwnAppAudio
 
@@ -194,6 +199,64 @@ public actor CaptureManager {
 
         self.dualConfiguration1 = config1
         self.dualConfiguration2 = config2
+    }
+
+    public func updateCursorVisibility(_ showsCursor: Bool) async throws {
+        if isDualMode {
+            guard let activeStream1 = stream1,
+                  let activeStream2 = stream2,
+                  let currentConfig1 = dualConfiguration1,
+                  let currentConfig2 = dualConfiguration2 else {
+                throw CaptureRestartError.missingConfiguration
+            }
+
+            let config1 = Self.rebuiltConfiguration(from: currentConfig1, showsCursor: showsCursor)
+            let config2 = Self.rebuiltConfiguration(from: currentConfig2, showsCursor: showsCursor)
+
+            try await applyConfiguration(config1, to: activeStream1)
+            try await applyConfiguration(config2, to: activeStream2)
+
+            self.dualConfiguration1 = config1
+            self.dualConfiguration2 = config2
+        } else {
+            guard let activeStream = stream, let currentConfig = currentConfiguration else {
+                throw CaptureRestartError.missingConfiguration
+            }
+
+            let config = Self.rebuiltConfiguration(from: currentConfig, showsCursor: showsCursor)
+
+            try await applyConfiguration(config, to: activeStream)
+
+            self.currentConfiguration = config
+        }
+    }
+
+    private nonisolated static func rebuiltConfiguration(
+        from source: SCStreamConfiguration,
+        showsCursor: Bool
+    ) -> SCStreamConfiguration {
+        let config = SCStreamConfiguration()
+        config.width = source.width
+        config.height = source.height
+        config.minimumFrameInterval = source.minimumFrameInterval
+        config.queueDepth = source.queueDepth
+        copyColorConfiguration(from: source, to: config)
+        config.showsCursor = showsCursor
+        config.capturesAudio = source.capturesAudio
+        config.excludesCurrentProcessAudio = source.excludesCurrentProcessAudio
+        return config
+    }
+
+    private func applyConfiguration(_ config: SCStreamConfiguration, to stream: SCStream) async throws {
+        try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
+            stream.updateConfiguration(config) { error in
+                if let error {
+                    continuation.resume(throwing: error)
+                } else {
+                    continuation.resume()
+                }
+            }
+        }
     }
 
     public func updateAudioCapture(
@@ -231,6 +294,7 @@ public actor CaptureManager {
             config1.minimumFrameInterval = currentConfig1.minimumFrameInterval
             config1.queueDepth = currentConfig1.queueDepth
             Self.copyColorConfiguration(from: currentConfig1, to: config1)
+            config1.showsCursor = currentConfig1.showsCursor
             config1.capturesAudio = captureAudio
             config1.excludesCurrentProcessAudio = excludeOwnAppAudio
 
@@ -240,6 +304,7 @@ public actor CaptureManager {
             config2.minimumFrameInterval = currentConfig2.minimumFrameInterval
             config2.queueDepth = currentConfig2.queueDepth
             Self.copyColorConfiguration(from: currentConfig2, to: config2)
+            config2.showsCursor = currentConfig2.showsCursor
             config2.capturesAudio = false
             config2.excludesCurrentProcessAudio = excludeOwnAppAudio
 
@@ -292,6 +357,7 @@ public actor CaptureManager {
             config.minimumFrameInterval = currentConfig.minimumFrameInterval
             config.queueDepth = currentConfig.queueDepth
             Self.copyColorConfiguration(from: currentConfig, to: config)
+            config.showsCursor = currentConfig.showsCursor
             config.capturesAudio = captureAudio
             config.excludesCurrentProcessAudio = excludeOwnAppAudio
 
@@ -385,7 +451,8 @@ public actor CaptureManager {
         outputHeight: Int? = nil,
         excludeOwnAppAudio: Bool = false,
         captureAudio: Bool = true,
-        captureHDR: Bool = false
+        captureHDR: Bool = false,
+        showsCursor: Bool = true
     ) async throws -> CaptureConfig {
         delegate.resetStats()
         let permissions = CapturePermissions()
@@ -430,7 +497,7 @@ public actor CaptureManager {
         let captureWidth = outputWidth ?? Int(display.width)
         let captureHeight = outputHeight ?? Int(display.height)
 
-        let config = Self.makeStreamConfiguration(captureHDR: captureHDR)
+        let config = Self.makeStreamConfiguration(captureHDR: captureHDR, showsCursor: showsCursor)
         config.width = captureWidth
         config.height = captureHeight
         config.minimumFrameInterval = CMTime(value: 1, timescale: CMTimeScale(fps))
@@ -482,7 +549,8 @@ public actor CaptureManager {
         outputHeight2: Int? = nil,
         excludeOwnAppAudio: Bool = false,
         captureAudio: Bool = true,
-        captureHDR: Bool = false
+        captureHDR: Bool = false,
+        showsCursor: Bool = true
     ) async throws -> (config1: CaptureConfig, config2: CaptureConfig) {
         delegate1.resetStats()
         delegate2.resetStats()
@@ -537,7 +605,7 @@ public actor CaptureManager {
         let capWidth2 = outputWidth2 ?? Int(display2.width)
         let capHeight2 = outputHeight2 ?? Int(display2.height)
 
-        let config1 = Self.makeStreamConfiguration(captureHDR: captureHDR)
+        let config1 = Self.makeStreamConfiguration(captureHDR: captureHDR, showsCursor: showsCursor)
         config1.width = capWidth1
         config1.height = capHeight1
         config1.minimumFrameInterval = CMTime(value: 1, timescale: CMTimeScale(fps))
@@ -545,7 +613,7 @@ public actor CaptureManager {
         config1.capturesAudio = captureAudio
         config1.excludesCurrentProcessAudio = excludeOwnAppAudio
 
-        let config2 = Self.makeStreamConfiguration(captureHDR: captureHDR)
+        let config2 = Self.makeStreamConfiguration(captureHDR: captureHDR, showsCursor: showsCursor)
         config2.width = capWidth2
         config2.height = capHeight2
         config2.minimumFrameInterval = CMTime(value: 1, timescale: CMTimeScale(fps))

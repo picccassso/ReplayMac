@@ -221,7 +221,8 @@ extension AppDelegate {
                             outputHeight2: nil,
                             excludeOwnAppAudio: excludeOwn,
                             captureAudio: captureMainSystemAudio,
-                            captureHDR: captureHDR
+                            captureHDR: captureHDR,
+                            showsCursor: AppSettings.showCursorInRecording
                         )
                     } catch CaptureError.notEnoughDisplays {
                         dualConfigs = nil
@@ -415,7 +416,8 @@ extension AppDelegate {
             queueDepth: queueDepth,
             excludeOwnAppAudio: excludeOwnAppAudio,
             captureAudio: captureAudio,
-            captureHDR: captureHDR
+            captureHDR: captureHDR,
+            showsCursor: AppSettings.showCursorInRecording
         )
 
         originalDisplay = DisplayDimensions(sourceOf: config)

@@ -125,6 +125,10 @@ extension SettingsView {
                         .font(.system(size: 11, design: .rounded))
                     }
                 }
+                Toggle("Show cursor in recordings", isOn: $showCursorInRecording)
+                Text("Hides the mouse cursor from recorded video. The cursor stays visible on your screen.")
+                    .font(.system(size: 12, design: .rounded))
+                    .foregroundStyle(AppTheme.textSecondary)
             } header: {
                 Text("Capture")
             }
