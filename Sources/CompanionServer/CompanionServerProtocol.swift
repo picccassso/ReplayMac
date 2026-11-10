@@ -34,7 +34,8 @@ public struct CompanionClientMessage: Codable, Sendable {
     public let bundleId: String?
     /// Audio target (`"microphone"` or `"systemAudio"`) for `set_volume`.
     public let target: String?
-    /// Volume level (`0.0...1.0`) for `set_volume`.
+    /// Volume level for `set_volume`: `0.0...1.0`, or up to the snapshot's
+    /// `microphoneGainMax` for the microphone. Out-of-range values are clamped.
     public let volume: Double?
     /// Display stable key for `select_display`.
     public let displayId: String?
@@ -257,8 +258,17 @@ public struct CompanionStateSnapshot: Codable, Sendable, Equatable {
     public let isMicrophoneMuted: Bool
     public let isSystemAudioEnabled: Bool
     public let isSystemAudioMuted: Bool
+    /// Microphone level as `0.0...1.0`, for phones whose slider stops at
+    /// 100%. A boosted microphone reads as 1 here; see `microphoneGain`.
     public let microphoneVolume: Double
     public let systemAudioVolume: Double
+    /// The microphone slider's real position, `0.0...microphoneGainMax`,
+    /// where 1 is 100% and anything above is a boost. Absent from builds that
+    /// predate the boost; decodes as `microphoneVolume`.
+    public let microphoneGain: Double
+    /// The highest value `set_volume` accepts for the microphone. Absent from
+    /// builds that predate the boost; decodes as 1.
+    public let microphoneGainMax: Double
     public let perAppAudioEnabled: Bool
     /// Absent from builds that predate the camera overlay; decodes as off.
     public let isCameraOverlayEnabled: Bool
@@ -295,6 +305,8 @@ public struct CompanionStateSnapshot: Codable, Sendable, Equatable {
         isSystemAudioMuted: Bool,
         microphoneVolume: Double = 1.0,
         systemAudioVolume: Double = 1.0,
+        microphoneGain: Double? = nil,
+        microphoneGainMax: Double = 1.0,
         perAppAudioEnabled: Bool = false,
         isCameraOverlayEnabled: Bool = false,
         isCameraOverlayAvailable: Bool = false,
@@ -325,6 +337,8 @@ public struct CompanionStateSnapshot: Codable, Sendable, Equatable {
         self.isSystemAudioMuted = isSystemAudioMuted
         self.microphoneVolume = microphoneVolume
         self.systemAudioVolume = systemAudioVolume
+        self.microphoneGain = microphoneGain ?? microphoneVolume
+        self.microphoneGainMax = microphoneGainMax
         self.perAppAudioEnabled = perAppAudioEnabled
         self.isCameraOverlayEnabled = isCameraOverlayEnabled
         self.isCameraOverlayAvailable = isCameraOverlayAvailable
@@ -341,7 +355,8 @@ public struct CompanionStateSnapshot: Codable, Sendable, Equatable {
         case bufferedSeconds, bufferDurationSeconds, bufferMemoryBytes, bufferMemoryFormatted
         case longBufferEnabled, longBufferDurationSeconds, capturedDisplayName, isUsingFallbackDisplay
         case isMicrophoneEnabled, isMicrophoneMuted, isSystemAudioEnabled, isSystemAudioMuted
-        case microphoneVolume, systemAudioVolume, perAppAudioEnabled, isCameraOverlayEnabled, isCameraOverlayAvailable
+        case microphoneVolume, systemAudioVolume, microphoneGain, microphoneGainMax
+        case perAppAudioEnabled, isCameraOverlayEnabled, isCameraOverlayAvailable
         case audioApps, displays, profiles, recentClips, theme
     }
 
@@ -368,6 +383,8 @@ public struct CompanionStateSnapshot: Codable, Sendable, Equatable {
         self.isSystemAudioMuted = try container.decodeIfPresent(Bool.self, forKey: .isSystemAudioMuted) ?? false
         self.microphoneVolume = try container.decodeIfPresent(Double.self, forKey: .microphoneVolume) ?? 1.0
         self.systemAudioVolume = try container.decodeIfPresent(Double.self, forKey: .systemAudioVolume) ?? 1.0
+        self.microphoneGain = try container.decodeIfPresent(Double.self, forKey: .microphoneGain) ?? microphoneVolume
+        self.microphoneGainMax = try container.decodeIfPresent(Double.self, forKey: .microphoneGainMax) ?? 1.0
         self.perAppAudioEnabled = try container.decodeIfPresent(Bool.self, forKey: .perAppAudioEnabled) ?? false
         self.isCameraOverlayEnabled = try container.decodeIfPresent(Bool.self, forKey: .isCameraOverlayEnabled) ?? false
         self.isCameraOverlayAvailable = try container.decodeIfPresent(Bool.self, forKey: .isCameraOverlayAvailable) ?? false

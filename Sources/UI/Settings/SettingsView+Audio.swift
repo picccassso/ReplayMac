@@ -138,7 +138,7 @@ extension SettingsView {
                     .buttonStyle(.plain)
                     .help(isSystemAudioMuted ? "Unmute system audio" : "Mute system audio")
 
-                    Text(isSystemAudioMuted ? "Muted (\(Int(systemAudioVolume * 100))%)" : "\(Int(systemAudioVolume * 100))%")
+                    Text(isSystemAudioMuted ? "Muted (\(Self.percent(systemAudioVolume))%)" : "\(Self.percent(systemAudioVolume))%")
                         .foregroundStyle(isSystemAudioMuted ? AppTheme.danger : AppTheme.accent)
                         .fontWeight(.semibold)
                 }
@@ -165,13 +165,16 @@ extension SettingsView {
                     .buttonStyle(.plain)
                     .help(isMicrophoneMuted ? "Unmute microphone" : "Mute microphone")
 
-                    Text(isMicrophoneMuted ? "Muted (\(Int(microphoneVolume * 100))%)" : "\(Int(microphoneVolume * 100))%")
+                    Text(isMicrophoneMuted ? "Muted (\(Self.percent(microphoneVolume))%)" : "\(Self.percent(microphoneVolume))%")
                         .foregroundStyle(isMicrophoneMuted ? AppTheme.danger : AppTheme.accent)
                         .fontWeight(.semibold)
                 }
-                Slider(value: $microphoneVolume, in: 0...1, step: 0.05)
+                Slider(value: $microphoneVolume, in: 0...AppSettings.maximumMicrophoneVolume, step: 0.05)
                     .tint(isMicrophoneMuted ? AppTheme.danger : AppTheme.accent)
                 LiveAudioLevelMeter(source: .microphone, isEnabled: captureMicrophone && !isMicrophoneMuted)
+                Text("Above 100% boosts a quiet microphone so your voice can keep up with game audio. Loud moments are held back so they don't distort.")
+                    .font(.caption)
+                    .foregroundStyle(AppTheme.textSecondary)
             }
             .disabled(!captureMicrophone)
         } header: {
@@ -303,6 +306,11 @@ extension SettingsView {
             }
         }
         return combined.sorted { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending }
+    }
+
+    /// Rounded, not truncated: 1.15 * 100 is 114.99… in floating point.
+    static func percent(_ volume: Double) -> Int {
+        Int((volume * 100).rounded())
     }
 
     func refreshAudioLevelPreview() {

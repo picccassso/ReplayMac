@@ -67,6 +67,10 @@ public final class MicCapture: @unchecked Sendable {
     private var captureGeneration = 0
     private var volume: Double = 1.0
 
+    /// Holds a boosted microphone under full scale. Only `handleInput` runs
+    /// it, on the serial processing queue; `stop` clears it under `lock`.
+    private var limiter = PeakLimiter()
+
     /// The device the caller asked for, retained so a restart can re-bind it.
     private var requestedDeviceID: String?
 
@@ -102,6 +106,8 @@ public final class MicCapture: @unchecked Sendable {
         lock.unlock()
     }
 
+    /// Gain applied to the microphone: 1 leaves it as captured, less turns it
+    /// down, more boosts it. Boosted peaks are limited rather than clipped.
     public func setVolume(_ volume: Double) {
         lock.lock()
         self.volume = volume
@@ -161,6 +167,7 @@ public final class MicCapture: @unchecked Sendable {
         lock.lock()
         captureGeneration += 1
         timeline.reset()
+        limiter.reset()
         lastSampleUptime = nil
         engineReadyUptime = nil
         requestedDeviceID = nil
@@ -377,7 +384,7 @@ public final class MicCapture: @unchecked Sendable {
     /// - wider inputs (audio interfaces) are added onto the outputs in turn at
     ///   full level. An interface usually carries one mic on one input with
     ///   the rest silent, and scaling by outputs/inputs buried that voice
-    ///   (12 dB down on 8 inputs). Peaks are clamped after the mic volume is
+    ///   (12 dB down on 8 inputs). Peaks are limited after the mic volume is
     ///   applied, in `handleInput`, not here.
     static func fold(_ buffer: AVAudioPCMBuffer, into format: AVAudioFormat) -> AVAudioPCMBuffer? {
         guard let source = buffer.floatChannelData,
@@ -633,22 +640,14 @@ public final class MicCapture: @unchecked Sendable {
 
         lock.lock()
         let currentVolume = volume
+        var currentLimiter = limiter
         lock.unlock()
 
-        // Volume first, then clamp: inputs folded at full level can peak past
-        // full scale, and clamping before the volume slider would leave a
-        // turned-down mic flat-topped instead of simply quieter.
-        let abl = UnsafeMutableAudioBufferListPointer(outputBuffer.mutableAudioBufferList)
-        let volumeFloat = Float(currentVolume)
-        for buffer in abl {
-            guard let data = buffer.mData else { continue }
-            let byteSize = Int(buffer.mDataByteSize)
-            let floatCount = byteSize / MemoryLayout<Float>.size
-            let floatPtr = data.assumingMemoryBound(to: Float.self)
-            for i in 0..<floatCount {
-                floatPtr[i] = min(max(floatPtr[i] * volumeFloat, -1), 1)
-            }
-        }
+        Self.applyVolume(currentVolume, to: outputBuffer, limiter: &currentLimiter)
+
+        lock.lock()
+        limiter = currentLimiter
+        lock.unlock()
 
         guard let sampleBuffer = makeSampleBuffer(from: outputBuffer, at: time) else { return }
         AudioLevelMonitor.shared.recordMicrophone(sampleBuffer)
@@ -662,6 +661,36 @@ public final class MicCapture: @unchecked Sendable {
         let h = handler
         lock.unlock()
         h?(sampleBuffer)
+    }
+
+    /// Scales an interleaved Float32 buffer by the mic volume and keeps it
+    /// within full scale. Volume goes first: inputs folded at full level, or
+    /// a mic boosted past 100%, can peak past full scale, and limiting before
+    /// the volume slider would leave a turned-down mic squashed instead of
+    /// simply quieter.
+    static func applyVolume(_ volume: Double, to buffer: AVAudioPCMBuffer, limiter: inout PeakLimiter) {
+        let channelCount = Int(buffer.format.channelCount)
+        let sampleRate = buffer.format.sampleRate
+        let abl = UnsafeMutableAudioBufferListPointer(buffer.mutableAudioBufferList)
+        for audioBuffer in abl {
+            guard let data = audioBuffer.mData else { continue }
+            let floatCount = Int(audioBuffer.mDataByteSize) / MemoryLayout<Float>.size
+            let samples = UnsafeMutableBufferPointer(
+                start: data.assumingMemoryBound(to: Float.self),
+                count: floatCount
+            )
+            limiter.process(
+                samples,
+                channelCount: channelCount,
+                gain: Float(volume),
+                sampleRate: sampleRate
+            )
+            // The limiter already holds everything under full scale; this
+            // only catches a non-finite sample from a misbehaving device.
+            for index in samples.indices where !(abs(samples[index]) <= 1) {
+                samples[index] = samples[index].isNaN ? 0 : (samples[index] < 0 ? -1 : 1)
+            }
+        }
     }
 
     private func makeSampleBuffer(from pcmBuffer: AVAudioPCMBuffer, at audioTime: AVAudioTime) -> CMSampleBuffer? {

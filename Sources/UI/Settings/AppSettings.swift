@@ -354,8 +354,19 @@ public enum AppSettings {
         Defaults[.systemAudioVolume] = min(max(volume, 0.0), 1.0)
     }
 
+    /// The microphone slider goes past 100% because a built-in or headset
+    /// mic is captured raw and sits far below game audio, and there is no
+    /// other way to bring a voice up to it. 400% is +12 dB. System audio
+    /// arrives at full level already, so its slider only turns down.
+    public static let maximumMicrophoneVolume = 4.0
+
     public static func setMicrophoneVolume(_ volume: Double) {
-        Defaults[.microphoneVolume] = min(max(volume, 0.0), 1.0)
+        Defaults[.microphoneVolume] = clampedMicrophoneVolume(volume)
+    }
+
+    public static func clampedMicrophoneVolume(_ volume: Double) -> Double {
+        guard volume.isFinite else { return 1.0 }
+        return min(max(volume, 0.0), maximumMicrophoneVolume)
     }
 
     public static func selectPrimaryDisplay(_ displayKey: String) {
@@ -508,7 +519,7 @@ public enum AppSettings {
         Defaults[.perAppAudioBundleID] = profile.perAppAudioBundleID
         Defaults[.mutedAudioAppBundleIDs] = profile.mutedAudioAppBundleIDs ?? []
         Defaults[.systemAudioVolume] = profile.systemAudioVolume
-        Defaults[.microphoneVolume] = profile.microphoneVolume
+        Defaults[.microphoneVolume] = clampedMicrophoneVolume(profile.microphoneVolume)
 
         Defaults[.memoryCapMB] = profile.memoryCapMB
         Defaults[.queueDepth] = profile.queueDepth
@@ -550,7 +561,7 @@ public enum AppSettings {
         isMuted: Bool = isMicrophoneMuted,
         isPushToMuteActive: Bool = false
     ) -> Double {
-        (isMuted || isPushToMuteActive) ? 0.0 : volume
+        (isMuted || isPushToMuteActive) ? 0.0 : clampedMicrophoneVolume(volume)
     }
 
     public static var captureHDR: Bool {

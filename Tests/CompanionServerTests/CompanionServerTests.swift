@@ -171,6 +171,9 @@ final class CompanionServerProtocolTests: XCTestCase {
         let decoded = try JSONDecoder().decode(CompanionStateSnapshot.self, from: encoded)
         XCTAssertEqual(decoded.microphoneVolume, 0.8, accuracy: 0.001)
         XCTAssertEqual(decoded.systemAudioVolume, 0.65, accuracy: 0.001)
+        // Without a boost the gain is just the volume.
+        XCTAssertEqual(decoded.microphoneGain, 0.8, accuracy: 0.001)
+        XCTAssertEqual(decoded.microphoneGainMax, 1.0, accuracy: 0.001)
         XCTAssertFalse(decoded.perAppAudioEnabled)
         XCTAssertTrue(decoded.isCameraOverlayEnabled)
         XCTAssertTrue(decoded.isCameraOverlayAvailable)
@@ -190,6 +193,41 @@ final class CompanionServerProtocolTests: XCTestCase {
         let legacy = try JSONDecoder().decode(CompanionStateSnapshot.self, from: legacyJSON)
         XCTAssertEqual(legacy.microphoneVolume, 1.0)
         XCTAssertEqual(legacy.systemAudioVolume, 1.0)
+        XCTAssertEqual(legacy.microphoneGain, 1.0)
+        XCTAssertEqual(legacy.microphoneGainMax, 1.0)
+
+        // A boosted microphone: the 0...1 field older phones read stays in
+        // range, and the real position travels in the gain fields.
+        let boosted = CompanionStateSnapshot(
+            isRecording: true,
+            isSessionRecording: false,
+            saveStatus: "idle",
+            recordingElapsedSeconds: 0,
+            extendedBufferElapsedSeconds: 0,
+            sessionElapsedSeconds: 0,
+            bufferedSeconds: 0,
+            bufferDurationSeconds: 30,
+            bufferMemoryBytes: 0,
+            bufferMemoryFormatted: "0 MB",
+            longBufferEnabled: false,
+            longBufferDurationSeconds: 300,
+            capturedDisplayName: nil,
+            isMicrophoneEnabled: true,
+            isMicrophoneMuted: false,
+            isSystemAudioEnabled: true,
+            isSystemAudioMuted: false,
+            microphoneVolume: 1.0,
+            systemAudioVolume: 0.5,
+            microphoneGain: 2.5,
+            microphoneGainMax: 4.0,
+            recentClips: []
+        )
+        let boostedJSON = try XCTUnwrap(
+            JSONSerialization.jsonObject(with: JSONEncoder().encode(boosted)) as? [String: Any]
+        )
+        XCTAssertEqual(boostedJSON["microphoneVolume"] as? Double, 1.0)
+        XCTAssertEqual(boostedJSON["microphoneGain"] as? Double, 2.5)
+        XCTAssertEqual(boostedJSON["microphoneGainMax"] as? Double, 4.0)
         XCTAssertFalse(legacy.perAppAudioEnabled)
         XCTAssertFalse(legacy.isCameraOverlayEnabled)
         XCTAssertFalse(legacy.isCameraOverlayAvailable)

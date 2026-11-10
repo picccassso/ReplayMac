@@ -71,6 +71,24 @@ final class CompanionUITests: XCTestCase {
         AppSettings.setMicrophoneVolume(0.65)
         XCTAssertEqual(AppSettings.microphoneVolume, 0.65, accuracy: 0.001)
 
+        // The microphone can be boosted past 100%, up to its own ceiling.
+        AppSettings.setMicrophoneVolume(2.5)
+        XCTAssertEqual(AppSettings.microphoneVolume, 2.5, accuracy: 0.001)
+        AppSettings.setMicrophoneVolume(9)
+        XCTAssertEqual(AppSettings.microphoneVolume, AppSettings.maximumMicrophoneVolume, accuracy: 0.001)
+        AppSettings.setMicrophoneVolume(-1)
+        XCTAssertEqual(AppSettings.microphoneVolume, 0.0, accuracy: 0.001)
+        AppSettings.setMicrophoneVolume(.nan)
+        XCTAssertEqual(AppSettings.microphoneVolume, 1.0, accuracy: 0.001)
+        XCTAssertEqual(
+            AppSettings.effectiveMicrophoneVolume(volume: 3, isMuted: false),
+            3,
+            accuracy: 0.001
+        )
+        XCTAssertEqual(AppSettings.effectiveMicrophoneVolume(volume: 3, isMuted: true), 0, accuracy: 0.001)
+        XCTAssertEqual(SettingsView.percent(1.15), 115)
+        XCTAssertEqual(SettingsView.percent(4), 400)
+
         let profileId = UUID()
         let profile = CaptureProfile(
             id: profileId,

@@ -223,8 +223,12 @@ extension AppDelegate {
             isMicrophoneMuted: menuBarState.isMicrophoneMuted,
             isSystemAudioEnabled: AppSettings.captureSystemAudio,
             isSystemAudioMuted: menuBarState.isSystemAudioMuted,
-            microphoneVolume: AppSettings.microphoneVolume,
+            // Phones that predate the boost draw a 0-100% slider, so they
+            // get the level capped there and newer ones read the gain.
+            microphoneVolume: min(AppSettings.microphoneVolume, 1.0),
             systemAudioVolume: AppSettings.systemAudioVolume,
+            microphoneGain: AppSettings.microphoneVolume,
+            microphoneGainMax: AppSettings.maximumMicrophoneVolume,
             perAppAudioEnabled: AppSettings.perAppAudioEnabled,
             isCameraOverlayEnabled: AppSettings.cameraOverlayEnabled,
             isCameraOverlayAvailable: AppSettings.isFeatureEnabled(.cameraOverlay),

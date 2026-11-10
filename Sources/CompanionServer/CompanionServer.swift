@@ -754,6 +754,8 @@ public final class CompanionServer: ObservableObject {
             isSystemAudioMuted: snapshot.isSystemAudioMuted,
             microphoneVolume: snapshot.microphoneVolume,
             systemAudioVolume: snapshot.systemAudioVolume,
+            microphoneGain: snapshot.microphoneGain,
+            microphoneGainMax: snapshot.microphoneGainMax,
             perAppAudioEnabled: snapshot.perAppAudioEnabled,
             isCameraOverlayEnabled: snapshot.isCameraOverlayEnabled,
             isCameraOverlayAvailable: snapshot.isCameraOverlayAvailable,
