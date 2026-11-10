@@ -234,6 +234,8 @@ public enum AppSettings {
         isFeatureEnabled(.audioMixing) ? Defaults[.mergeAudioTracks] : true
     }
     public static var playAudioCueOnSave: Bool { Defaults[.playAudioCueOnSave] }
+    /// When on, the menu bar shows a plain static icon instead of the red recording indicator and timer.
+    public static var staticMenuBarIcon: Bool { Defaults[.staticMenuBarIcon] }
     public static var showNotificationOnSave: Bool { Defaults[.showNotificationOnSave] }
     public static var showClipThumbnailAfterSave: Bool {
         isFeatureEnabled(.quickSaveAndThumbnail) && Defaults[.showClipThumbnailAfterSave]
@@ -872,6 +874,7 @@ public extension Defaults.Keys {
 
     static let captureHDR = Key<Bool>("captureHDR", default: false)
     static let showCursorInRecording = Key<Bool>("showCursorInRecording", default: true)
+    static let staticMenuBarIcon = Key<Bool>("staticMenuBarIcon", default: false)
     static let videoCodec = Key<String>("videoCodec", default: VideoCodec.hevc.rawValue)
     static let captureMode = Key<String>("captureMode", default: "single")
     static let captureDisplayID = Key<String>("captureDisplayID", default: "")

@@ -677,35 +677,40 @@ private struct StatusBadgeView: View {
                 Text("Failed")
                     .foregroundStyle(AppTheme.danger)
             case .idle:
-                if state.isSessionRecording {
-                    Circle()
-                        .fill(AppTheme.danger)
-                        .frame(width: 8, height: 8)
-                        .frame(width: 12, height: 12)
-                    Text("S \(state.formattedSessionDuration)")
-                        .foregroundStyle(AppTheme.textPrimary)
-                } else if state.isRecording {
-                    Circle()
-                        .fill(AppTheme.danger)
-                        .frame(width: 8, height: 8)
-                        .frame(width: 12, height: 12)
-                    Text(state.formattedRecordingDuration)
-                        .foregroundStyle(AppTheme.textPrimary)
-                } else {
+                if state.isStaticIconActive {
                     Image(systemName: "record.circle")
                         .foregroundStyle(AppTheme.accent)
-                }
+                } else {
+                    if state.isSessionRecording {
+                        Circle()
+                            .fill(AppTheme.danger)
+                            .frame(width: 8, height: 8)
+                            .frame(width: 12, height: 12)
+                        Text("S \(state.formattedSessionDuration)")
+                            .foregroundStyle(AppTheme.textPrimary)
+                    } else if state.isRecording {
+                        Circle()
+                            .fill(AppTheme.danger)
+                            .frame(width: 8, height: 8)
+                            .frame(width: 12, height: 12)
+                        Text(state.formattedRecordingDuration)
+                            .foregroundStyle(AppTheme.textPrimary)
+                    } else {
+                        Image(systemName: "record.circle")
+                            .foregroundStyle(AppTheme.accent)
+                    }
 
-                if state.isMicrophoneMuted {
-                    Image(systemName: "mic.slash.fill")
-                        .font(.system(size: 10, weight: .bold))
-                        .foregroundStyle(AppTheme.danger)
-                }
+                    if state.isMicrophoneMuted {
+                        Image(systemName: "mic.slash.fill")
+                            .font(.system(size: 10, weight: .bold))
+                            .foregroundStyle(AppTheme.danger)
+                    }
 
-                if state.isSystemAudioMuted {
-                    Image(systemName: "speaker.slash.fill")
-                        .font(.system(size: 10, weight: .bold))
-                        .foregroundStyle(AppTheme.danger)
+                    if state.isSystemAudioMuted {
+                        Image(systemName: "speaker.slash.fill")
+                            .font(.system(size: 10, weight: .bold))
+                            .foregroundStyle(AppTheme.danger)
+                    }
                 }
             }
         }
@@ -740,7 +745,7 @@ private struct StatusBadgeView: View {
         case .saving:
             return AppTheme.accent.opacity(0.12)
         case .idle:
-            if state.isSessionRecording || state.isRecording {
+            if !state.isStaticIconActive && (state.isSessionRecording || state.isRecording) {
                 return AppTheme.danger.opacity(0.12)
             }
             return AppTheme.accent.opacity(0.10)

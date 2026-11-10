@@ -187,6 +187,23 @@ final class MenuBarStateTests: XCTestCase {
         XCTAssertEqual(pastedURLs?.first?.standardizedFileURL, olderClip.standardizedFileURL)
     }
 
+    func testStaticMenuBarIconIsActiveOnlyWhenEnabledAndIdle() {
+        let previous = Defaults[.staticMenuBarIcon]
+        defer { Defaults[.staticMenuBarIcon] = previous }
+        let state = MenuBarState()
+
+        Defaults[.staticMenuBarIcon] = false
+        state.setRecording(true)
+        XCTAssertFalse(state.isStaticIconActive)
+
+        Defaults[.staticMenuBarIcon] = true
+        XCTAssertTrue(state.isStaticIconActive)
+
+        // Transient save feedback still replaces the static icon.
+        XCTAssertTrue(state.beginSaving())
+        XCTAssertFalse(state.isStaticIconActive)
+    }
+
     func testShowBufferNotRunningBrieflySetsStatusAndClearsOnStartRecording() {
         let state = MenuBarState()
         XCTAssertEqual(state.saveStatus, .idle)

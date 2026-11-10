@@ -40,6 +40,12 @@ public final class MenuBarState: ObservableObject {
         saveStatus == .saving
     }
 
+    /// When the static menu bar icon setting is on, the idle badge shows a
+    /// plain icon instead of the red recording indicator and timer.
+    public var isStaticIconActive: Bool {
+        AppSettings.staticMenuBarIcon && saveStatus == .idle
+    }
+
     public var saveStatusString: String {
         switch saveStatus {
         case .idle: return "idle"

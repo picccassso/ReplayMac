@@ -24,6 +24,13 @@ extension SettingsView {
             }
 
             Section {
+                Toggle("Static menu bar icon", isOn: $staticMenuBarIcon)
+                    .help("Show a simple icon in the menu bar at all times, without the red recording dot and counting timer.")
+            } header: {
+                Text("Menu Bar")
+            }
+
+            Section {
                 LabeledContent("Output directory") {
                     HStack(spacing: 10) {
                         Text(

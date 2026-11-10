@@ -17,6 +17,7 @@ public struct SettingsView: View {
 
     @Default(.captureHDR) var captureHDR
     @Default(.showCursorInRecording) var showCursorInRecording
+    @Default(.staticMenuBarIcon) var staticMenuBarIcon
     @Default(.videoCodec) var videoCodecRawValue
     @Default(.captureMode) var captureModeRawValue
     @Default(.captureDisplayID) var captureDisplayID
