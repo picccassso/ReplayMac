@@ -1,4 +1,4 @@
-import Darwin.Mach
+import Dispatch
 import Foundation
 import os
 
@@ -11,9 +11,11 @@ private let bufferMonitorLogger = Logger(subsystem: "com.replaycap", category: "
 @MainActor
 extension AppDelegate {
     func syncMemoryCapsToSettings() {
-        let dualMode = AppSettings.captureMode == CaptureMode.dualSideBySide.rawValue
+        // The pipeline's actual shape, not the setting: dual capture falls
+        // back to a single display when only one is connected.
         let caps = AppSettings.ringBufferMemoryCaps(
-            isDualMode: dualMode,
+            isDualMode: isDualMode,
+            isSeparateDualSave: AppSettings.dualCaptureSaveModeEnum == .separateFiles,
             captureSystemAudio: AppSettings.captureSystemAudio,
             captureMicrophone: AppSettings.captureMicrophone
         )
@@ -29,7 +31,13 @@ extension AppDelegate {
         // Retain the requested window plus headroom so GOP-granular eviction never
         // leaves the buffer short of a full "Save Last N Seconds" (see
         // AppSettings.ringBufferHeadroomSeconds).
-        let cap = AppSettings.ringBufferTimeCapSeconds
+        // Under critical memory pressure the window is held shorter than the
+        // setting until the pressure lifts (see MemoryPressurePolicy).
+        let replaySeconds = MemoryPressurePolicy.replaySeconds(
+            configured: AppSettings.bufferDurationSeconds,
+            level: memoryPressureLevel
+        )
+        let cap = TimeInterval(replaySeconds) + AppSettings.ringBufferHeadroomSeconds
         // Audio's share of the memory cap is sized from the window.
         syncMemoryCapsToSettings()
         videoRingBuffer.timeCap = cap
@@ -162,13 +170,6 @@ extension AppDelegate {
 
                 let totalRingMemory = videoMemory + dualDisplay1Memory + dualDisplay2Memory + audioMemory + micMemory
                 self.menuBarState.setBufferMemoryBytes(totalRingMemory)
-                self.enforceMemoryBudgets(
-                    totalRingMemory: totalRingMemory,
-                    dualDisplay1Memory: dualDisplay1Memory,
-                    dualDisplay2Memory: dualDisplay2Memory,
-                    systemAudioMemory: audioMemory,
-                    micAudioMemory: micMemory
-                )
 
                 let audioAge = captureStats.lastAudioSampleDate.map { String(format: "%.1fs ago", now.timeIntervalSince($0)) } ?? "never"
                 bufferMonitorLogger.debug("SCKCallbacks | Video: total=\(captureStats.videoSampleCount) | Audio: total=\(captureStats.audioSampleCount) invalid=\(captureStats.invalidAudioSampleCount) last=\(audioAge, privacy: .public)")
@@ -176,51 +177,65 @@ extension AppDelegate {
         }
     }
 
-    func enforceMemoryBudgets(
-        totalRingMemory: Int,
-        dualDisplay1Memory: Int,
-        dualDisplay2Memory: Int,
-        systemAudioMemory: Int,
-        micAudioMemory: Int
-    ) {
-        _ = totalRingMemory
-        _ = dualDisplay1Memory
-        _ = dualDisplay2Memory
-        _ = systemAudioMemory
-        _ = micAudioMemory
-
-        // Per-buffer memory caps are enforced inside each ring buffer via setMemoryCap().
-        // Keep this hook for system-wide memory pressure trimming only.
-
-        if let availableMemory = Self.estimatedAvailableMemoryBytes(),
-           availableMemory < 512 * 1024 * 1024 {
-            let reducedSeconds = max(10, AppSettings.bufferDurationSeconds / 2)
-            let evictedVideo = videoRingBuffer.trimToDuration(maxSeconds: TimeInterval(reducedSeconds))
-            let evictedDisplay1 = dualDisplay1VideoRingBuffer.trimToDuration(maxSeconds: TimeInterval(reducedSeconds))
-            let evictedDisplay2 = dualDisplay2VideoRingBuffer.trimToDuration(maxSeconds: TimeInterval(reducedSeconds))
-            let evictedSystem = systemAudioRingBuffer.trimToDuration(maxSeconds: TimeInterval(reducedSeconds))
-            let evictedMic = micAudioRingBuffer.trimToDuration(maxSeconds: TimeInterval(reducedSeconds))
-            bufferMonitorLogger.warning("Critical memory pressure (\(availableMemory / (1024 * 1024))MB avail). Shrunk buffers to \(reducedSeconds)s; evicted video=\(evictedVideo)B display1=\(evictedDisplay1)B display2=\(evictedDisplay2)B systemAudio=\(evictedSystem)B mic=\(evictedMic)B")
-        }
-    }
-
-    static func estimatedAvailableMemoryBytes() -> UInt64? {
-        let physical = ProcessInfo.processInfo.physicalMemory
-
-        var info = mach_task_basic_info()
-        var count = mach_msg_type_number_t(MemoryLayout<mach_task_basic_info_data_t>.size / MemoryLayout<integer_t>.size)
-
-        let result: kern_return_t = withUnsafeMutablePointer(to: &info) { pointer in
-            pointer.withMemoryRebound(to: integer_t.self, capacity: Int(count)) { rebound in
-                task_info(mach_task_self_, task_flavor_t(MACH_TASK_BASIC_INFO), rebound, &count)
+    /// Listens for system-wide memory pressure for the life of the app.
+    ///
+    /// Each ring buffer enforces its own share of the memory cap; this covers
+    /// the case the cap cannot see, where the rest of the system has run out.
+    /// macOS reports that directly. (An earlier check compared physical memory
+    /// with this process's own footprint, which only ever read as low once the
+    /// app itself held nearly all the RAM in the machine.)
+    func setupMemoryPressureObserver() {
+        let source = DispatchSource.makeMemoryPressureSource(
+            eventMask: [.normal, .warning, .critical],
+            queue: .main
+        )
+        source.setEventHandler { [weak self] in
+            MainActor.assumeIsolated {
+                guard let self, let source = self.memoryPressureSource else { return }
+                let event = source.data
+                let level: MemoryPressureLevel
+                if event.contains(.critical) {
+                    level = .critical
+                } else if event.contains(.warning) {
+                    level = .warning
+                } else {
+                    level = .normal
+                }
+                self.handleMemoryPressure(level)
             }
         }
+        memoryPressureSource = source
+        source.resume()
+    }
 
-        guard result == KERN_SUCCESS else {
-            return nil
+    func handleMemoryPressure(_ level: MemoryPressureLevel) {
+        guard level != memoryPressureLevel else { return }
+        let previous = memoryPressureLevel
+        memoryPressureLevel = level
+
+        let configured = AppSettings.bufferDurationSeconds
+        let before = MemoryPressurePolicy.replaySeconds(configured: configured, level: previous)
+        let after = MemoryPressurePolicy.replaySeconds(configured: configured, level: level)
+        guard before != after else { return }
+
+        let heldBefore = videoRingBuffer.currentMemoryBytes
+            + dualDisplay1VideoRingBuffer.currentMemoryBytes
+            + dualDisplay2VideoRingBuffer.currentMemoryBytes
+            + systemAudioRingBuffer.currentMemoryBytes
+            + micAudioRingBuffer.currentMemoryBytes
+        // Applies the shorter (or restored) window and trims to it right away.
+        syncBufferDurationToSettings()
+        let heldAfter = videoRingBuffer.currentMemoryBytes
+            + dualDisplay1VideoRingBuffer.currentMemoryBytes
+            + dualDisplay2VideoRingBuffer.currentMemoryBytes
+            + systemAudioRingBuffer.currentMemoryBytes
+            + micAudioRingBuffer.currentMemoryBytes
+
+        if level == .critical {
+            let freedMB = max(0, heldBefore - heldAfter) / (1024 * 1024)
+            bufferMonitorLogger.warning("Critical memory pressure: replay buffer held to \(after, privacy: .public)s (from \(configured, privacy: .public)s), freed \(freedMB, privacy: .public)MB")
+        } else {
+            bufferMonitorLogger.info("Memory pressure eased: replay buffer back to \(after, privacy: .public)s")
         }
-
-        let used = UInt64(info.resident_size)
-        return physical > used ? physical - used : 0
     }
 }

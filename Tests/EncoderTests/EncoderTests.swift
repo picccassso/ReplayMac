@@ -253,6 +253,47 @@ final class EncoderTests: XCTestCase {
         CMTime(value: 1_000_000 + Int64(ms), timescale: 1_000)
     }
 
+    /// The compositor hands the encoder 8-bit 4:2:0 full-range canvases tagged
+    /// BT.709 (the same layout the screen is captured in). Both codecs have to
+    /// take them as they are and still write BT.709 into the stream.
+    func testEncodesBT709TaggedFullRange420Frames() throws {
+        for codec in [VideoCodec.hevc, .h264] {
+            let encoder = VideoEncoder(idleRefreshEnabled: false)
+            let outputs = Mutex<[(matrix: String?, primaries: String?, fullRange: Bool?)]>([])
+            let delivered = expectation(description: "\(codec) frames delivered")
+            delivered.assertForOverFulfill = false
+            encoder.outputHandler = { sample in
+                let extensions = sample.formatDescription
+                    .flatMap { CMFormatDescriptionGetExtensions($0) as? [CFString: Any] } ?? [:]
+                let tags = (
+                    matrix: extensions[kCMFormatDescriptionExtension_YCbCrMatrix] as? String,
+                    primaries: extensions[kCMFormatDescriptionExtension_ColorPrimaries] as? String,
+                    fullRange: extensions[kCMFormatDescriptionExtension_FullRangeVideo] as? Bool
+                )
+                let count = outputs.withLock { $0.append(tags); return $0.count }
+                if count >= 5 { delivered.fulfill() }
+            }
+            try encoder.start(width: 320, height: 180, fps: 30, codec: codec, bitrate: 2_000_000)
+
+            for index in 0..<10 {
+                encoder.encode(sampleBuffer: try makeFrame(
+                    width: 320,
+                    height: 180,
+                    presentationTime: Self.time(ms: 1_000 + index * 33),
+                    pixelFormat: kCVPixelFormatType_420YpCbCr8BiPlanarFullRange,
+                    taggedBT709: true
+                ))
+            }
+            wait(for: [delivered], timeout: 10)
+            encoder.stop()
+
+            let tags = try XCTUnwrap(outputs.withLock { $0.first })
+            XCTAssertEqual(tags.matrix, kCMFormatDescriptionYCbCrMatrix_ITU_R_709_2 as String)
+            XCTAssertEqual(tags.primaries, kCMFormatDescriptionColorPrimaries_ITU_R_709_2 as String)
+            XCTAssertEqual(tags.fullRange, true)
+        }
+    }
+
     private static func isKeyframe(_ sample: CMSampleBuffer) -> Bool {
         guard let attachments = CMSampleBufferGetSampleAttachmentsArray(sample, createIfNecessary: false) as? [[CFString: Any]],
               let first = attachments.first else {
@@ -261,14 +302,25 @@ final class EncoderTests: XCTestCase {
         return !((first[kCMSampleAttachmentKey_NotSync] as? Bool) ?? false)
     }
 
-    private func makeFrame(width: Int, height: Int, presentationTime: CMTime) throws -> CMSampleBuffer {
+    private func makeFrame(
+        width: Int,
+        height: Int,
+        presentationTime: CMTime,
+        pixelFormat: OSType = kCVPixelFormatType_32BGRA,
+        taggedBT709: Bool = false
+    ) throws -> CMSampleBuffer {
         var pixelBuffer: CVPixelBuffer?
         let attributes: [String: Any] = [kCVPixelBufferIOSurfacePropertiesKey as String: [:]]
         XCTAssertEqual(
-            CVPixelBufferCreate(kCFAllocatorDefault, width, height, kCVPixelFormatType_32BGRA, attributes as CFDictionary, &pixelBuffer),
+            CVPixelBufferCreate(kCFAllocatorDefault, width, height, pixelFormat, attributes as CFDictionary, &pixelBuffer),
             kCVReturnSuccess
         )
         let imageBuffer = try XCTUnwrap(pixelBuffer)
+        if taggedBT709 {
+            CVBufferSetAttachment(imageBuffer, kCVImageBufferYCbCrMatrixKey, kCVImageBufferYCbCrMatrix_ITU_R_709_2, .shouldPropagate)
+            CVBufferSetAttachment(imageBuffer, kCVImageBufferColorPrimariesKey, kCVImageBufferColorPrimaries_ITU_R_709_2, .shouldPropagate)
+            CVBufferSetAttachment(imageBuffer, kCVImageBufferTransferFunctionKey, kCVImageBufferTransferFunction_ITU_R_709_2, .shouldPropagate)
+        }
 
         var formatDescription: CMVideoFormatDescription?
         CMVideoFormatDescriptionCreateForImageBuffer(

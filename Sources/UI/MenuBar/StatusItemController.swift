@@ -29,6 +29,7 @@ public final class StatusItemController: NSObject, NSMenuDelegate {
     private var updateItem: NSMenuItem?
 
     private var lastClipURL: URL?
+    private var isMenuOpen = false
 
     public var onSaveClip: (() -> Void)?
     public var onSaveLongBuffer: (() -> Void)?
@@ -58,8 +59,16 @@ public final class StatusItemController: NSObject, NSMenuDelegate {
         refreshPresentation()
     }
 
+    /// Brings the status item in line with the current state. Capture calls
+    /// this every second, so the menu's items are only rebuilt while the menu
+    /// is open: `menuWillOpen` refreshes them before they are ever seen, and
+    /// rebuilding them behind a closed menu (the running-apps list and its
+    /// icons included) was main-thread work nobody could see.
     public func refreshPresentation() {
-        refreshMenuItems()
+        state.setCameraOverlayEnabled(AppSettings.cameraOverlayEnabled)
+        if isMenuOpen {
+            refreshMenuItems()
+        }
         updateTooltip()
     }
 
@@ -291,7 +300,14 @@ public final class StatusItemController: NSObject, NSMenuDelegate {
     }
 
     public func menuWillOpen(_ menu: NSMenu) {
+        guard menu === statusItem?.menu else { return }
+        isMenuOpen = true
         refreshPresentation()
+    }
+
+    public func menuDidClose(_ menu: NSMenu) {
+        guard menu === statusItem?.menu else { return }
+        isMenuOpen = false
     }
 
     private func refreshMenuItems() {

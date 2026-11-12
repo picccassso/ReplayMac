@@ -3,8 +3,8 @@ import Foundation
 import Synchronization
 
 /// Passthrough audio handler.
-/// SCK outputs raw PCM float32. We store it directly in the ring buffer
-/// and let AVAssetWriterInput handle AAC encoding during save.
+/// SCK outputs raw PCM float32. It goes to the ring buffer as PCM (held
+/// there as 16-bit) and AVAssetWriterInput handles AAC encoding during save.
 public final class AudioEncoder: Sendable {
     public typealias OutputHandler = @Sendable (CMSampleBuffer) -> Void
 

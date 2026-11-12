@@ -1,6 +1,7 @@
 import Foundation
 @preconcurrency import AVFoundation
 @preconcurrency import CoreMedia
+import Synchronization
 import os.log
 
 public enum LongBufferRecorderError: LocalizedError, Equatable {
@@ -119,7 +120,21 @@ public actor LongBufferRecorder {
     /// the wait is normally a single frame. This bound only exists so a stream
     /// that stops producing keyframes records something rather than nothing.
     private let keyframeWaitSeconds: Double = 3
-    private var isEnabled = false
+    private var isEnabled = false {
+        didSet {
+            let enabled = isEnabled
+            acceptsSamplesFlag.withLock { $0 = enabled }
+        }
+    }
+    /// `isEnabled`, readable without hopping onto the actor.
+    private let acceptsSamplesFlag = Mutex(false)
+
+    /// Whether appended samples are recorded at all. Capture threads check
+    /// this before queueing a sample, so a recorder that is switched off
+    /// costs nothing per frame.
+    public nonisolated var acceptsSamples: Bool {
+        acceptsSamplesFlag.withLock { $0 }
+    }
     private var maxDurationSeconds: Double = 300
     private var storageConfig: LongBufferStorageConfig = .longBuffer
     private var outputDirectory: URL?

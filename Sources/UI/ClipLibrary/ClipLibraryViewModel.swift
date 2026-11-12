@@ -73,8 +73,25 @@ final class ClipLibraryViewModel: ObservableObject {
     private var loadedDirectory: URL?
     private let outputDirectory: () -> URL?
 
-    init(outputDirectory: @escaping () -> URL? = { AppSettings.outputDirectoryURL }) {
+    /// How long the window may stay hidden before its thumbnails are dropped,
+    /// so closing and reopening it in passing does not regenerate them.
+    static let defaultThumbnailReleaseDelay: Duration = .seconds(30)
+
+    private let thumbnailReleaseDelay: Duration
+    private var thumbnailReleaseTask: Task<Void, Never>?
+
+    /// False once the window has been hidden long enough for its thumbnails
+    /// to be released. Each one is a decoded bitmap of close to a megabyte and
+    /// there is one per clip in the folder, which adds up to hundreds of
+    /// megabytes held for a window nobody is looking at while a game runs.
+    private(set) var keepsThumbnails = true
+
+    init(
+        outputDirectory: @escaping () -> URL? = { AppSettings.outputDirectoryURL },
+        thumbnailReleaseDelay: Duration = ClipLibraryViewModel.defaultThumbnailReleaseDelay
+    ) {
         self.outputDirectory = outputDirectory
+        self.thumbnailReleaseDelay = thumbnailReleaseDelay
     }
     private var metadataByPath: [String: ClipUserMetadata] = [:]
 
@@ -84,8 +101,43 @@ final class ClipLibraryViewModel: ObservableObject {
     private struct CachedClip {
         let info: ClipInfo
         let thumbnail: NSImage?
+        /// False for an entry whose thumbnail was never generated or has been
+        /// released; a failed generation still counts as loaded, so a clip
+        /// with no decodable frame is not retried on every reload.
+        let thumbnailLoaded: Bool
     }
     private var clipCache: [String: CachedClip] = [:]
+
+    /// Tells the library whether its window is on screen. Hiding it releases
+    /// the thumbnails after `thumbnailReleaseDelay`; showing it again brings
+    /// them back. Clip details (duration, size, tags) stay loaded throughout.
+    func setWindowVisible(_ visible: Bool) {
+        thumbnailReleaseTask?.cancel()
+        thumbnailReleaseTask = nil
+
+        if visible {
+            guard !keepsThumbnails else { return }
+            keepsThumbnails = true
+            Task { await reload() }
+            return
+        }
+
+        guard keepsThumbnails else { return }
+        let delay = thumbnailReleaseDelay
+        thumbnailReleaseTask = Task { [weak self] in
+            try? await Task.sleep(for: delay)
+            guard !Task.isCancelled else { return }
+            self?.releaseThumbnails()
+        }
+    }
+
+    private func releaseThumbnails() {
+        thumbnailReleaseTask = nil
+        keepsThumbnails = false
+        clipCache = clipCache.mapValues { CachedClip(info: $0.info, thumbnail: nil, thumbnailLoaded: false) }
+        guard rows.contains(where: { $0.thumbnail != nil }) else { return }
+        rows = rows.map { ClipRow(info: $0.info, thumbnail: nil, userMetadata: $0.userMetadata) }
+    }
 
     func reload() async {
         let generation = UUID()
@@ -111,7 +163,13 @@ final class ClipLibraryViewModel: ObservableObject {
         metadataByPath = ClipLibraryMetadataStore.load(in: outputDirectory)
 
         let cache = clipCache
-        let misses = base.filter { cache[Self.cacheKey(for: $0)] == nil }
+        // While the window is hidden only clip details are loaded; thumbnails
+        // wait until it is shown again.
+        let wantsThumbnails = keepsThumbnails
+        let misses = base.filter { info in
+            guard let cached = cache[Self.cacheKey(for: info)] else { return true }
+            return wantsThumbnails && !cached.thumbnailLoaded
+        }
 
         // Enrich + generate pre-decoded thumbnails for new/changed clips in parallel.
         let computed: [(key: String, info: ClipInfo, thumbnail: PredecodedThumbnailBox)] = await withTaskGroup(
@@ -119,9 +177,19 @@ final class ClipLibraryViewModel: ObservableObject {
         ) { group in
             for info in misses {
                 let key = Self.cacheKey(for: info)
+                // Details already read for this file are reused; only the
+                // thumbnail is missing.
+                let knownInfo = cache[key]?.info
                 group.addTask {
-                    let enriched = await ClipMetadata.enrichClipInfo(info)
-                    let thumbnail = await Self.predecodedThumbnail(for: enriched.fileURL)
+                    let enriched: ClipInfo
+                    if let knownInfo {
+                        enriched = knownInfo
+                    } else {
+                        enriched = await ClipMetadata.enrichClipInfo(info)
+                    }
+                    let thumbnail = wantsThumbnails
+                        ? await Self.predecodedThumbnail(for: enriched.fileURL)
+                        : PredecodedThumbnailBox(image: nil)
                     return (key: key, info: enriched, thumbnail: thumbnail)
                 }
             }
@@ -136,19 +204,25 @@ final class ClipLibraryViewModel: ObservableObject {
         if Task.isCancelled || reloadGeneration != generation || self.outputDirectory() != scannedDirectory { return }
 
         // Rebuild the cache to current files only (reusing hits, prunes stale).
+        // Hits come from the live cache, not the snapshot taken before the
+        // wait: thumbnails released in the meantime must stay released.
+        let storesThumbnails = wantsThumbnails && keepsThumbnails
         var refreshedCache: [String: CachedClip] = [:]
         for info in base {
             let key = Self.cacheKey(for: info)
-            if let hit = cache[key] {
+            if let hit = clipCache[key] {
                 refreshedCache[key] = hit
             }
         }
         for entry in computed {
             refreshedCache[entry.key] = CachedClip(
                 info: entry.info,
-                thumbnail: entry.thumbnail.image.map {
-                    NSImage(cgImage: $0, size: NSSize(width: $0.width, height: $0.height))
-                }
+                thumbnail: storesThumbnails
+                    ? entry.thumbnail.image.map {
+                        NSImage(cgImage: $0, size: NSSize(width: $0.width, height: $0.height))
+                    }
+                    : nil,
+                thumbnailLoaded: storesThumbnails
             )
         }
         clipCache = refreshedCache

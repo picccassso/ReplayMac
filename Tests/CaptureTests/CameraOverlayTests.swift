@@ -69,16 +69,32 @@ final class CameraOverlayTests: XCTestCase {
         return try XCTUnwrap(sampleBuffer)
     }
 
-    /// Reads one BGRA pixel from a 32BGRA buffer. `row` counts from the top of
-    /// the image (buffer row 0), while layout rects use the bottom-left
+    /// Reads one pixel of a composited canvas as BGRA. The canvas is 8-bit
+    /// 4:2:0 full range tagged BT.709, so the pixel is converted back to RGB
+    /// with that matrix; a canvas written with any other matrix (or a
+    /// different range) reads back as the wrong colour. `row` counts from the
+    /// top of the image (buffer row 0), while layout rects use the bottom-left
     /// CoreGraphics origin — convert with `row = canvasHeight - ciY`.
     private func pixelAt(_ buffer: CVPixelBuffer, col: Int, row: Int) -> (b: Int, g: Int, r: Int, a: Int)? {
-        guard CVPixelBufferLockBaseAddress(buffer, .readOnly) == kCVReturnSuccess else { return nil }
+        guard CVPixelBufferGetPixelFormatType(buffer) == FrameCompositor.canvasPixelFormat,
+              CVPixelBufferLockBaseAddress(buffer, .readOnly) == kCVReturnSuccess else { return nil }
         defer { CVPixelBufferUnlockBaseAddress(buffer, .readOnly) }
-        guard let base = CVPixelBufferGetBaseAddress(buffer) else { return nil }
-        let bytesPerRow = CVPixelBufferGetBytesPerRow(buffer)
-        let ptr = base.advanced(by: row * bytesPerRow + col * 4).assumingMemoryBound(to: UInt8.self)
-        return (Int(ptr[0]), Int(ptr[1]), Int(ptr[2]), Int(ptr[3]))
+        guard let lumaBase = CVPixelBufferGetBaseAddressOfPlane(buffer, 0),
+              let chromaBase = CVPixelBufferGetBaseAddressOfPlane(buffer, 1) else { return nil }
+        let luma = lumaBase.advanced(by: row * CVPixelBufferGetBytesPerRowOfPlane(buffer, 0) + col)
+            .assumingMemoryBound(to: UInt8.self)
+        let chroma = chromaBase.advanced(by: (row / 2) * CVPixelBufferGetBytesPerRowOfPlane(buffer, 1) + (col / 2) * 2)
+            .assumingMemoryBound(to: UInt8.self)
+        let y = Double(luma[0])
+        let cb = Double(chroma[0]) - 128
+        let cr = Double(chroma[1]) - 128
+        func clamped(_ value: Double) -> Int { Int(min(255, max(0, value.rounded()))) }
+        return (
+            b: clamped(y + 1.8556 * cb),
+            g: clamped(y - 0.1873 * cb - 0.4681 * cr),
+            r: clamped(y + 1.5748 * cr),
+            a: 255
+        )
     }
 
     /// Pixel at the center of a layout rect, converting the bottom-left rect
@@ -266,7 +282,7 @@ final class CameraOverlayTests: XCTestCase {
             let pixelBuffer = try XCTUnwrap(CMSampleBufferGetImageBuffer(buffer))
             XCTAssertEqual(CVPixelBufferGetWidth(pixelBuffer), 64)
             XCTAssertEqual(CVPixelBufferGetHeight(pixelBuffer), 36)
-            XCTAssertEqual(CVPixelBufferGetPixelFormatType(pixelBuffer), kCVPixelFormatType_32BGRA)
+            XCTAssertEqual(CVPixelBufferGetPixelFormatType(pixelBuffer), FrameCompositor.canvasPixelFormat)
             // Cadence: one output per pushed frame, PTS tracks the input PTS.
             let pts = CMSampleBufferGetPresentationTimeStamp(buffer)
             XCTAssertEqual(pts.seconds, 1 + Double(index) / 60, accuracy: 1e-3)
@@ -569,6 +585,76 @@ final class CameraOverlayTests: XCTestCase {
         compositor.pushPrimaryFrame(try makeSolidFrame(width: 64, height: 36, bgra: (255, 0, 0, 255), seconds: 1 + 4.0 / 60))
         XCTAssertEqual(output.count, 5)
         assertPixel(centerPixel(4), is: (0, 0, 255, 255))
+    }
+
+    // MARK: - Canvas format and lifetime
+
+    /// The canvas goes to the encoder as it is, so the colours Core Image
+    /// writes into it have to be the BT.709 full-range values the file is
+    /// tagged with. Every primary plus white and mid grey has to survive the
+    /// trip through the compositor.
+    func testCanvasKeepsColoursThroughYCbCr() throws {
+        let colours: [(UInt8, UInt8, UInt8, UInt8)] = [
+            (0, 0, 255, 255), (0, 255, 0, 255), (255, 0, 0, 255),
+            (255, 255, 255, 255), (128, 128, 128, 255), (0, 0, 0, 255),
+            (40, 160, 220, 255)
+        ]
+        for (index, colour) in colours.enumerated() {
+            let compositor = FrameCompositor()
+            compositor.configureSingleDisplay(width: 64, height: 36, fps: 60)
+            let output = OutputRecorder()
+            compositor.outputHandler = { output.record($0) }
+
+            compositor.pushPrimaryFrame(try makeSolidFrame(width: 64, height: 36, bgra: colour, seconds: 1))
+
+            let pixelBuffer = try XCTUnwrap(output.buffers.first.flatMap(CMSampleBufferGetImageBuffer))
+            XCTAssertEqual(CVPixelBufferGetPixelFormatType(pixelBuffer), FrameCompositor.canvasPixelFormat)
+            let pixel = try XCTUnwrap(pixelAt(pixelBuffer, col: 32, row: 18), "colour \(index)")
+            XCTAssertEqual(pixel.b, Int(colour.0), accuracy: 4, "blue of colour \(index)")
+            XCTAssertEqual(pixel.g, Int(colour.1), accuracy: 4, "green of colour \(index)")
+            XCTAssertEqual(pixel.r, Int(colour.2), accuracy: 4, "red of colour \(index)")
+        }
+    }
+
+    /// Side-by-side without an overlay is drawn in one pass: each display in
+    /// its own half, black where the shorter one leaves the canvas uncovered.
+    func testDualModeDrawsEachDisplayInItsHalf() throws {
+        let compositor = FrameCompositor()
+        compositor.configure(display1Width: 64, display1Height: 36, display2Width: 48, display2Height: 20, fps: 60)
+        let output = OutputRecorder()
+        compositor.outputHandler = { output.record($0) }
+
+        compositor.pushPrimaryFrame(try makeSolidFrame(width: 64, height: 36, bgra: (255, 0, 0, 255), seconds: 1))
+        compositor.pushSecondaryFrame(try makeSolidFrame(width: 48, height: 20, bgra: (0, 255, 0, 255), seconds: 1))
+
+        let pixelBuffer = try XCTUnwrap(output.buffers.last.flatMap(CMSampleBufferGetImageBuffer))
+        XCTAssertEqual(CVPixelBufferGetWidth(pixelBuffer), 112)
+        XCTAssertEqual(CVPixelBufferGetHeight(pixelBuffer), 36)
+        assertPixel(pixelAt(pixelBuffer, col: 30, row: 18), is: (255, 0, 0, 255))
+        assertPixel(pixelAt(pixelBuffer, col: 88, row: 18), is: (0, 255, 0, 255))
+        // The second display is 20 tall, centred, so rows 0–7 beside it are black.
+        assertPixel(pixelAt(pixelBuffer, col: 88, row: 2), is: (0, 0, 0, 255))
+    }
+
+    /// Stopping capture gives the canvas pool back; nothing is emitted until
+    /// the compositor is configured again, and then it works as before.
+    func testReleaseResourcesStopsOutputUntilReconfigured() throws {
+        let compositor = FrameCompositor()
+        compositor.configureSingleDisplay(width: 64, height: 36, fps: 60)
+        let output = OutputRecorder()
+        compositor.outputHandler = { output.record($0) }
+
+        compositor.pushPrimaryFrame(try makeSolidFrame(width: 64, height: 36, bgra: (255, 0, 0, 255), seconds: 1))
+        XCTAssertEqual(output.count, 1)
+
+        compositor.reset()
+        compositor.releaseResources()
+        compositor.pushPrimaryFrame(try makeSolidFrame(width: 64, height: 36, bgra: (255, 0, 0, 255), seconds: 2))
+        XCTAssertEqual(output.count, 1)
+
+        compositor.configureSingleDisplay(width: 64, height: 36, fps: 60)
+        compositor.pushPrimaryFrame(try makeSolidFrame(width: 64, height: 36, bgra: (255, 0, 0, 255), seconds: 3))
+        XCTAssertEqual(output.count, 2)
     }
 
     // MARK: - Concurrency hammer (run under --sanitize=thread)

@@ -562,6 +562,61 @@ final class LongBufferRecorderTests: XCTestCase {
         XCTAssertTrue(FileManager.default.fileExists(atPath: similarlyNamedDirectory.path))
     }
 
+    /// Capture threads read this to decide whether a sample is worth queueing,
+    /// so it has to follow the recorder being switched on and off.
+    func testRecorderOnlyAcceptsSamplesWhileEnabled() async throws {
+        let outputDirectory = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: outputDirectory) }
+
+        let recorder = makeFileBackedRecorder { _, _, outputDirectory, _, _, _ in
+            let url = outputDirectory.appendingPathComponent("out.mp4")
+            try Data("out".utf8).write(to: url)
+            return url
+        }
+        XCTAssertFalse(recorder.acceptsSamples)
+
+        await recorder.configure(enabled: true, maxDurationSeconds: 300, outputDirectory: outputDirectory)
+        XCTAssertTrue(recorder.acceptsSamples)
+
+        await recorder.configure(enabled: false, maxDurationSeconds: 300, outputDirectory: outputDirectory)
+        XCTAssertFalse(recorder.acceptsSamples)
+
+        // A session save ends ingest on its own, without a reconfigure.
+        await recorder.configure(enabled: true, maxDurationSeconds: .infinity, outputDirectory: outputDirectory, storage: .session)
+        await recorder.appendVideo(try makeVideoSample(pts: 1))
+        _ = try await recorder.saveEntireRecording(outputDirectory: outputDirectory)
+        XCTAssertFalse(recorder.acceptsSamples)
+    }
+
+    /// The pump drops samples up front while every recorder is off, and must
+    /// still deliver them the moment one is switched on.
+    func testPumpFeedsARecorderOnlyOnceItIsSwitchedOn() async throws {
+        let outputDirectory = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: outputDirectory) }
+
+        let recorder = makeFileBackedRecorder { _, _, _, _, _, _ in throw TestError.simulatedExportFailure }
+        let idleRecorder = makeFileBackedRecorder { _, _, _, _, _, _ in throw TestError.simulatedExportFailure }
+        let pump = LongBufferAppendPump(recorders: [recorder, idleRecorder])
+
+        pump.enqueueVideo(try makeVideoSample(pts: 1))
+        XCTAssertEqual(pump.snapshot().pendingSamples, 0)
+        XCTAssertTrue(try segmentFiles(in: outputDirectory).isEmpty)
+
+        await recorder.configure(enabled: true, maxDurationSeconds: 300, outputDirectory: outputDirectory)
+        pump.enqueueVideo(try makeVideoSample(pts: 2))
+
+        // The pump hands samples to the recorder asynchronously.
+        var segments: [URL] = []
+        for _ in 0..<500 where segments.isEmpty {
+            try await Task.sleep(for: .milliseconds(10))
+            segments = try segmentFiles(in: outputDirectory)
+        }
+        XCTAssertEqual(segments.count, 1, "The enabled recorder should have opened a segment for the queued frame")
+        await recorder.stop(deleteSegments: true)
+    }
+
     private func makeFileBackedRecorder(
         clipExporter: @escaping LongBufferRecorder.ClipExporter
     ) -> LongBufferRecorder {

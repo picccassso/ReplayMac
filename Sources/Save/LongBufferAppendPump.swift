@@ -61,7 +61,12 @@ public final class LongBufferAppendPump: @unchecked Sendable {
         }
     }
 
+    /// Samples are only queued while a recorder is switched on. Extended
+    /// replay and session recording are both off by default, and every
+    /// encoded frame and audio buffer used to be queued, handed to a task and
+    /// passed to each recorder just to be dropped there.
     private func enqueue(_ sample: PendingSample) {
+        guard recorders.contains(where: \.acceptsSamples) else { return }
         queue.async { [weak self] in
             guard let self else { return }
             if self.pendingSamples.count >= self.maxPendingSamples {

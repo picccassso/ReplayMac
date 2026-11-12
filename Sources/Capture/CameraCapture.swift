@@ -37,7 +37,7 @@ public struct CameraDeviceInfo: Sendable, Identifiable, Hashable {
 }
 
 /// Captures webcam video via `AVCaptureSession` + `AVCaptureVideoDataOutput` and
-/// hands raw `CMSampleBuffer`s (32BGRA, matching the compositor canvas) to a
+/// hands raw `CMSampleBuffer`s (32BGRA, which the compositor draws from) to a
 /// frame handler.
 ///
 /// Patterned on `MicCapture`: all mutable state sits behind `lock`, all session
@@ -287,7 +287,7 @@ public final class CameraCapture: @unchecked Sendable {
         session.addInput(input)
 
         let output = AVCaptureVideoDataOutput()
-        // 32BGRA matches the compositor canvas pixel format.
+        // 32BGRA: the compositor reads camera frames through Core Image.
         output.videoSettings = [kCVPixelBufferPixelFormatTypeKey as String: kCVPixelFormatType_32BGRA]
         // Drop late frames instead of queueing them: the overlay only ever
         // needs the newest frame.

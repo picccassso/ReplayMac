@@ -152,7 +152,7 @@ public final class FrameCompositor: @unchecked Sendable {
 
     /// Single-display mode: the canvas is exactly `width` x `height` and every
     /// primary screen frame is composited full-canvas (with the camera overlay
-    /// on top when one is set). Uses the same 32BGRA pool as `configure(...)`.
+    /// on top when one is set). Uses the same canvas pool as `configure(...)`.
     public func configureSingleDisplay(width: Int, height: Int, fps: Int) {
         lock.lock()
         defer { lock.unlock() }
@@ -167,18 +167,28 @@ public final class FrameCompositor: @unchecked Sendable {
         lastEmitWasCameraRefresh = false
     }
 
-    /// Shared 32BGRA pool creation (IOSurface + Metal compatible, min 8
-    /// buffers) used by both dual and single-display modes.
+    /// The canvas format: the same 8-bit 4:2:0 the screen is captured in.
+    /// It is what the hardware encoder takes directly, and at 1.5 bytes a
+    /// pixel a canvas is well under half the size of the 32BGRA one used
+    /// before, which the encoder also had to convert back to 4:2:0 itself.
+    static let canvasPixelFormat = kCVPixelFormatType_420YpCbCr8BiPlanarFullRange
+
+    /// Canvases kept warm between frames. A frame is in use by the encoder,
+    /// held as its last frame for still-screen repeats, and being drawn, so
+    /// four covers the steady state; the pool still grows past it if needed.
+    private static let minimumPooledCanvases = 4
+
+    /// Shared canvas pool creation (IOSurface + Metal compatible) used by
+    /// both dual and single-display modes.
     private static func makePixelBufferPool(width: Int, height: Int) -> CVPixelBufferPool? {
         var pool: CVPixelBufferPool?
-        let pixelFormat = kCVPixelFormatType_32BGRA
 
         let poolAttrs: [String: Any] = [
-            kCVPixelBufferPoolMinimumBufferCountKey as String: 8
+            kCVPixelBufferPoolMinimumBufferCountKey as String: minimumPooledCanvases
         ]
 
         let bufferAttrs: [String: Any] = [
-            kCVPixelBufferPixelFormatTypeKey as String: pixelFormat,
+            kCVPixelBufferPixelFormatTypeKey as String: canvasPixelFormat,
             kCVPixelBufferWidthKey as String: width,
             kCVPixelBufferHeightKey as String: height,
             kCVPixelBufferBytesPerRowAlignmentKey as String: 64,
@@ -193,6 +203,22 @@ public final class FrameCompositor: @unchecked Sendable {
             &pool
         )
         return pool
+    }
+
+    /// Takes a canvas from the pool, tagged BT.709. Core Image reads the
+    /// matrix tag to turn its RGB into YCbCr, and an untagged buffer would
+    /// leave that choice to a default; the tags match what the encoder writes
+    /// into the file, so it encodes the canvas as it is.
+    private static func makeCanvas(from pool: CVPixelBufferPool) -> CVPixelBuffer? {
+        var canvas: CVPixelBuffer?
+        guard CVPixelBufferPoolCreatePixelBuffer(kCFAllocatorDefault, pool, &canvas) == kCVReturnSuccess,
+              let canvas else {
+            return nil
+        }
+        CVBufferSetAttachment(canvas, kCVImageBufferYCbCrMatrixKey, kCVImageBufferYCbCrMatrix_ITU_R_709_2, .shouldPropagate)
+        CVBufferSetAttachment(canvas, kCVImageBufferColorPrimariesKey, kCVImageBufferColorPrimaries_ITU_R_709_2, .shouldPropagate)
+        CVBufferSetAttachment(canvas, kCVImageBufferTransferFunctionKey, kCVImageBufferTransferFunction_ITU_R_709_2, .shouldPropagate)
+        return canvas
     }
 
     /// Sets (or clears, with nil) the camera overlay layout. Cached mask/border
@@ -453,32 +479,26 @@ public final class FrameCompositor: @unchecked Sendable {
         canvas: Canvas,
         overlayAssets: OverlayAssets? = nil
     ) -> CMSampleBuffer? {
-        var outputPixelBuffer: CVPixelBuffer?
-        let status = CVPixelBufferPoolCreatePixelBuffer(kCFAllocatorDefault, pool, &outputPixelBuffer)
-        guard status == kCVReturnSuccess, let outBuffer = outputPixelBuffer else { return nil }
+        guard let outBuffer = Self.makeCanvas(from: pool) else { return nil }
 
-        if let overlayAssets {
-            // With an overlay the whole scene is composed in the image graph
-            // (source-over) and rendered in one full-canvas pass — a separate
-            // bounded render of the masked camera would replace (not blend
-            // over) its region and punch transparent holes into the canvas.
-            let bounds = CGRect(x: 0, y: 0, width: CGFloat(canvas.width), height: CGFloat(canvas.height))
-            var scene = CIImage(color: .black).cropped(to: bounds)
-            scene = displaySceneImage(primary, atX: 0, canvas: canvas).applyingFilter(
-                "CISourceOverCompositing", parameters: [kCIInputBackgroundImageKey: scene]
-            )
-            scene = displaySceneImage(secondary, atX: primary.width, canvas: canvas).applyingFilter(
-                "CISourceOverCompositing", parameters: [kCIInputBackgroundImageKey: scene]
-            )
-            if let overlayScene = overlaySceneImage(assets: overlayAssets, onTopOf: scene) {
-                scene = overlayScene
-            }
-            ciContext.render(scene, to: outBuffer, bounds: bounds, colorSpace: colorSpace)
-        } else {
-            clear(outBuffer, canvas: canvas)
-            drawPixelBuffer(primary.sampleBuffer, into: outBuffer, canvas: canvas, atX: 0, width: primary.width, height: primary.height)
-            drawPixelBuffer(secondary.sampleBuffer, into: outBuffer, canvas: canvas, atX: primary.width, width: secondary.width, height: secondary.height)
+        // The whole scene is composed in the image graph (source-over) and
+        // rendered in one full-canvas pass. With an overlay it has to be: a
+        // separate bounded render of the masked camera would replace (not
+        // blend over) its region and punch transparent holes into the canvas.
+        // Without one it is still a single pass instead of a clear and a draw
+        // per display.
+        let bounds = CGRect(x: 0, y: 0, width: CGFloat(canvas.width), height: CGFloat(canvas.height))
+        var scene = CIImage(color: .black).cropped(to: bounds)
+        scene = displaySceneImage(primary, atX: 0, canvas: canvas).applyingFilter(
+            "CISourceOverCompositing", parameters: [kCIInputBackgroundImageKey: scene]
+        )
+        scene = displaySceneImage(secondary, atX: primary.width, canvas: canvas).applyingFilter(
+            "CISourceOverCompositing", parameters: [kCIInputBackgroundImageKey: scene]
+        )
+        if let overlayAssets, let overlayScene = overlaySceneImage(assets: overlayAssets, onTopOf: scene) {
+            scene = overlayScene
         }
+        ciContext.render(scene, to: outBuffer, bounds: bounds, colorSpace: colorSpace)
 
         return makeSampleBuffer(from: outBuffer, presentationTimeStamp: pts, sourceDuration: CMSampleBufferGetDuration(primary.sampleBuffer))
     }
@@ -493,9 +513,7 @@ public final class FrameCompositor: @unchecked Sendable {
         canvas: Canvas,
         overlayAssets: OverlayAssets? = nil
     ) -> CMSampleBuffer? {
-        var outputPixelBuffer: CVPixelBuffer?
-        let status = CVPixelBufferPoolCreatePixelBuffer(kCFAllocatorDefault, pool, &outputPixelBuffer)
-        guard status == kCVReturnSuccess, let outBuffer = outputPixelBuffer else { return nil }
+        guard let outBuffer = Self.makeCanvas(from: pool) else { return nil }
 
         let bounds = CGRect(x: 0, y: 0, width: CGFloat(canvas.width), height: CGFloat(canvas.height))
         let screenImage = screenSceneImage(frame, canvas: canvas)
@@ -554,43 +572,24 @@ public final class FrameCompositor: @unchecked Sendable {
         pool: CVPixelBufferPool,
         canvas: Canvas
     ) -> CMSampleBuffer? {
-        var outputPixelBuffer: CVPixelBuffer?
-        let status = CVPixelBufferPoolCreatePixelBuffer(kCFAllocatorDefault, pool, &outputPixelBuffer)
-        guard status == kCVReturnSuccess, let outBuffer = outputPixelBuffer else { return nil }
+        guard let outBuffer = Self.makeCanvas(from: pool) else { return nil }
 
-        clear(outBuffer, canvas: canvas)
-        let xOffset = isPrimary ? 0 : frame.width
-        drawPixelBuffer(frame.sampleBuffer, into: outBuffer, canvas: canvas, atX: xOffset, width: frame.width, height: frame.height)
+        // The one display that is delivering frames, in its own half of the
+        // canvas, over black where the other display would be.
+        let bounds = CGRect(x: 0, y: 0, width: CGFloat(canvas.width), height: CGFloat(canvas.height))
+        let xOffset = isPrimary ? 0 : canvas.width - frame.width
+        let scene = displaySceneImage(frame, atX: xOffset, canvas: canvas).applyingFilter(
+            "CISourceOverCompositing",
+            parameters: [kCIInputBackgroundImageKey: CIImage(color: .black).cropped(to: bounds)]
+        )
+        ciContext.render(scene, to: outBuffer, bounds: bounds, colorSpace: colorSpace)
 
         return makeSampleBuffer(from: outBuffer, presentationTimeStamp: pts, sourceDuration: CMSampleBufferGetDuration(frame.sampleBuffer))
     }
 
-    private func clear(_ pixelBuffer: CVPixelBuffer, canvas: Canvas) {
-        let bounds = CGRect(x: 0, y: 0, width: canvas.width, height: canvas.height)
-        let image = CIImage(color: .black).cropped(to: bounds)
-        ciContext.render(image, to: pixelBuffer, bounds: bounds, colorSpace: colorSpace)
-    }
-
-    private func drawPixelBuffer(
-        _ sampleBuffer: CMSampleBuffer,
-        into outputBuffer: CVPixelBuffer,
-        canvas: Canvas,
-        atX x: Int,
-        width: Int,
-        height: Int
-    ) {
-        guard let pixelBuffer = CMSampleBufferGetImageBuffer(sampleBuffer) else { return }
-
-        let yOffset = (canvas.height - height) / 2
-        let bounds = CGRect(x: CGFloat(x), y: CGFloat(yOffset), width: CGFloat(width), height: CGFloat(height))
-        let ciImage = CIImage(cvPixelBuffer: pixelBuffer)
-            .transformed(by: CGAffineTransform(translationX: bounds.minX, y: bounds.minY))
-        ciContext.render(ciImage, to: outputBuffer, bounds: bounds, colorSpace: colorSpace)
-    }
-
     /// Draws a screen frame stretched over the whole canvas (single-display
-    /// mode base render). The screen image covers the entire canvas, so the
-    /// black `clear` is skipped on this path.
+    /// mode base render). The screen image covers the entire canvas, so
+    /// nothing is drawn behind it.
     private func drawPixelBufferFullCanvas(
         _ sampleBuffer: CMSampleBuffer,
         frameWidth: Int,
@@ -705,7 +704,7 @@ public final class FrameCompositor: @unchecked Sendable {
     }
 
     /// One display of a dual side-by-side composite as a scene image,
-    /// positioned at `x`, vertically centered like `drawPixelBuffer`.
+    /// positioned at `x` and vertically centered.
     private func displaySceneImage(_ frame: DisplayFrame, atX x: Int, canvas: Canvas) -> CIImage {
         let yOffset = (canvas.height - frame.height) / 2
         return CIImage(cvPixelBuffer: CMSampleBufferGetImageBuffer(frame.sampleBuffer)!)
@@ -762,6 +761,23 @@ public final class FrameCompositor: @unchecked Sendable {
         cameraFramePTS = .invalid
         overlayCache = nil
         overlayCacheKey = nil
+    }
+
+    /// Gives back the canvas pool and Core Image's render caches once capture
+    /// has stopped. `reset()` keeps both so the compositor can carry on after
+    /// it; without this the pooled canvases stayed allocated for as long as
+    /// the app ran, long after the overlay or dual capture was switched off.
+    /// `configure` or `configureSingleDisplay` builds a new pool on the next
+    /// start.
+    public func releaseResources() {
+        emitLock.lock()
+        defer { emitLock.unlock() }
+        lock.lock()
+        pixelBufferPool = nil
+        compositeWidth = 0
+        compositeHeight = 0
+        lock.unlock()
+        ciContext.clearCaches()
     }
 
     private static func ptsIsValid(_ pts: CMTime) -> Bool {

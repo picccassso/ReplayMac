@@ -24,9 +24,9 @@ final class ReplayMemoryEstimateTests: XCTestCase {
         let result = estimate(seconds: 300, mbps: 25)
 
         XCTAssertFalse(result.isCapLimited)
-        // 25 Mbps video plus two raw PCM audio sources (768 kB/s) over 303s
-        // is about 1180 MB.
-        XCTAssertEqual(Double(result.requiredBytes), 1_179_600_000, accuracy: 5_000_000)
+        // 25 Mbps video plus two 16-bit PCM audio sources (384 kB/s) over
+        // 303s is about 1063 MB.
+        XCTAssertEqual(Double(result.requiredBytes), 1_063_200_000, accuracy: 5_000_000)
         XCTAssertEqual(result.tier, .heavy)
     }
 
@@ -34,21 +34,26 @@ final class ReplayMemoryEstimateTests: XCTestCase {
         let result = estimate(seconds: 300, mbps: 50)
 
         XCTAssertTrue(result.isCapLimited)
-        // Both audio buffers take their full 306s first (about 224 MiB); the
-        // remaining 1312 MiB holds about 220s of 6.25 MB/s video, minus headroom.
-        XCTAssertEqual(result.coveredSeconds, 217, accuracy: 2)
+        // Both audio buffers take their full 306s first (about 112 MiB); the
+        // remaining 1424 MiB holds about 239s of 6.25 MB/s video, minus headroom.
+        XCTAssertEqual(result.coveredSeconds, 235, accuracy: 2)
         let target = try XCTUnwrap(result.minimumCapMBToFit)
         XCTAssertEqual(target.truncatingRemainder(dividingBy: ReplayMemoryEstimate.memoryCapStepMB), 0)
         XCTAssertFalse(estimate(seconds: 300, mbps: 50, capMB: target).isCapLimited)
         XCTAssertTrue(estimate(seconds: 300, mbps: 50, capMB: target - ReplayMemoryEstimate.memoryCapStepMB).isCapLimited)
     }
 
-    func testDualModeSplitsCapAcrossBuffers() {
+    /// Side-by-side records one composite stream, so it holds as much as a
+    /// single display; only separate files split the cap across two buffers.
+    func testOnlySeparateDualSaveSplitsTheCap() {
         let single = estimate(seconds: 300, mbps: 25)
-        let dual = estimate(seconds: 300, mbps: 25, dual: true)
+        let sideBySide = estimate(seconds: 300, mbps: 25, dual: true)
+        let separate = estimate(seconds: 300, mbps: 25, dual: true, separate: true)
 
-        XCTAssertLessThan(dual.coveredSeconds, single.coveredSeconds)
-        XCTAssertTrue(dual.isCapLimited)
+        XCTAssertEqual(sideBySide.coveredSeconds, single.coveredSeconds)
+        XCTAssertFalse(sideBySide.isCapLimited)
+        XCTAssertLessThan(separate.coveredSeconds, single.coveredSeconds)
+        XCTAssertTrue(separate.isCapLimited)
     }
 
     func testSeparateDualSaveDoublesVideoMemory() {
@@ -61,15 +66,18 @@ final class ReplayMemoryEstimateTests: XCTestCase {
     }
 
     func testMinimumCapIsNilWhenSliderMaximumIsNotEnough() {
-        let result = estimate(seconds: 300, mbps: 50, dual: true, separate: true, capMB: 4096)
+        // Two 80 Mbps streams for five minutes need about 6 GB, past the
+        // slider's 4 GB. (The slider's own 50 Mbps maximum now fits: separate
+        // files share the cap between two buffers, not three.)
+        let result = estimate(seconds: 300, mbps: 80, dual: true, separate: true, capMB: 4096)
 
         XCTAssertTrue(result.isCapLimited)
         XCTAssertNil(result.minimumCapMBToFit)
     }
 
-    /// The estimate used to budget audio at the 0.2 Mbps AAC rate, about a
-    /// fifteenth of the raw PCM the buffers actually hold.
-    func testAudioIsBudgetedAtTheRawPCMRate() {
+    /// The estimate used to budget audio at the 0.2 Mbps AAC rate, a fraction
+    /// of the PCM the buffers actually hold.
+    func testAudioIsBudgetedAtTheBufferedPCMRate() {
         let withAudio = estimate(seconds: 60, mbps: 25)
         let videoOnly = ReplayMemoryEstimate.make(
             bufferSeconds: 60,
@@ -95,6 +103,7 @@ final class ReplayMemoryEstimateTests: XCTestCase {
                 let result = estimate(seconds: 300, mbps: mbps, capMB: capMB)
                 let caps = AppSettings.ringBufferMemoryCaps(
                     isDualMode: false,
+                    isSeparateDualSave: false,
                     captureSystemAudio: true,
                     captureMicrophone: true,
                     retainedSeconds: 300 + AppSettings.ringBufferHeadroomSeconds,

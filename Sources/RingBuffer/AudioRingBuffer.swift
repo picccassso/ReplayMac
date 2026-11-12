@@ -2,11 +2,17 @@ import Foundation
 @preconcurrency import CoreMedia
 import DequeModule
 
-/// Time-bounded ring buffer for encoded audio CMSampleBuffers.
+/// Time-bounded ring buffer for captured audio.
 /// Evicts oldest samples when duration or memory cap is exceeded.
+///
+/// Capture delivers 32-bit float PCM, which is held here as 16-bit PCM: half
+/// the memory for the same audio once it reaches the AAC track in a clip. Each
+/// buffer keeps its own timing and format, and is handed back out as the
+/// float buffer it came in as, so nothing downstream sees a different stream.
+/// Anything that is not packed float PCM is stored untouched.
 public final class AudioRingBuffer: @unchecked Sendable {
     private let lock = NSLock()
-    private var deque = Deque<CMSampleBuffer>()
+    private var deque = Deque<StoredAudio>()
     private var _currentMemoryBytes: Int = 0
 
     // Caps are only touched under `lock`: the main actor updates them from
@@ -72,54 +78,44 @@ public final class AudioRingBuffer: @unchecked Sendable {
     }
 
     public func append(_ sample: CMSampleBuffer) {
+        // Converted before taking the lock, so capture threads only ever wait
+        // on each other for the append itself.
+        let stored = StoredAudio(sample)
+
         lock.lock()
         defer { lock.unlock() }
 
-        deque.append(sample)
-        _currentMemoryBytes += dataSize(of: sample)
+        deque.append(stored)
+        _currentMemoryBytes += stored.byteCount
         evictIfNeeded()
     }
 
     public func samples(last seconds: TimeInterval) -> [CMSampleBuffer] {
-        lock.lock()
-        defer { lock.unlock() }
-
-        guard !deque.isEmpty else { return [] }
-
-        let newestPTS = presentationTimeStamp(of: deque.last!)
-        let cutoffPTS = newestPTS - seconds
-
-        let startIndex = deque.indices.first { index in
-            presentationTimeStamp(of: deque[index]) >= cutoffPTS
-        } ?? 0
-
-        return Array(deque[startIndex...])
+        let selected: [StoredAudio] = lock.withLock {
+            guard let newest = deque.last else { return [] }
+            let cutoffPTS = newest.pts - seconds
+            let startIndex = deque.indices.first { deque[$0].pts >= cutoffPTS } ?? 0
+            return Array(deque[startIndex...])
+        }
+        return selected.compactMap { $0.makeSampleBuffer() }
     }
 
     /// Returns samples whose PTS falls within the provided absolute range.
     /// This is used to align audio extraction to the selected video window.
     public func samples(between startPTS: Double, and endPTS: Double) -> [CMSampleBuffer] {
-        lock.lock()
-        defer { lock.unlock() }
-
-        guard !deque.isEmpty else { return [] }
         guard endPTS >= startPTS else { return [] }
 
-        var result: [CMSampleBuffer] = []
-        result.reserveCapacity(deque.count)
-
-        // A full scan rather than stopping at the first sample past `endPTS`:
-        // capture is meant to append in time order, but a stray out-of-order
-        // buffer must not hide the samples after it.
-        for sample in deque {
-            let pts = presentationTimeStamp(of: sample)
-            if pts >= startPTS && pts <= endPTS {
-                result.append(sample)
-            }
+        var selected: [StoredAudio] = lock.withLock {
+            // A full scan rather than stopping at the first sample past
+            // `endPTS`: capture is meant to append in time order, but a stray
+            // out-of-order buffer must not hide the samples after it.
+            deque.filter { $0.pts >= startPTS && $0.pts <= endPTS }
         }
-        result.sort { presentationTimeStamp(of: $0) < presentationTimeStamp(of: $1) }
+        selected.sort { $0.pts < $1.pts }
 
-        return result
+        // Turned back into float buffers outside the lock: a long window is
+        // tens of thousands of buffers, and capture keeps appending meanwhile.
+        return selected.compactMap { $0.makeSampleBuffer() }
     }
 
     public func clear() {
@@ -139,9 +135,7 @@ public final class AudioRingBuffer: @unchecked Sendable {
         lock.lock()
         defer { lock.unlock() }
         guard let oldest = deque.first, let newest = deque.last else { return 0 }
-        let oldestPTS = presentationTimeStamp(of: oldest)
-        let newestPTS = presentationTimeStamp(of: newest)
-        return max(0, newestPTS - oldestPTS)
+        return max(0, newest.pts - oldest.pts)
     }
 
     public var totalSampleCount: Int {
@@ -158,7 +152,7 @@ public final class AudioRingBuffer: @unchecked Sendable {
         let startingBytes = _currentMemoryBytes
         while true {
             guard let oldest = deque.first, let newest = deque.last else { break }
-            let duration = presentationTimeStamp(of: newest) - presentationTimeStamp(of: oldest)
+            let duration = newest.pts - oldest.pts
             guard duration > maxSeconds else { break }
             guard deque.count > 1, oldestIsBelowRetentionFloor() else { break }
             evictOldest()
@@ -171,7 +165,7 @@ public final class AudioRingBuffer: @unchecked Sendable {
     private func evictIfNeeded() {
         while true {
             guard let oldest = deque.first, let newest = deque.last else { break }
-            let duration = presentationTimeStamp(of: newest) - presentationTimeStamp(of: oldest)
+            let duration = newest.pts - oldest.pts
             if duration > _timeCap, deque.count > 1, oldestIsBelowRetentionFloor() {
                 evictOldest()
             } else {
@@ -191,20 +185,169 @@ public final class AudioRingBuffer: @unchecked Sendable {
     private func oldestIsBelowRetentionFloor() -> Bool {
         guard let floor = _retentionFloor?() else { return true }
         guard deque.count > 1 else { return false }
-        return presentationTimeStamp(of: deque[deque.index(after: deque.startIndex)]) <= floor
+        return deque[deque.index(after: deque.startIndex)].pts <= floor
     }
 
     private func evictOldest() {
         guard let oldest = deque.first else { return }
-        let size = dataSize(of: oldest)
-        _currentMemoryBytes = max(0, _currentMemoryBytes - size)
+        _currentMemoryBytes = max(0, _currentMemoryBytes - oldest.byteCount)
         deque.removeFirst()
+    }
+}
+
+/// One captured audio buffer as the ring buffer holds it.
+private struct StoredAudio {
+    private enum Payload {
+        /// Float PCM held as 16-bit integers, with what is needed to rebuild
+        /// the buffer it came from.
+        case compact(samples: [Int16], format: CMFormatDescription, frameCount: CMItemCount, timing: CMSampleTimingInfo)
+        /// Any other buffer, kept as it arrived.
+        case original(CMSampleBuffer)
+    }
+
+    /// Full scale for the 16-bit samples. The same factor is used both ways,
+    /// so full-scale float audio comes back as exactly full scale.
+    private static let fullScale: Float = 32_767
+
+    let pts: Double
+    /// Bytes of audio this entry holds, which is what the memory cap counts.
+    let byteCount: Int
+    private let payload: Payload
+
+    init(_ sample: CMSampleBuffer) {
+        let presentationTime = CMSampleBufferGetPresentationTimeStamp(sample)
+        pts = presentationTime.isValid ? presentationTime.seconds : 0
+
+        if let compact = Self.compact(sample) {
+            payload = compact.payload
+            byteCount = compact.byteCount
+        } else {
+            payload = .original(sample)
+            byteCount = Self.dataSize(of: sample)
+        }
+    }
+
+    /// The buffer as it was captured. A compacted buffer is rebuilt with its
+    /// original format, frame count and timing; nil only if Core Media cannot
+    /// allocate it.
+    func makeSampleBuffer() -> CMSampleBuffer? {
+        switch payload {
+        case .original(let sample):
+            return sample
+        case .compact(let samples, let format, let frameCount, let timing):
+            let byteCount = samples.count * MemoryLayout<Float>.size
+            var blockBuffer: CMBlockBuffer?
+            guard CMBlockBufferCreateWithMemoryBlock(
+                allocator: kCFAllocatorDefault,
+                memoryBlock: nil,
+                blockLength: byteCount,
+                blockAllocator: kCFAllocatorDefault,
+                customBlockSource: nil,
+                offsetToData: 0,
+                dataLength: byteCount,
+                flags: kCMBlockBufferAssureMemoryNowFlag,
+                blockBufferOut: &blockBuffer
+            ) == noErr, let blockBuffer else {
+                return nil
+            }
+
+            var dataPointer: UnsafeMutablePointer<Int8>?
+            guard CMBlockBufferGetDataPointer(
+                blockBuffer, atOffset: 0, lengthAtOffsetOut: nil, totalLengthOut: nil, dataPointerOut: &dataPointer
+            ) == noErr, let dataPointer else {
+                return nil
+            }
+            dataPointer.withMemoryRebound(to: Float.self, capacity: samples.count) { floats in
+                for index in samples.indices {
+                    floats[index] = Float(samples[index]) / Self.fullScale
+                }
+            }
+
+            var timing = timing
+            var sampleBuffer: CMSampleBuffer?
+            guard CMSampleBufferCreate(
+                allocator: kCFAllocatorDefault,
+                dataBuffer: blockBuffer,
+                dataReady: true,
+                makeDataReadyCallback: nil,
+                refcon: nil,
+                formatDescription: format,
+                sampleCount: frameCount,
+                sampleTimingEntryCount: 1,
+                sampleTimingArray: &timing,
+                sampleSizeEntryCount: 0,
+                sampleSizeArray: nil,
+                sampleBufferOut: &sampleBuffer
+            ) == noErr else {
+                return nil
+            }
+            return sampleBuffer
+        }
+    }
+
+    /// The 16-bit form of `sample`, or nil when it is not a buffer this can
+    /// rebuild exactly: packed native-endian 32-bit float PCM with a single
+    /// timing entry and one float per channel per frame. The samples are
+    /// converted in the order they sit in the buffer, so interleaved and
+    /// planar audio both come back laid out as they went in.
+    private static func compact(_ sample: CMSampleBuffer) -> (payload: Payload, byteCount: Int)? {
+        guard let format = CMSampleBufferGetFormatDescription(sample),
+              let asbd = CMAudioFormatDescriptionGetStreamBasicDescription(format)?.pointee,
+              asbd.mFormatID == kAudioFormatLinearPCM,
+              asbd.mFormatFlags & kAudioFormatFlagIsFloat != 0,
+              asbd.mFormatFlags & kAudioFormatFlagIsPacked != 0,
+              asbd.mFormatFlags & kAudioFormatFlagIsBigEndian == 0,
+              asbd.mBitsPerChannel == 32,
+              asbd.mChannelsPerFrame > 0,
+              let dataBuffer = CMSampleBufferGetDataBuffer(sample) else {
+            return nil
+        }
+
+        let frameCount = CMSampleBufferGetNumSamples(sample)
+        let floatCount = frameCount * Int(asbd.mChannelsPerFrame)
+        let byteCount = floatCount * MemoryLayout<Float>.size
+        guard frameCount > 0, CMBlockBufferGetDataLength(dataBuffer) == byteCount else {
+            return nil
+        }
+
+        var timingCount: CMItemCount = 0
+        var timing = CMSampleTimingInfo()
+        guard CMSampleBufferGetSampleTimingInfoArray(
+            sample, entryCount: 1, arrayToFill: &timing, entriesNeededOut: &timingCount
+        ) == noErr, timingCount == 1 else {
+            return nil
+        }
+
+        var floats = [Float](repeating: 0, count: floatCount)
+        let copyStatus = floats.withUnsafeMutableBytes { destination in
+            CMBlockBufferCopyDataBytes(dataBuffer, atOffset: 0, dataLength: byteCount, destination: destination.baseAddress!)
+        }
+        guard copyStatus == noErr else { return nil }
+
+        let samples = [Int16](unsafeUninitializedCapacity: floatCount) { buffer, initializedCount in
+            for index in 0..<floatCount {
+                let scaled = (floats[index] * fullScale).rounded()
+                // Anything past full scale is held at it; a non-finite sample
+                // from a misbehaving device becomes silence, not a click.
+                if scaled.isNaN {
+                    buffer[index] = 0
+                } else {
+                    buffer[index] = Int16(max(-fullScale, min(fullScale, scaled)))
+                }
+            }
+            initializedCount = floatCount
+        }
+
+        return (
+            .compact(samples: samples, format: format, frameCount: frameCount, timing: timing),
+            floatCount * MemoryLayout<Int16>.size
+        )
     }
 
     /// Returns the actual data size of a CMSampleBuffer.
     /// CMSampleBufferGetTotalSampleSize returns 0 for uncompressed audio (PCM),
     /// so we fall back to CMBlockBufferGetDataLength.
-    private func dataSize(of sampleBuffer: CMSampleBuffer) -> Int {
+    private static func dataSize(of sampleBuffer: CMSampleBuffer) -> Int {
         let totalSize = CMSampleBufferGetTotalSampleSize(sampleBuffer)
         if totalSize > 0 { return totalSize }
 
@@ -212,10 +355,5 @@ public final class AudioRingBuffer: @unchecked Sendable {
             return CMBlockBufferGetDataLength(dataBuffer)
         }
         return 0
-    }
-
-    private func presentationTimeStamp(of sampleBuffer: CMSampleBuffer) -> Double {
-        let pts = CMSampleBufferGetPresentationTimeStamp(sampleBuffer)
-        return pts.isValid ? pts.seconds : 0
     }
 }

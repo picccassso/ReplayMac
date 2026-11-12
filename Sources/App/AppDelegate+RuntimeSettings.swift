@@ -417,6 +417,8 @@ extension AppDelegate {
         }
 
         currentFPS = fps
+        // The save mode decides how many video buffers share the memory cap.
+        syncMemoryCapsToSettings()
     }
 
     func configureDualVideoHandlers(saveMode: DualCaptureSaveMode) async {

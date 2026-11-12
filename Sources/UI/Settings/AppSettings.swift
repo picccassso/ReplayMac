@@ -759,19 +759,100 @@ public enum AppSettings {
     public static var companionServerPort: Int { Defaults[.companionServerPort] }
     public static var companionCustomServerName: String { Defaults[.companionCustomServerName] }
 
-    /// RAM one audio ring buffer uses per second. Audio is buffered as the raw
-    /// 48 kHz stereo Float32 PCM that ScreenCaptureKit and the microphone path
-    /// deliver (AAC encoding only happens when a clip is saved), so it is far
-    /// heavier than the compressed track that ends up in the file.
-    public static let audioRingBufferBytesPerSecond: Double = 48_000 * 2 * 4
+    /// The memory cap every install had before it scaled with the Mac's RAM.
+    public static let legacyMemoryCapMB: Double = 1536
+
+    /// Memory cap a new install starts with: about a tenth of the Mac's RAM,
+    /// on the Memory cap slider's 64 MB steps, between 512 MB and the 1536 MB
+    /// every Mac used to get. An 8 GB Mac starts at 768 MB; 16 GB and up keep
+    /// 1536 MB. The cap is a ceiling for long replay buffers, not what a
+    /// buffer uses, and Settings offers to raise it when a buffer needs more.
+    public static func defaultMemoryCapMB(
+        physicalMemoryBytes: UInt64 = ProcessInfo.processInfo.physicalMemory
+    ) -> Double {
+        let step = 64.0
+        let tenthMB = Double(physicalMemoryBytes) / (1024 * 1024) / 10
+        let stepped = (tenthMB / step).rounded(.down) * step
+        return min(max(stepped, 512), legacyMemoryCapMB)
+    }
+
+    /// Bitrate a new install starts with: what the Quality preset recommends
+    /// for the size it will capture at. The flat 25 Mbps default suits a
+    /// 1440p capture; on a MacBook Air's smaller display it buffered two and
+    /// a half times the video the picture needs.
+    public static func initialBitrateMbps(
+        displayWidth: Int,
+        displayHeight: Int,
+        preset: QualityPreset = .quality,
+        frameRate: Int = Defaults.Keys.frameRate.defaultValue
+    ) -> Double {
+        guard displayWidth > 0, displayHeight > 0 else {
+            return Defaults.Keys.bitrateMbps.defaultValue
+        }
+        return BitrateGuide.recommendedMbps(
+            preset: preset,
+            width: displayWidth,
+            height: displayHeight,
+            frameRate: frameRate,
+            isH264SDR: false
+        )
+    }
+
+    /// One-time setup of the defaults that depend on the Mac itself. Runs at
+    /// launch, after onboarding has decided whether this is an established
+    /// installation.
+    ///
+    /// A new install gets a bitrate sized for its display, and the RAM-scaled
+    /// memory cap simply by never storing one. An established install keeps
+    /// what it has been recording with: its memory cap is pinned to the old
+    /// default if it never chose one, and its bitrate is left alone.
+    public static func seedPerformanceDefaultsIfNeeded(
+        isEstablishedInstall: Bool = Defaults[.hasCompletedOnboarding],
+        mainDisplaySize: CGSize = CGDisplayBounds(CGMainDisplayID()).size,
+        store: UserDefaults = .standard
+    ) {
+        guard !Defaults[.didSeedPerformanceDefaults] else { return }
+        Defaults[.didSeedPerformanceDefaults] = true
+
+        if isEstablishedInstall {
+            if store.object(forKey: Defaults.Keys.memoryCapMB.name) == nil,
+               Defaults.Keys.memoryCapMB.defaultValue != legacyMemoryCapMB {
+                Defaults[.memoryCapMB] = legacyMemoryCapMB
+            }
+            return
+        }
+
+        if store.object(forKey: Defaults.Keys.bitrateMbps.name) == nil {
+            Defaults[.bitrateMbps] = initialBitrateMbps(
+                displayWidth: Int(mainDisplaySize.width),
+                displayHeight: Int(mainDisplaySize.height),
+                preset: QualityPreset(rawValue: Defaults[.qualityPreset]) ?? .quality,
+                frameRate: Defaults[.frameRate]
+            )
+        }
+    }
+
+    /// RAM one audio ring buffer uses per second. Audio is buffered as 48 kHz
+    /// stereo 16-bit PCM (capture delivers Float32, which the ring buffer
+    /// halves; AAC encoding only happens when a clip is saved), so it is
+    /// still far heavier than the compressed track that ends up in the file.
+    public static let audioRingBufferBytesPerSecond: Double = 48_000 * 2 * 2
 
     /// Extra audio kept beyond the retained window, for the keyframe a clip
     /// starts on: the encoder keeps keyframes under 3 s apart.
     public static let audioKeyframeMarginSeconds: TimeInterval = 3.0
 
+    /// Video ring buffers that actually fill in a capture mode. Side-by-side
+    /// dual capture encodes one composite stream into the primary buffer, and
+    /// only separate files fill one buffer per display. Splitting the cap
+    /// across all three buffers that exist left most of it unused in dual mode.
+    public static func activeVideoBufferCount(isDualMode: Bool, isSeparateDualSave: Bool) -> Int {
+        isDualMode && isSeparateDualSave ? 2 : 1
+    }
+
     /// Splits the memory cap between the ring buffers, audio first.
     ///
-    /// Raw PCM audio fills at a fixed 384 kB/s per source, while video fills at
+    /// PCM audio fills at a fixed 192 kB/s per source, while video fills at
     /// whatever the encoder actually produces, usually well under the bitrate
     /// setting. Any split that guesses the video rate leaves audio running out
     /// first whenever the guess is high, and a clip then opens on silence. So
@@ -781,13 +862,14 @@ public enum AppSettings {
     /// their sound.
     public static func ringBufferMemoryCaps(
         isDualMode: Bool,
+        isSeparateDualSave: Bool,
         captureSystemAudio: Bool,
         captureMicrophone: Bool,
         retainedSeconds: TimeInterval = ringBufferTimeCapSeconds,
         totalCapMB: Double = memoryCapMB
     ) -> (videoPerBuffer: Int, audioPerBuffer: Int) {
         let totalBytes = Int(totalCapMB * 1024 * 1024)
-        let videoBufferCount = max(isDualMode ? 3 : 1, 1)
+        let videoBufferCount = activeVideoBufferCount(isDualMode: isDualMode, isSeparateDualSave: isSeparateDualSave)
 
         var audioBufferCount = 0
         if captureSystemAudio {
@@ -904,7 +986,8 @@ public extension Defaults.Keys {
     static let perAppAudioBundleID = Key<String>("perAppAudioBundleID", default: "")
     static let mutedAudioAppBundleIDs = Key<[String]>("mutedAudioAppBundleIDs", default: [])
 
-    static let memoryCapMB = Key<Double>("memoryCapMB", default: 1536)
+    static let memoryCapMB = Key<Double>("memoryCapMB", default: AppSettings.defaultMemoryCapMB())
+    static let didSeedPerformanceDefaults = Key<Bool>("didSeedPerformanceDefaults", default: false)
     static let queueDepth = Key<Int>("queueDepth", default: 5)
     static let playAudioCueOnSave = Key<Bool>("playAudioCueOnSave", default: true)
     static let showNotificationOnSave = Key<Bool>("showNotificationOnSave", default: true)

@@ -84,6 +84,10 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     var displayReconfigurationTask: Task<Void, Never>?
     var workspaceAudioFilterRefreshTask: Task<Void, Never>?
     var monitoringTask: Task<Void, Never>?
+    /// System memory pressure, as last reported by macOS. Critical pressure
+    /// shortens the replay window until it eases.
+    var memoryPressureLevel: MemoryPressureLevel = .normal
+    var memoryPressureSource: DispatchSourceMemoryPressure?
     let mainWindowState = MainWindowState()
     weak var mainWindow: NSWindow?
     var mainWindowOpener: (() -> Void)?
@@ -150,6 +154,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         super.init()
         AppSettings.migrateLegacyBrandDefaults()
         AppSettings.migrateCameraFeatureModuleIfNeeded()
+        AppSettings.seedPerformanceDefaultsIfNeeded()
         lastMicEnabled = AppSettings.captureMicrophone
         lastMicDeviceID = AppSettings.microphoneID
         lastCameraEnabled = AppSettings.cameraOverlayEnabled
@@ -248,6 +253,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         setupWindowObservers()
         setupPowerObservers()
         setupDisplayObservers()
+        setupMemoryPressureObserver()
 
         // First launch: walk through the setup assistant before anything
         // records. Auto-start (and its screen-recording permission prompt)

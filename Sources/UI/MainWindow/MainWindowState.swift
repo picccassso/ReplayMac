@@ -132,6 +132,15 @@ public final class MainWindowState: ObservableObject {
         if let tab = SettingsTab(rawValue: page.rawValue) { settingsTab = tab }
         exports.objectWillChange.sink { [weak self] _ in self?.objectWillChange.send() }.store(in: &subscriptions)
         library.model.isProtected = { [weak self] url in self?.isProtected(url) ?? false }
+        // The clip library drops its thumbnails while the window is hidden.
+        // Driven from here so it does not depend on the view being updated
+        // while its window is off screen. The initial value counts too: an
+        // app launched straight to the menu bar has a hidden window from the
+        // start.
+        $isWindowVisible
+            .removeDuplicates()
+            .sink { [library] visible in library.model.setWindowVisible(visible) }
+            .store(in: &subscriptions)
         presentEditor = { [weak self] session in
             guard let self else { return }
             ClipEditorWindowController.show(session: session, state: self)

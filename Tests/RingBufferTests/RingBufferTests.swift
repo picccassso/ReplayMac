@@ -1,5 +1,6 @@
 import XCTest
 @preconcurrency import CoreMedia
+import CoreAudio
 @testable import RingBuffer
 
 final class RingBufferTests: XCTestCase {
@@ -383,6 +384,193 @@ final class RingBufferTests: XCTestCase {
         XCTAssertEqual(buffer.totalSampleCount, 0)
         XCTAssertEqual(buffer.currentMemoryBytes, 0)
         XCTAssertEqual(buffer.duration, 0)
+    }
+
+    // MARK: - AudioRingBuffer: 16-bit storage of float PCM
+
+    /// A packed PCM buffer in the layout capture delivers: `samples` holds one
+    /// value per channel per frame, in the order they sit in the buffer.
+    private static func makePCMSampleBuffer(
+        samples: [Float],
+        channels: Int,
+        pts: CMTime,
+        nonInterleaved: Bool = false
+    ) throws -> CMSampleBuffer {
+        let bytesPerFrame = (nonInterleaved ? 1 : channels) * MemoryLayout<Float>.size
+        var asbd = AudioStreamBasicDescription(
+            mSampleRate: 48_000,
+            mFormatID: kAudioFormatLinearPCM,
+            mFormatFlags: kAudioFormatFlagIsFloat | kAudioFormatFlagIsPacked
+                | (nonInterleaved ? kAudioFormatFlagIsNonInterleaved : 0),
+            mBytesPerPacket: UInt32(bytesPerFrame),
+            mFramesPerPacket: 1,
+            mBytesPerFrame: UInt32(bytesPerFrame),
+            mChannelsPerFrame: UInt32(channels),
+            mBitsPerChannel: 32,
+            mReserved: 0
+        )
+        return try makeAudioSampleBuffer(
+            asbd: &asbd,
+            bytes: samples.withUnsafeBytes { Array($0) },
+            frameCount: samples.count / channels,
+            pts: pts
+        )
+    }
+
+    private static func makeAudioSampleBuffer(
+        asbd: inout AudioStreamBasicDescription,
+        bytes: [UInt8],
+        frameCount: Int,
+        pts: CMTime
+    ) throws -> CMSampleBuffer {
+        var formatDescription: CMAudioFormatDescription?
+        XCTAssertEqual(CMAudioFormatDescriptionCreate(
+            allocator: kCFAllocatorDefault, asbd: &asbd, layoutSize: 0, layout: nil,
+            magicCookieSize: 0, magicCookie: nil, extensions: nil, formatDescriptionOut: &formatDescription
+        ), noErr)
+
+        var blockBuffer: CMBlockBuffer?
+        XCTAssertEqual(CMBlockBufferCreateWithMemoryBlock(
+            allocator: kCFAllocatorDefault, memoryBlock: nil, blockLength: bytes.count,
+            blockAllocator: kCFAllocatorDefault, customBlockSource: nil, offsetToData: 0,
+            dataLength: bytes.count, flags: kCMBlockBufferAssureMemoryNowFlag, blockBufferOut: &blockBuffer
+        ), noErr)
+        let block = try XCTUnwrap(blockBuffer)
+        XCTAssertEqual(CMBlockBufferReplaceDataBytes(
+            with: bytes, blockBuffer: block, offsetIntoDestination: 0, dataLength: bytes.count
+        ), noErr)
+
+        var timing = CMSampleTimingInfo(
+            duration: CMTime(value: 1, timescale: CMTimeScale(asbd.mSampleRate)),
+            presentationTimeStamp: pts,
+            decodeTimeStamp: .invalid
+        )
+        var sampleBuffer: CMSampleBuffer?
+        XCTAssertEqual(CMSampleBufferCreate(
+            allocator: kCFAllocatorDefault, dataBuffer: block, dataReady: true,
+            makeDataReadyCallback: nil, refcon: nil, formatDescription: try XCTUnwrap(formatDescription),
+            sampleCount: frameCount, sampleTimingEntryCount: 1, sampleTimingArray: &timing,
+            sampleSizeEntryCount: 0, sampleSizeArray: nil, sampleBufferOut: &sampleBuffer
+        ), noErr)
+        return try XCTUnwrap(sampleBuffer)
+    }
+
+    private static func floats(in sample: CMSampleBuffer) throws -> [Float] {
+        let block = try XCTUnwrap(CMSampleBufferGetDataBuffer(sample))
+        let length = CMBlockBufferGetDataLength(block)
+        var values = [Float](repeating: 0, count: length / MemoryLayout<Float>.size)
+        let status = values.withUnsafeMutableBytes {
+            CMBlockBufferCopyDataBytes(block, atOffset: 0, dataLength: length, destination: $0.baseAddress!)
+        }
+        XCTAssertEqual(status, noErr)
+        return values
+    }
+
+    /// Float PCM takes half the memory in the buffer and comes back out as
+    /// the buffer that went in: same format, frame count and exact timing,
+    /// with every sample within half a 16-bit step.
+    func testFloatPCMIsHeldAs16BitAndComesBackUnchanged() throws {
+        let frames = 960
+        let input = (0..<frames * 2).map { Float(sin(Double($0) * 0.013)) * 0.8 }
+        let pts = CMTime(value: 123_456_789, timescale: 1_000_000_000)
+        let source = try Self.makePCMSampleBuffer(samples: input, channels: 2, pts: pts)
+
+        let buffer = AudioRingBuffer(timeCap: 30, memoryCap: 50_000_000)
+        buffer.append(source)
+
+        XCTAssertEqual(buffer.currentMemoryBytes, frames * 2 * MemoryLayout<Int16>.size)
+
+        let restored = try XCTUnwrap(buffer.samples(between: 0, and: 1).first)
+        XCTAssertTrue(CFEqual(restored.formatDescription, source.formatDescription))
+        XCTAssertEqual(CMSampleBufferGetNumSamples(restored), frames)
+        let restoredPTS = CMSampleBufferGetPresentationTimeStamp(restored)
+        XCTAssertEqual(restoredPTS.value, pts.value)
+        XCTAssertEqual(restoredPTS.timescale, pts.timescale)
+        XCTAssertEqual(CMSampleBufferGetDuration(restored), CMSampleBufferGetDuration(source))
+
+        let output = try Self.floats(in: restored)
+        XCTAssertEqual(output.count, input.count)
+        for (index, value) in input.enumerated() {
+            XCTAssertEqual(output[index], value, accuracy: 0.5 / 32_767 + 1e-6, "sample \(index)")
+        }
+        // `samples(last:)` hands out the same rebuilt audio.
+        XCTAssertEqual(try Self.floats(in: try XCTUnwrap(buffer.samples(last: 1).first)), output)
+    }
+
+    /// Planar audio (all of one channel, then all of the next) keeps its
+    /// layout, so each channel comes back where it was.
+    func testPlanarFloatPCMKeepsItsChannelLayout() throws {
+        let frames = 480
+        let left = (0..<frames).map { Float($0) / Float(frames) }
+        let right = (0..<frames).map { -Float($0) / Float(frames) }
+        let source = try Self.makePCMSampleBuffer(
+            samples: left + right, channels: 2, pts: CMTime(value: 48_000, timescale: 48_000), nonInterleaved: true
+        )
+
+        let buffer = AudioRingBuffer(timeCap: 30, memoryCap: 50_000_000)
+        buffer.append(source)
+
+        let restored = try XCTUnwrap(buffer.samples(last: 1).first)
+        XCTAssertTrue(CFEqual(restored.formatDescription, source.formatDescription))
+        XCTAssertEqual(CMSampleBufferGetNumSamples(restored), frames)
+        let output = try Self.floats(in: restored)
+        XCTAssertEqual(output.count, frames * 2)
+        XCTAssertEqual(output[frames - 1], left[frames - 1], accuracy: 1e-4)
+        XCTAssertEqual(output[frames], right[0], accuracy: 1e-4)
+        XCTAssertEqual(output[frames * 2 - 1], right[frames - 1], accuracy: 1e-4)
+    }
+
+    /// Full scale survives exactly, anything past it is held at full scale,
+    /// and a non-finite sample becomes silence.
+    func testFloatPCMExtremesAreHeldAtFullScale() throws {
+        let input: [Float] = [1, -1, 1.5, -2, .nan, 0, .infinity, -.infinity]
+        let source = try Self.makePCMSampleBuffer(samples: input, channels: 1, pts: CMTime(value: 1, timescale: 1))
+
+        let buffer = AudioRingBuffer(timeCap: 30, memoryCap: 50_000_000)
+        buffer.append(source)
+
+        let output = try Self.floats(in: try XCTUnwrap(buffer.samples(last: 1).first))
+        XCTAssertEqual(output, [1, -1, 1, -1, 0, 0, 1, -1])
+    }
+
+    /// Only float PCM is converted. Audio in any other format is kept as the
+    /// very buffer that was appended.
+    func testNonFloatAudioIsStoredUntouched() throws {
+        var asbd = AudioStreamBasicDescription(
+            mSampleRate: 48_000,
+            mFormatID: kAudioFormatLinearPCM,
+            mFormatFlags: kAudioFormatFlagIsSignedInteger | kAudioFormatFlagIsPacked,
+            mBytesPerPacket: 4, mFramesPerPacket: 1, mBytesPerFrame: 4,
+            mChannelsPerFrame: 2, mBitsPerChannel: 16, mReserved: 0
+        )
+        let source = try Self.makeAudioSampleBuffer(
+            asbd: &asbd, bytes: [UInt8](repeating: 7, count: 400), frameCount: 100, pts: CMTime(value: 1, timescale: 1)
+        )
+
+        let buffer = AudioRingBuffer(timeCap: 30, memoryCap: 50_000_000)
+        buffer.append(source)
+
+        XCTAssertEqual(buffer.currentMemoryBytes, 400)
+        XCTAssertTrue(try XCTUnwrap(buffer.samples(last: 1).first) === source)
+    }
+
+    /// The memory cap counts what is actually held, so it fits twice the
+    /// float audio it used to.
+    func testAudioMemoryCapCountsTheCompactedSize() throws {
+        let frames = 1_000
+        let floatBytes = frames * 2 * MemoryLayout<Float>.size
+        // Room for five buffers at their float size.
+        let buffer = AudioRingBuffer(timeCap: 1_000, memoryCap: floatBytes * 5)
+        for index in 0..<20 {
+            buffer.append(try Self.makePCMSampleBuffer(
+                samples: [Float](repeating: 0.25, count: frames * 2),
+                channels: 2,
+                pts: CMTime(value: Int64(index + 1) * 1_000, timescale: 48_000)
+            ))
+        }
+
+        XCTAssertEqual(buffer.totalSampleCount, 10)
+        XCTAssertLessThanOrEqual(buffer.currentMemoryBytes, floatBytes * 5)
     }
 
     // MARK: - Regression: Non-default buffer duration

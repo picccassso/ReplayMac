@@ -13,10 +13,11 @@ public struct ReplayMemoryEstimate: Equatable {
     /// Buffer lengths at or above this are steered toward extended replay.
     public static let heavyThresholdSeconds = 240
     public static let lightThresholdSeconds = 60
-    /// Audio sits in the ring buffers as raw PCM, about 3 Mbps per source. The
-    /// 0.2 Mbps AAC figure `estimatedLongBufferDiskGB` uses only applies once a
-    /// track is written to disk; using it here understated the RAM audio needs
-    /// fifteenfold and hid windows the audio buffers could not hold.
+    /// Audio sits in the ring buffers as 16-bit PCM, about 1.5 Mbps per
+    /// source. The 0.2 Mbps AAC figure `estimatedLongBufferDiskGB` uses only
+    /// applies once a track is written to disk; using it here understated the
+    /// RAM audio needs several times over and hid windows the audio buffers
+    /// could not hold.
     static var audioBytesPerSecondPerSource: Double { AppSettings.audioRingBufferBytesPerSecond }
     /// Range and step of the Memory cap slider in Settings → Advanced.
     public static let memoryCapRangeMB: ClosedRange<Double> = 256...4096
@@ -55,7 +56,7 @@ public struct ReplayMemoryEstimate: Equatable {
     ) -> ReplayMemoryEstimate {
         // Side-by-side dual capture encodes one composite stream; separate
         // files encode one stream per display, each at the full bitrate.
-        let videoStreams = isDualMode && isSeparateDualSave ? 2 : 1
+        let videoStreams = AppSettings.activeVideoBufferCount(isDualMode: isDualMode, isSeparateDualSave: isSeparateDualSave)
         let audioSources = (captureSystemAudio ? 1 : 0) + (captureMicrophone ? 1 : 0)
         let retainedSeconds = Double(bufferSeconds) + AppSettings.ringBufferHeadroomSeconds
 
@@ -66,6 +67,7 @@ public struct ReplayMemoryEstimate: Equatable {
         func coveredSeconds(capMB: Double) -> Int {
             let caps = AppSettings.ringBufferMemoryCaps(
                 isDualMode: isDualMode,
+                isSeparateDualSave: isSeparateDualSave,
                 captureSystemAudio: captureSystemAudio,
                 captureMicrophone: captureMicrophone,
                 retainedSeconds: retainedSeconds,

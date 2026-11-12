@@ -16,7 +16,7 @@ extension ReplayMemoryEstimate {
             isSeparateDualSave: Defaults[.dualCaptureSaveMode] == DualCaptureSaveMode.separateFiles.rawValue,
             captureSystemAudio: Defaults[.captureSystemAudio],
             captureMicrophone: Defaults[.captureMicrophone],
-            memoryCapMB: Defaults[.memoryCapMB]
+            memoryCapMB: AppSettings.memoryCapMB
         )
     }
 }
@@ -32,11 +32,19 @@ struct ReplayBufferMemoryHint: View {
     @Default(.captureSystemAudio) private var captureSystemAudio
     @Default(.captureMicrophone) private var captureMicrophone
     @Default(.memoryCapMB) private var memoryCapMB
+    @Default(.enabledFeatureModules) private var enabledFeatureModules
     @Default(.longBufferEnabled) private var longBufferEnabled
 
     /// Shown as a button on long buffers when extended replay is off. Nil
     /// leaves just the text, for places that can't navigate to Settings.
     var openExtendedReplaySettings: (() -> Void)?
+
+    /// The Memory cap slider lives in Advanced settings. With that feature
+    /// switched off the cap in force is the default, whatever is stored, so
+    /// that is what the estimate has to be made against.
+    private var canChangeMemoryCap: Bool {
+        enabledFeatureModules.contains(.systemAndFileTuning)
+    }
 
     private var estimate: ReplayMemoryEstimate {
         ReplayMemoryEstimate.make(
@@ -46,7 +54,7 @@ struct ReplayBufferMemoryHint: View {
             isSeparateDualSave: dualCaptureSaveMode == DualCaptureSaveMode.separateFiles.rawValue,
             captureSystemAudio: captureSystemAudio,
             captureMicrophone: captureMicrophone,
-            memoryCapMB: memoryCapMB
+            memoryCapMB: canChangeMemoryCap ? memoryCapMB : Defaults.Keys.memoryCapMB.defaultValue
         )
     }
 
@@ -62,7 +70,10 @@ struct ReplayBufferMemoryHint: View {
             }
 
             if estimate.isCapLimited {
-                ReplayMemoryCapWarning(estimate: estimate) { memoryCapMB = $0 }
+                ReplayMemoryCapWarning(
+                    estimate: estimate,
+                    raiseCap: canChangeMemoryCap ? { memoryCapMB = $0 } : nil
+                )
             }
         }
         .font(.system(size: 12, design: .rounded))
@@ -97,13 +108,20 @@ struct ReplayBufferMemoryHint: View {
 /// window is full, with a one-click fix when the slider can go high enough.
 struct ReplayMemoryCapWarning: View {
     let estimate: ReplayMemoryEstimate
-    let raiseCap: (Double) -> Void
+    /// Nil where the cap cannot be changed (the Memory cap slider is hidden),
+    /// so the warning points at bitrate and buffer length instead of offering
+    /// a button that would store a value nothing reads.
+    let raiseCap: ((Double) -> Void)?
+
+    private var raiseTarget: Double? {
+        raiseCap == nil ? nil : estimate.minimumCapMBToFit
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
             Label(message, systemImage: "exclamationmark.triangle.fill")
                 .foregroundStyle(.orange)
-            if let target = estimate.minimumCapMBToFit {
+            if let target = raiseTarget, let raiseCap {
                 Button("Raise Memory Cap to \(ReplayMemoryEstimate.formatCapMB(target))") {
                     raiseCap(target)
                 }
@@ -119,7 +137,7 @@ struct ReplayMemoryCapWarning: View {
         let covered = ReplayMemoryEstimate.formatDuration(estimate.coveredSeconds)
         let requested = ReplayMemoryEstimate.formatDuration(estimate.requestedSeconds)
         let base = "Your \(cap) memory cap only holds about \(covered) at \(Int(estimate.bitrateMbps)) Mbps, so clips will be shorter than \(requested)."
-        if estimate.minimumCapMBToFit == nil {
+        if raiseTarget == nil {
             return "\(base) Lower the bitrate or the buffer length to fit."
         }
         return base

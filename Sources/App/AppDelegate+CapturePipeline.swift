@@ -382,6 +382,7 @@ extension AppDelegate {
         frameCompositor.setCameraOverlay(nil)
         frameCompositor.clearCameraFrame()
         frameCompositor.reset()
+        frameCompositor.releaseResources()
         isCameraOverlayRoutingActive = false
         AudioLevelMonitor.shared.reset()
         AudioLevelPreview.shared.setCaptureActive(false)
@@ -400,7 +401,7 @@ extension AppDelegate {
     ) async throws {
         if cameraActive {
             // Overlay active: route screen frames through the compositor so the
-            // camera can be drawn on top (32BGRA canvas into the encoder).
+            // camera can be drawn on top (an SDR 4:2:0 canvas into the encoder).
             await captureManager.setVideoHandler(replayCapPrimaryFrameCompositorHandler(frameCompositor))
         } else {
             // No overlay: keep the direct SCK 420YpCbCr8 → encoder path.
@@ -445,7 +446,7 @@ extension AppDelegate {
             fps: fps,
             codec: codec,
             bitrate: bitrate,
-            // The overlay composites into a 32BGRA SDR canvas, so the encoder
+            // The overlay composites into an 8-bit SDR canvas, so the encoder
             // must run SDR whenever the overlay is active.
             captureHDR: cameraActive ? false : captureHDR
         )
@@ -529,6 +530,7 @@ extension AppDelegate {
         frameCompositor.setCameraOverlay(nil)
         frameCompositor.clearCameraFrame()
         frameCompositor.reset()
+        frameCompositor.releaseResources()
         isCameraOverlayRoutingActive = false
         AudioLevelMonitor.shared.reset()
 
