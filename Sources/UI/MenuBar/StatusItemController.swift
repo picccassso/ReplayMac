@@ -1,5 +1,6 @@
 import Branding
 import Cocoa
+import Defaults
 import SwiftUI
 import KeyboardShortcuts
 
@@ -666,7 +667,12 @@ public final class StatusItemController: NSObject, NSMenuDelegate {
 private struct StatusBadgeView: View {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @ObservedObject var state: MenuBarState
+    @Default(.staticMenuBarIcon) private var staticMenuBarIcon
     let onWidthChange: (CGFloat) -> Void
+
+    private var isStaticIconActive: Bool {
+        staticMenuBarIcon && state.saveStatus == .idle
+    }
 
     var body: some View {
         HStack(spacing: 5) {
@@ -693,7 +699,7 @@ private struct StatusBadgeView: View {
                 Text("Failed")
                     .foregroundStyle(AppTheme.danger)
             case .idle:
-                if state.isStaticIconActive {
+                if isStaticIconActive {
                     Image(systemName: "record.circle")
                         .foregroundStyle(AppTheme.accent)
                 } else {
@@ -750,6 +756,7 @@ private struct StatusBadgeView: View {
         .animation(reduceMotion ? nil : .easeOut(duration: 0.2), value: state.bufferedSeconds)
         .animation(reduceMotion ? nil : .easeOut(duration: 0.2), value: state.isMicrophoneMuted)
         .animation(reduceMotion ? nil : .easeOut(duration: 0.2), value: state.isSystemAudioMuted)
+        .animation(reduceMotion ? nil : .easeOut(duration: 0.2), value: isStaticIconActive)
     }
 
     private var backgroundColor: Color {
@@ -761,7 +768,7 @@ private struct StatusBadgeView: View {
         case .saving:
             return AppTheme.accent.opacity(0.12)
         case .idle:
-            if !state.isStaticIconActive && (state.isSessionRecording || state.isRecording) {
+            if !isStaticIconActive && (state.isSessionRecording || state.isRecording) {
                 return AppTheme.danger.opacity(0.12)
             }
             return AppTheme.accent.opacity(0.10)
