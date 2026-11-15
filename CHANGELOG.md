@@ -1,5 +1,24 @@
 # Changelog
 
+## 2.4.0
+
+### Capture and Audio
+
+- **Hide mouse cursor in recordings (#17):** add a "Show cursor in recordings" toggle in Settings → Video. Turn it off to exclude the mouse cursor from single and dual-display recordings while keeping it visible on your screen. Changes apply live while recording
+- **Boost microphone past 100% (#19):** the microphone level slider in Settings → Audio now goes up to 400% (+12 dB) so a quiet built-in or headset mic can balance against game audio without turning system audio down. A peak limiter holds back loud moments so boosted voices don't crackle on laughs or consonants, while audio under full scale stays unchanged. Companion protocol snapshots share the extended gain while staying compatible with older phones, and percentage labels now round cleanly instead of truncating (for example, 115% instead of 114%)
+
+### Menu Bar
+
+- **Static menu bar icon (#20):** add a "Static menu bar icon" toggle in Settings → General → Menu Bar. When enabled, the idle menu bar item displays a plain static icon instead of the red recording dot and counting timer, updating immediately when toggled while keeping transient save feedback (Saving…, Saved, Failed)
+
+### Memory and Background Work
+
+- **Halved audio buffer memory:** captured audio is now stored in the ring buffer as 16-bit PCM and handed back as float PCM on save, cutting audio buffer memory in half (a 5-minute buffer with both sources drops from about 233 MB to 117 MB). Settings memory estimates follow the new footprint
+- **Lighter compositing:** camera overlay and side-by-side dual-display compositing now render directly to 8-bit 4:2:0 (`BT.709`) instead of 32BGRA (about 62% smaller) in a single pass, release canvas pools and Core Image caches when capture stops, and correctly position frames when only the second display delivers in dual mode
+- **macOS memory pressure handling:** the low-memory guard now responds to real macOS memory pressure events—halving the replay window (never below 10 s) under critical pressure and restoring it once pressure eases
+- **Smarter buffer caps and defaults:** dual-display video caps now split across the buffers actually in use (including side-by-side and single-display fallback). New installs default their memory cap to roughly a tenth of the Mac's RAM (768 MB on 8 GB Macs, 1536 MB on 16 GB+) and start at the Quality preset's recommended bitrate for their display, while existing installs keep their saved settings. The cap warning no longer offers to raise the memory cap when Advanced settings are hidden
+- **Lower idle CPU and RAM:** Clip Library thumbnails are released 30 seconds after the main window hides and regenerated when shown, the extended-replay pump no longer queues encoded samples when extended replay and session recording are both off, and the menu bar menu only rebuilds while open rather than every second
+
 ## 2.3.0
 
 ### Customise Features
