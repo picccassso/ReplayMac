@@ -37,21 +37,53 @@ extension ClipLibraryView {
     }
 
     var gridView: some View {
-        let rows = visibleRows
+        let sections = visibleSections
+        let expandedItems = sections.flatMap { state.isSectionCollapsed($0.id) ? [] : $0.items }
         let columnCount = gridColumnCount
         let thumbnailWidth = gridThumbnailWidth
         let columns = Array(
             repeating: GridItem(.flexible(), spacing: ClipGridMetrics.spacing, alignment: .top),
             count: columnCount
         )
+        let displayOptions = gridDisplayOptions
+
         return ScrollViewReader { proxy in
             ScrollView {
-                LazyVGrid(columns: columns, alignment: .leading, spacing: ClipGridMetrics.spacing) {
-                    ForEach(rows) { row in
-                        gridCard(for: row, in: rows, thumbnailWidth: thumbnailWidth)
+                if groupMode == .none {
+                    LazyVGrid(columns: columns, alignment: .leading, spacing: ClipGridMetrics.spacing) {
+                        ForEach(sections.first?.items ?? []) { item in
+                            gridCard(
+                                for: item,
+                                in: expandedItems,
+                                thumbnailWidth: thumbnailWidth,
+                                displayOptions: displayOptions
+                            )
+                        }
                     }
+                    .padding(ClipGridMetrics.padding)
+                } else {
+                    LazyVStack(alignment: .leading, spacing: 18) {
+                        ForEach(sections) { section in
+                            let isCollapsed = state.isSectionCollapsed(section.id)
+                            VStack(alignment: .leading, spacing: 10) {
+                                gridSectionHeader(for: section, isCollapsed: isCollapsed)
+                                if !isCollapsed {
+                                    LazyVGrid(columns: columns, alignment: .leading, spacing: ClipGridMetrics.spacing) {
+                                        ForEach(section.items) { item in
+                                            gridCard(
+                                                for: item,
+                                                in: expandedItems,
+                                                thumbnailWidth: thumbnailWidth,
+                                                displayOptions: displayOptions
+                                            )
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    .padding(ClipGridMetrics.padding)
                 }
-                .padding(ClipGridMetrics.padding)
             }
             .background {
                 // Clicking between cards clears the selection, as in Finder.
@@ -67,7 +99,7 @@ extension ClipLibraryView {
             .focusEffectDisabled()
             .focused($gridFocused)
             .onKeyPress(phases: .down) { press in
-                handleGridKey(press, rows: rows, columnCount: columnCount, proxy: proxy)
+                handleGridKey(press, items: expandedItems, columnCount: columnCount, proxy: proxy)
             }
             .onDeleteCommand {
                 requestDelete(selectedRows)
@@ -75,12 +107,59 @@ extension ClipLibraryView {
         }
     }
 
-    private func gridCard(for row: ClipRow, in rows: [ClipRow], thumbnailWidth: CGFloat) -> some View {
-        ClipGridCard(
+    private func gridSectionHeader(for section: ClipSection, isCollapsed: Bool) -> some View {
+        let countLabel = section.clipCount == 1 ? "1 clip" : "\(section.clipCount) clips"
+        let sizeLabel = ByteCountFormatter.string(fromByteCount: section.totalBytes, countStyle: .file)
+
+        return Button {
+            withAnimation(.easeInOut(duration: 0.16)) {
+                state.toggleSection(section.id)
+            }
+        } label: {
+            HStack(spacing: 8) {
+                Image(systemName: isCollapsed ? "chevron.right" : "chevron.down")
+                    .font(.system(size: 10, weight: .bold))
+                    .foregroundStyle(AppTheme.textSecondary)
+                    .frame(width: 12)
+
+                if let icon = section.systemImage {
+                    Image(systemName: icon)
+                        .font(.system(size: 11, weight: .semibold))
+                        .foregroundStyle(section.id == "fav:yes" ? .yellow : AppTheme.accent)
+                }
+
+                Text(section.title)
+                    .font(.system(size: 13, weight: .semibold, design: .rounded))
+                    .foregroundStyle(AppTheme.textPrimary)
+
+                Text("\(countLabel) · \(sizeLabel)")
+                    .font(.system(size: 11, weight: .medium, design: .rounded))
+                    .foregroundStyle(AppTheme.textSecondary)
+
+                Spacer()
+            }
+            .padding(.horizontal, 8)
+            .padding(.vertical, 5)
+            .background(AppTheme.backgroundSecondary.opacity(0.45), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel("\(section.title), \(countLabel), \(isCollapsed ? "collapsed" : "expanded")")
+    }
+
+    private func gridCard(
+        for item: ClipSectionItem,
+        in expandedItems: [ClipSectionItem],
+        thumbnailWidth: CGFloat,
+        displayOptions: ClipGridDisplayOptions
+    ) -> some View {
+        let row = item.row
+        return ClipGridCard(
             row: row,
-            isSelected: state.selection.contains(row.id),
+            isSelected: state.selection.contains(item.clipID),
             isProtected: windowState.isProtected(row.info.fileURL),
             thumbnailWidth: thumbnailWidth,
+            displayOptions: displayOptions,
             actions: ClipGridCardActions(
                 toggleFavorite: {
                     model.toggleFavorite(row)
@@ -95,8 +174,8 @@ extension ClipLibraryView {
                 delete: { requestDelete([row]) }
             )
         )
-        .id(row.id)
-        .onTapGesture { handleGridClick(on: row, in: rows) }
+        .id(item.id)
+        .onTapGesture { handleGridClick(on: item, in: expandedItems) }
         .contextMenu { clipContextMenu(for: contextTargets(for: row)) }
         // Drag a clip straight into Finder, Messages, Discord, and so on.
         .onDrag { NSItemProvider(contentsOf: row.info.fileURL) ?? NSItemProvider() }
@@ -104,7 +183,7 @@ extension ClipLibraryView {
         .accessibilityLabel(row.displayTitle)
         .accessibilityValue("\(row.durationLabel), \(row.sizeLabel), \(row.dateLabel)\(row.userMetadata.isFavorite ? ", favorite" : "")")
         .accessibilityAddTraits(state.selection.contains(row.id) ? [.isButton, .isSelected] : .isButton)
-        .accessibilityAction { selectOnly(row) }
+        .accessibilityAction { selectOnly(item) }
         .accessibilityAction(named: "Quick Preview") { state.previewURL = row.info.fileURL }
         .accessibilityAction(named: "Trim & Export") { openTrim(row.info.fileURL) }
         .accessibilityAction(named: row.userMetadata.isFavorite ? "Remove Favorite" : "Mark Favorite") {
@@ -120,59 +199,73 @@ extension ClipLibraryView {
 
     func selectOnly(_ row: ClipRow) {
         state.selection = [row.id]
-        gridAnchorID = row.id
-        gridCursorID = row.id
+        if let firstItem = visibleSections.flatMap(\.items).first(where: { $0.clipID == row.id }) {
+            gridAnchorID = firstItem.id
+            gridCursorID = firstItem.id
+        } else {
+            gridAnchorID = nil
+            gridCursorID = nil
+        }
+    }
+
+    private func selectOnly(_ item: ClipSectionItem) {
+        state.selection = [item.clipID]
+        gridAnchorID = item.id
+        gridCursorID = item.id
     }
 
     /// Finder-style clicks: plain selects one, Command toggles, Shift extends
     /// from the anchor, and a double-click opens Quick Preview.
-    private func handleGridClick(on row: ClipRow, in rows: [ClipRow]) {
+    private func handleGridClick(on item: ClipSectionItem, in items: [ClipSectionItem]) {
         gridFocused = true
         if NSApp.currentEvent?.clickCount == 2 {
-            selectOnly(row)
-            state.previewURL = row.info.fileURL
+            selectOnly(item)
+            state.previewURL = item.row.info.fileURL
             return
         }
 
         let modifiers = NSEvent.modifierFlags
         if modifiers.contains(.command) {
-            if state.selection.contains(row.id) {
-                state.selection.remove(row.id)
+            if state.selection.contains(item.clipID) {
+                state.selection.remove(item.clipID)
             } else {
-                state.selection.insert(row.id)
+                state.selection.insert(item.clipID)
             }
-            gridAnchorID = row.id
-            gridCursorID = row.id
-        } else if modifiers.contains(.shift), let anchorID = gridAnchorID, state.selection.contains(anchorID) {
-            selectRange(from: anchorID, to: row.id, in: rows)
-            gridCursorID = row.id
+            gridAnchorID = item.id
+            gridCursorID = item.id
+        } else if modifiers.contains(.shift),
+                  let anchorID = gridAnchorID,
+                  let anchorItem = items.first(where: { $0.id == anchorID }),
+                  state.selection.contains(anchorItem.clipID) {
+            selectRange(from: anchorID, to: item.id, in: items)
+            gridCursorID = item.id
         } else {
-            selectOnly(row)
+            selectOnly(item)
         }
     }
 
-    private func selectRange(from anchorID: ClipRow.ID, to targetID: ClipRow.ID, in rows: [ClipRow]) {
-        guard let start = rows.firstIndex(where: { $0.id == anchorID }),
-              let end = rows.firstIndex(where: { $0.id == targetID }) else { return }
-        state.selection = Set(rows[min(start, end)...max(start, end)].map(\.id))
+    private func selectRange(from anchorID: ClipSectionItem.ID, to targetID: ClipSectionItem.ID, in items: [ClipSectionItem]) {
+        guard let start = items.firstIndex(where: { $0.id == anchorID }),
+              let end = items.firstIndex(where: { $0.id == targetID }) else { return }
+        state.selection = Set(items[min(start, end)...max(start, end)].map(\.clipID))
     }
 
     private func handleGridKey(
         _ press: KeyPress,
-        rows: [ClipRow],
+        items: [ClipSectionItem],
         columnCount: Int,
         proxy: ScrollViewProxy
     ) -> KeyPress.Result {
         let extend = press.modifiers.contains(.shift)
         switch press.key {
         case .leftArrow:
-            moveGridCursor(by: -1, extend: extend, rows: rows, proxy: proxy)
+            moveGridCursor(by: -1, extend: extend, items: items, proxy: proxy)
         case .rightArrow:
-            moveGridCursor(by: 1, extend: extend, rows: rows, proxy: proxy)
+            moveGridCursor(by: 1, extend: extend, items: items, proxy: proxy)
         case .upArrow:
-            moveGridCursor(by: -columnCount, extend: extend, rows: rows, proxy: proxy)
+            moveGridCursor(by: -columnCount, extend: extend, items: items, proxy: proxy)
         case .downArrow:
-            moveGridCursor(by: columnCount, extend: extend, rows: rows, proxy: proxy)
+            moveGridCursor(by: columnCount, extend: extend, items: items, proxy: proxy)
         case .space, .return:
             guard let row = singleSelectedRow else { return .ignored }
             state.previewURL = row.info.fileURL
@@ -181,30 +274,34 @@ extension ClipLibraryView {
             state.selection = []
         default:
             guard press.modifiers.contains(.command), press.characters == "a" else { return .ignored }
-            state.selection = Set(rows.map(\.id))
+            state.selection = Set(items.map(\.clipID))
         }
         return .handled
     }
 
-    private func moveGridCursor(by offset: Int, extend: Bool, rows: [ClipRow], proxy: ScrollViewProxy) {
-        guard !rows.isEmpty else { return }
+    private func moveGridCursor(by offset: Int, extend: Bool, items: [ClipSectionItem], proxy: ScrollViewProxy) {
+        guard !items.isEmpty else { return }
         let target: Int
-        if let cursorID = gridCursorID, state.selection.contains(cursorID),
-           let current = rows.firstIndex(where: { $0.id == cursorID }) {
-            target = min(max(current + offset, 0), rows.count - 1)
+        if let cursorID = gridCursorID,
+           let current = items.firstIndex(where: { $0.id == cursorID }),
+           state.selection.contains(items[current].clipID) {
+            target = min(max(current + offset, 0), items.count - 1)
         } else {
-            target = offset < 0 ? rows.count - 1 : 0
+            target = offset < 0 ? items.count - 1 : 0
         }
 
-        let row = rows[target]
-        if extend, let anchorID = gridAnchorID, state.selection.contains(anchorID) {
-            selectRange(from: anchorID, to: row.id, in: rows)
-            gridCursorID = row.id
+        let item = items[target]
+        if extend,
+           let anchorID = gridAnchorID,
+           let anchorItem = items.first(where: { $0.id == anchorID }),
+           state.selection.contains(anchorItem.clipID) {
+            selectRange(from: anchorID, to: item.id, in: items)
+            gridCursorID = item.id
         } else {
-            selectOnly(row)
+            selectOnly(item)
         }
         withAnimation(.easeOut(duration: 0.15)) {
-            proxy.scrollTo(row.id)
+            proxy.scrollTo(item.id)
         }
     }
 }

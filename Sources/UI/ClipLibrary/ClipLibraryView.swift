@@ -8,15 +8,30 @@ public struct ClipLibraryView: View {
     @Default(.outputDirectoryPath) private var outputDirectoryPath
     @Default(.clipLibraryLayout) private var layout
     @Default(.clipLibraryGridCardWidth) var gridCardWidth
+    @Default(.clipLibraryGroupMode) var groupMode
+    @Default(.clipLibrarySortMode) var sortMode
+    @Default(.clipLibrarySortDirection) var sortDirection
+    @Default(.clipLibrarySortFavoritesFirst) var favoritesFirst
+    @Default(.clipLibraryFavoritesOnly) var favoritesOnly
+    @Default(.clipLibraryDateFilter) var dateFilter
+    @Default(.clipLibrarySelectedTags) var selectedTags
+    @Default(.clipLibraryDateFormat) var dateFormat
+    @Default(.clipLibraryTableDensity) var tableDensity
+    @Default(.clipLibraryVisibleColumns) var visibleColumns
+    @Default(.clipLibraryGridSubtitleFields) var gridSubtitleFields
+    @Default(.clipLibraryGridShowTagBadges) var gridShowTagBadges
+    @Default(.clipLibraryGridShowDurationBadge) var gridShowDurationBadge
+    @Default(.clipLibraryGridShowFavoriteBadge) var gridShowFavoriteBadge
+
     @ObservedObject var state: ClipLibraryState
     @ObservedObject var model: ClipLibraryViewModel
     @ObservedObject var windowState: MainWindowState
 
     @State var gridWidth: CGFloat = 0
-    /// Where shift-click and shift-arrow ranges start in the grid.
-    @State var gridAnchorID: ClipRow.ID?
-    /// The card arrow keys move from.
-    @State var gridCursorID: ClipRow.ID?
+    /// Where shift-click and shift-arrow ranges start in the grid (item ID).
+    @State var gridAnchorID: ClipSectionItem.ID?
+    /// The card arrow keys move from (item ID).
+    @State var gridCursorID: ClipSectionItem.ID?
     @FocusState var gridFocused: Bool
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
@@ -154,50 +169,128 @@ public struct ClipLibraryView: View {
             .buttonStyle(.bordered)
     }
 
-    private var librarySummaryHeader: some View {
-        HStack(spacing: 8) {
-            let summary = model.storageSummary
-            let clips = summary.clipCount == 1 ? "1 clip" : "\(summary.clipCount) clips"
-            let size = ByteCountFormatter.string(fromByteCount: summary.totalBytes, countStyle: .file)
+    private var hasActiveFilters: Bool {
+        favoritesOnly || dateFilter != .all || !selectedTags.isEmpty
+    }
 
-            if state.favoritesOnly {
-                let filteredCount = visibleRows.count
-                let filteredBytes = visibleRows.reduce(Int64(0)) { $0 + $1.info.fileSize }
-                let filteredSize = ByteCountFormatter.string(fromByteCount: filteredBytes, countStyle: .file)
-                Image(systemName: "star.fill")
-                    .font(.system(size: 11))
-                    .foregroundStyle(.yellow)
-                Text("\(filteredCount) favorites · \(filteredSize)")
-                    .foregroundStyle(AppTheme.textPrimary)
-                Text("(\(clips) · \(size) total)")
+    private var librarySummaryHeader: some View {
+        let summary = model.storageSummary
+        let clips = summary.clipCount == 1 ? "1 clip" : "\(summary.clipCount) clips"
+        let size = ByteCountFormatter.string(fromByteCount: summary.totalBytes, countStyle: .file)
+        let matchingRows = visibleRows
+        let sections = visibleSections
+        let allCollapsed = !sections.isEmpty && sections.allSatisfy { state.isSectionCollapsed($0.id) }
+
+        return VStack(alignment: .leading, spacing: 6) {
+            HStack(spacing: 8) {
+                if hasActiveFilters || !state.searchText.isEmpty {
+                    let filteredCount = matchingRows.count
+                    let filteredBytes = matchingRows.reduce(Int64(0)) { $0 + $1.info.fileSize }
+                    let filteredSize = ByteCountFormatter.string(fromByteCount: filteredBytes, countStyle: .file)
+                    Image(systemName: !state.searchText.isEmpty ? "magnifyingglass" : "line.3.horizontal.decrease.circle.fill")
+                        .font(.system(size: 11))
+                        .foregroundStyle(AppTheme.accent)
+                    Text("\(filteredCount) matching · \(filteredSize)")
+                        .foregroundStyle(AppTheme.textPrimary)
+                    Text("(\(clips) · \(size) total)")
+                        .foregroundStyle(AppTheme.textSecondary)
+                } else {
+                    Image(systemName: "film.stack")
+                        .font(.system(size: 11))
+                        .foregroundStyle(AppTheme.accent)
+                    Text("\(clips) · \(size)")
+                        .foregroundStyle(AppTheme.textSecondary)
+                }
+
+                Spacer()
+
+                if groupMode != .none, sections.count > 1 {
+                    Button {
+                        if allCollapsed {
+                            state.expandAllSections()
+                        } else {
+                            state.collapseSections(sections.map(\.id))
+                        }
+                    } label: {
+                        Label(
+                            allCollapsed ? "Expand All" : "Collapse All",
+                            systemImage: allCollapsed ? "chevron.down.square" : "chevron.right.square"
+                        )
+                        .labelStyle(.titleAndIcon)
+                    }
+                    .buttonStyle(.plain)
                     .foregroundStyle(AppTheme.textSecondary)
-            } else if !state.searchText.isEmpty {
-                let filteredCount = visibleRows.count
-                let filteredBytes = visibleRows.reduce(Int64(0)) { $0 + $1.info.fileSize }
-                let filteredSize = ByteCountFormatter.string(fromByteCount: filteredBytes, countStyle: .file)
-                Image(systemName: "magnifyingglass")
-                    .font(.system(size: 11))
-                    .foregroundStyle(AppTheme.accent)
-                Text("\(filteredCount) matching · \(filteredSize)")
-                    .foregroundStyle(AppTheme.textPrimary)
-                Text("(\(clips) · \(size) total)")
-                    .foregroundStyle(AppTheme.textSecondary)
-            } else {
-                Image(systemName: "film.stack")
-                    .font(.system(size: 11))
-                    .foregroundStyle(AppTheme.accent)
-                Text("\(clips) · \(size)")
-                    .foregroundStyle(AppTheme.textSecondary)
+                    .help(allCollapsed ? "Expand all sections" : "Collapse all sections")
+                }
+
+                if layout == .grid {
+                    gridSizeSlider
+                }
             }
-            Spacer()
-            if layout == .grid {
-                gridSizeSlider
+
+            if hasActiveFilters {
+                activeFilterChipsBar
             }
         }
         .font(.system(size: 11, weight: .medium, design: .rounded))
         .padding(.horizontal, 16)
         .padding(.vertical, 7)
         .background(AppTheme.backgroundSecondary.opacity(0.35))
+    }
+
+    private var activeFilterChipsBar: some View {
+        ScrollView(.horizontal, showsIndicators: false) {
+            HStack(spacing: 6) {
+                if favoritesOnly {
+                    filterChip(title: "Favorites", systemImage: "star.fill", tint: .yellow) {
+                        favoritesOnly = false
+                    }
+                }
+                if dateFilter != .all {
+                    filterChip(title: dateFilter.title, systemImage: "calendar", tint: AppTheme.accent) {
+                        dateFilter = .all
+                    }
+                }
+                ForEach(selectedTags, id: \.self) { tag in
+                    filterChip(title: tag, systemImage: "tag.fill", tint: AppTheme.accent) {
+                        selectedTags.removeAll { $0.caseInsensitiveCompare(tag) == .orderedSame }
+                    }
+                }
+                Button("Clear Filters") {
+                    ClipLibraryViewOptions.resetFilters()
+                }
+                .buttonStyle(.plain)
+                .foregroundStyle(AppTheme.accent)
+                .padding(.leading, 4)
+            }
+        }
+    }
+
+    private func filterChip(
+        title: String,
+        systemImage: String,
+        tint: Color,
+        onRemove: @escaping () -> Void
+    ) -> some View {
+        Button(action: onRemove) {
+            HStack(spacing: 4) {
+                Image(systemName: systemImage)
+                    .font(.system(size: 9.5, weight: .semibold))
+                    .foregroundStyle(tint)
+                Text(title)
+                    .foregroundStyle(AppTheme.textPrimary)
+                Image(systemName: "xmark")
+                    .font(.system(size: 8.5, weight: .bold))
+                    .foregroundStyle(AppTheme.textSecondary)
+            }
+            .font(.system(size: 10.5, weight: .medium, design: .rounded))
+            .padding(.horizontal, 8)
+            .padding(.vertical, 3)
+            .background(AppTheme.accent.opacity(0.1), in: Capsule())
+            .overlay(Capsule().stroke(AppTheme.accent.opacity(0.22), lineWidth: 0.5))
+        }
+        .buttonStyle(.plain)
+        .help("Remove \(title) filter")
     }
 
     @ViewBuilder
@@ -224,9 +317,18 @@ public struct ClipLibraryView: View {
                     .font(.system(size: 18, weight: .bold, design: .rounded))
                     .foregroundStyle(AppTheme.textPrimary)
 
-                Text(model.rows.isEmpty ? "Saved clips will appear here." : "Try another search or turn off the favorites filter.")
+                Text(model.rows.isEmpty ? "Saved clips will appear here." : "Try another search or adjust your active filters.")
                     .font(.system(size: 13, weight: .regular, design: .rounded))
                     .foregroundStyle(AppTheme.textSecondary)
+            }
+
+            if !model.rows.isEmpty && (hasActiveFilters || !state.searchText.isEmpty) {
+                Button("Reset Filters") {
+                    state.searchText = ""
+                    ClipLibraryViewOptions.resetFilters()
+                }
+                .buttonStyle(.bordered)
+                .controlSize(.small)
             }
         }
     }
@@ -536,15 +638,42 @@ public struct ClipLibraryView: View {
         state.selection = state.selection.filter { id in model.rows.contains(where: { $0.id == id }) }
     }
 
+    var queryOptions: ClipLibraryQueryOptions {
+        ClipLibraryQueryOptions(
+            groupMode: groupMode,
+            sortMode: sortMode,
+            sortDirection: sortDirection,
+            favoritesFirst: favoritesFirst,
+            favoritesOnly: favoritesOnly,
+            dateFilter: dateFilter,
+            selectedTags: selectedTags,
+            searchText: state.searchText
+        )
+    }
+
+    var gridDisplayOptions: ClipGridDisplayOptions {
+        ClipGridDisplayOptions(
+            showTagBadges: gridShowTagBadges,
+            showDurationBadge: gridShowDurationBadge,
+            showFavoriteBadge: gridShowFavoriteBadge,
+            subtitleFields: gridSubtitleFields,
+            dateFormat: dateFormat
+        )
+    }
+
+    var visibleSections: [ClipSection] {
+        ClipLibraryQuery.sections(from: model.rows, options: queryOptions)
+    }
+
     var visibleRows: [ClipRow] {
-        model.sortedRows(by: state.sortMode).filter { row in
-            let matchesFavorite = !state.favoritesOnly || row.userMetadata.isFavorite
-            let query = state.searchText.trimmingCharacters(in: .whitespacesAndNewlines)
-            guard matchesFavorite, !query.isEmpty else {
-                return matchesFavorite
+        var seen = Set<String>()
+        var result: [ClipRow] = []
+        for section in visibleSections {
+            for item in section.items where seen.insert(item.clipID).inserted {
+                result.append(item.row)
             }
-            return row.searchText.localizedCaseInsensitiveContains(query)
         }
+        return result
     }
 
     func syncDraftFromSelection() {

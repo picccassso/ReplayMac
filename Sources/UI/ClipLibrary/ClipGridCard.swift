@@ -1,34 +1,6 @@
 import SwiftUI
 import AppKit
 @preconcurrency import AVFoundation
-import Defaults
-
-enum ClipLibraryLayout: String, CaseIterable, Identifiable, Defaults.Serializable {
-    case list
-    case grid
-
-    var id: String { rawValue }
-
-    var title: String {
-        switch self {
-        case .list: return "List"
-        case .grid: return "Grid"
-        }
-    }
-
-    var systemImage: String {
-        switch self {
-        case .list: return "list.bullet"
-        case .grid: return "square.grid.2x2"
-        }
-    }
-}
-
-extension Defaults.Keys {
-    static let clipLibraryLayout = Key<ClipLibraryLayout>("clipLibraryLayout", default: .list)
-    /// Smallest width a grid card may shrink to; cards stretch to fill each row.
-    static let clipLibraryGridCardWidth = Key<Double>("clipLibraryGridCardWidth", default: 240)
-}
 
 enum ClipGridMetrics {
     static let cardWidthRange: ClosedRange<Double> = 180...380
@@ -53,6 +25,7 @@ struct ClipGridCard: View {
     let isSelected: Bool
     let isProtected: Bool
     let thumbnailWidth: CGFloat
+    var displayOptions: ClipGridDisplayOptions = .default
     let actions: ClipGridCardActions
 
     @StateObject private var skimmer = ClipSkimmer()
@@ -108,7 +81,7 @@ struct ClipGridCard: View {
             .overlay { poster }
             .overlay(alignment: .leading) { playhead }
             .overlay(alignment: .topLeading) {
-                if row.userMetadata.isFavorite || isHovering {
+                if displayOptions.showFavoriteBadge && (row.userMetadata.isFavorite || isHovering) {
                     favoriteButton.padding(8)
                 }
             }
@@ -224,16 +197,20 @@ struct ClipGridCard: View {
 
     private var bottomBadges: some View {
         HStack(alignment: .bottom, spacing: 4) {
-            ForEach(row.userMetadata.tags.prefix(2), id: \.self) { tag in
-                ThumbnailBadge(text: tag)
-            }
-            if row.userMetadata.tags.count > 2 {
-                ThumbnailBadge(text: "+\(row.userMetadata.tags.count - 2)")
-                    .fixedSize()
+            if displayOptions.showTagBadges {
+                ForEach(row.userMetadata.tags.prefix(2), id: \.self) { tag in
+                    ThumbnailBadge(text: tag)
+                }
+                if row.userMetadata.tags.count > 2 {
+                    ThumbnailBadge(text: "+\(row.userMetadata.tags.count - 2)")
+                        .fixedSize()
+                }
             }
             Spacer(minLength: 4)
-            ThumbnailBadge(text: durationText, monospaced: true)
-                .fixedSize()
+            if displayOptions.showDurationBadge {
+                ThumbnailBadge(text: durationText, monospaced: true)
+                    .fixedSize()
+            }
         }
         .allowsHitTesting(false)
     }
@@ -248,16 +225,23 @@ struct ClipGridCard: View {
     // MARK: Details
 
     private var details: some View {
-        VStack(alignment: .leading, spacing: 2) {
+        let subtitle = ClipLibraryFormatter.gridSubtitle(
+            for: row,
+            fields: displayOptions.subtitleFields,
+            dateFormat: displayOptions.dateFormat
+        )
+        return VStack(alignment: .leading, spacing: 2) {
             Text(row.displayTitle)
                 .font(.system(size: 13, weight: .semibold, design: .rounded))
                 .foregroundStyle(AppTheme.textPrimary)
                 .lineLimit(1)
                 .truncationMode(.middle)
-            Text(row.gridSubtitleLabel)
-                .font(.system(size: 11, weight: .medium, design: .rounded))
-                .foregroundStyle(AppTheme.textSecondary)
-                .lineLimit(1)
+            if !subtitle.isEmpty {
+                Text(subtitle)
+                    .font(.system(size: 11, weight: .medium, design: .rounded))
+                    .foregroundStyle(AppTheme.textSecondary)
+                    .lineLimit(1)
+            }
         }
         .padding(.horizontal, 4)
         .padding(.bottom, 2)

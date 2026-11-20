@@ -1,24 +1,6 @@
 import AppKit
 import Save
 
-enum ClipSortMode: String, CaseIterable, Identifiable {
-    case date
-    case name
-    case duration
-    case size
-
-    var id: String { rawValue }
-
-    var title: String {
-        switch self {
-        case .date: return "Date"
-        case .name: return "Name"
-        case .duration: return "Duration"
-        case .size: return "Size"
-        }
-    }
-}
-
 struct ClipRow: Identifiable {
     let info: ClipInfo
     let thumbnail: NSImage?
@@ -29,6 +11,7 @@ struct ClipRow: Identifiable {
     let fileNameWithoutExtension: String
     let durationLabel: String
     let sizeLabel: String
+    let resolutionLabel: String?
     let dateLabel: String
     let gridSubtitleLabel: String
 
@@ -47,6 +30,11 @@ struct ClipRow: Identifiable {
         }
         let sizeLabel = ByteCountFormatter.string(fromByteCount: info.fileSize, countStyle: .file)
         self.sizeLabel = sizeLabel
+        if let resolution = info.resolution, resolution.width > 0, resolution.height > 0 {
+            self.resolutionLabel = "\(Int(resolution.width.rounded()))×\(Int(resolution.height.rounded()))"
+        } else {
+            self.resolutionLabel = nil
+        }
         self.dateLabel = DateFormatter.clipLibraryDate.string(from: info.creationDate)
         self.gridSubtitleLabel = "\(DateFormatter.clipGridDate.string(from: info.creationDate)) · \(sizeLabel)"
     }
@@ -378,16 +366,20 @@ final class ClipLibraryViewModel: ObservableObject {
         await reload()
     }
 
-    func sortedRows(by mode: ClipSortMode) -> [ClipRow] {
-        switch mode {
-        case .date:
-            return rows.sorted { $0.info.creationDate > $1.info.creationDate }
-        case .name:
-            return rows.sorted { $0.fileName.localizedCaseInsensitiveCompare($1.fileName) == .orderedAscending }
-        case .duration:
-            return rows.sorted { $0.info.duration > $1.info.duration }
-        case .size:
-            return rows.sorted { $0.info.fileSize > $1.info.fileSize }
+    var availableTags: [String] {
+        var displayByKey: [String: String] = [:]
+        for row in rows {
+            for rawTag in row.userMetadata.tags {
+                let clean = rawTag.trimmingCharacters(in: .whitespacesAndNewlines)
+                guard !clean.isEmpty else { continue }
+                let key = clean.lowercased()
+                if displayByKey[key] == nil {
+                    displayByKey[key] = clean
+                }
+            }
+        }
+        return displayByKey.values.sorted {
+            $0.localizedStandardCompare($1) == .orderedAscending
         }
     }
 
