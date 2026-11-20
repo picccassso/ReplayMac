@@ -6,12 +6,12 @@ extension SettingsView {
         "\(Int(bitrateSliderValue)) Mbps"
     }
 
-    var bitrateScopeLabel: String {
+    var bitrateScopeLabel: String? {
         if captureModeRawValue == CaptureMode.dualSideBySide.rawValue,
            dualCaptureSaveModeRawValue == DualCaptureSaveMode.separateFiles.rawValue {
             return "Applies per display file"
         }
-        return "Applies to the saved video stream"
+        return nil
     }
 
     var recommendedBitrateLabel: String {

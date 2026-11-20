@@ -201,21 +201,28 @@ extension SettingsView {
                             .tint(AppTheme.accent)
                             .background(BitrateSweetSpotBand(sweetSpot: guide.sweetSpot))
                             .accessibilityHint(guide.message(for: bitrateSliderValue.rounded()))
-                        HStack(spacing: 8) {
-                            Label(bitrateScopeLabel, systemImage: "info.circle")
+                        HStack(alignment: .firstTextBaseline, spacing: 8) {
+                            BitrateZoneLabel(guide: guide, bitrateMbps: bitrateSliderValue.rounded())
                             Spacer()
-                            if isAtRecommendedBitrate {
-                                Text(recommendedBitrateLabel)
-                            } else {
-                                Button(recommendedBitrateLabel, action: applyRecommendedBitrate)
-                                    .buttonStyle(.link)
-                                    .help("Set the bitrate to the recommendation")
+                            Group {
+                                if isAtRecommendedBitrate {
+                                    Text(recommendedBitrateLabel)
+                                } else {
+                                    Button(recommendedBitrateLabel, action: applyRecommendedBitrate)
+                                        .buttonStyle(.link)
+                                        .help("Set the bitrate to the recommendation")
+                                }
                             }
+                            .foregroundStyle(AppTheme.textSecondary)
+                            .font(.system(size: 12, design: .rounded))
+                            .fixedSize(horizontal: true, vertical: false)
                         }
-                        .foregroundStyle(AppTheme.textSecondary)
-                        .font(.system(size: 12, design: .rounded))
-                        BitrateZoneLabel(guide: guide, bitrateMbps: bitrateSliderValue.rounded())
                         BitrateCostHint(bitrateMbps: bitrateSliderValue.rounded())
+                        if let bitrateScopeLabel {
+                            Label(bitrateScopeLabel, systemImage: "info.circle")
+                                .foregroundStyle(AppTheme.textSecondary)
+                                .font(.system(size: 12, design: .rounded))
+                        }
                     }
                     .sheet(isPresented: $isShowingBitrateExplainer) {
                         BitrateExplainerSheet(

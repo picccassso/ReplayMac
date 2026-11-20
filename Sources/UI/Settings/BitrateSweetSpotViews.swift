@@ -89,6 +89,6 @@ struct BitrateCostHint: View {
             memoryCapMB: memoryCapMB
         )
         let buffer = ReplayMemoryEstimate.formatDuration(bufferDurationSeconds)
-        return "About \(perMinute) per minute of video. Your \(buffer) buffer keeps about \(estimate.formattedRequired) in memory."
+        return "~\(perMinute)/min · ~\(estimate.formattedRequired) in memory (\(buffer) buffer)"
     }
 }

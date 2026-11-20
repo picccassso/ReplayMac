@@ -70,14 +70,14 @@ public struct BitrateGuide: Equatable {
         let high = Int(sweetSpot.upperBound)
         switch zone(for: mbps) {
         case .low:
-            return "Fast motion can look blocky below \(low) Mbps at this size and frame rate."
+            return "May look blocky in fast motion below \(low) Mbps."
         case .sweetSpot:
             if low == high {
-                return "\(low) Mbps is the sweet spot for this size and frame rate."
+                return "Sweet spot (\(low) Mbps)."
             }
-            return "In the sweet spot for this size and frame rate (\(low)–\(high) Mbps)."
+            return "Sweet spot (\(low)–\(high) Mbps)."
         case .high:
-            return "Above \(high) Mbps, clips get bigger, and the extra detail mostly shows on a large, sharp display."
+            return "Above \(high) Mbps — bigger files, subtle visual gain."
         }
     }
 

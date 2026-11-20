@@ -52,7 +52,7 @@ struct BitrateExplainerSheet: View {
                     .font(.system(size: 15, weight: .semibold, design: .rounded))
             }
 
-            Text("Bitrate is how much data each second of video gets. When there isn't enough, the encoder throws detail away, and you see it first in fast motion: blocky smears when the camera swings, mushy grass and smoke, fuzzy HUD text. It's shared across every pixel of every frame, so the same bitrate goes further at a smaller size or a lower frame rate.")
+            Text("Bitrate sets how much data each second of video gets. Too low and fast motion turns blocky; too high and files grow with little visible gain.")
                 .fixedSize(horizontal: false, vertical: true)
 
             HStack(alignment: .top, spacing: Self.columnSpacing) {
@@ -86,10 +86,9 @@ struct BitrateExplainerSheet: View {
             }
 
             VStack(alignment: .leading, spacing: 8) {
-                Label("Above the green, the extra detail only shows on a large, sharp display, or when you pause and look closely. On a laptop screen or a phone you probably won't see a difference, and sites like YouTube compress clips again when you upload them.", systemImage: "display")
-                Label("The green moves with your size, frame rate and codec, so the slider doesn't stop at it. Go above it if you edit clips or watch them on a high-end monitor, or below it to save memory and disk.", systemImage: "slider.horizontal.3")
-                Label("Fast shooters and racing games benefit from the top of the band. Desktop and strategy footage looks fine near the bottom.", systemImage: "gamecontroller")
-                Label("A higher bitrate won't slow your games. Encoding runs on your Mac's media engine, and its work depends on resolution and frame rate. Bitrate costs memory and disk space instead.", systemImage: "cpu")
+                Label("Fast shooters and racing games benefit from the top of the green band; desktop and strategy footage looks fine near the bottom.", systemImage: "gamecontroller")
+                Label("Go above the band if you edit clips or watch on a large, sharp display — YouTube and social sites recompress uploads anyway.", systemImage: "display")
+                Label("Higher bitrate won't slow your games; it runs on the media engine and only costs memory and disk space.", systemImage: "cpu")
             }
             .foregroundStyle(AppTheme.textSecondary)
             .font(.system(size: 12, design: .rounded))
@@ -181,9 +180,9 @@ struct BitrateExplainerSheet: View {
             .chartYScale(domain: qualityAxisFloor...1)
             .chartYAxis(.hidden)
             .chartXAxis {
-                AxisMarks(values: [10, 20, 30, 40, 50]) { _ in
+                AxisMarks(preset: .aligned, values: [10, 20, 30, 40, 50]) { _ in
                     AxisGridLine()
-                    AxisValueLabel(anchor: .top)
+                    AxisValueLabel()
                 }
             }
             .chartPlotStyle { plot in
@@ -191,7 +190,7 @@ struct BitrateExplainerSheet: View {
             }
             .frame(height: 170)
             .accessibilityHidden(true)
-            Text("Green is the sweet spot. Past it, the line flattens: files keep growing, but on most screens the picture barely changes.")
+            Text("Past the green band, the curve flattens — files grow, but picture quality barely changes.")
                 .font(.system(size: 11, design: .rounded))
                 .foregroundStyle(AppTheme.textSecondary)
                 .fixedSize(horizontal: false, vertical: true)
