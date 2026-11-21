@@ -183,6 +183,9 @@ struct ClipTrimView: View {
                         .textSelection(.enabled)
                 }
                 estimateSummary
+                if session.isBusy, let progress = exports.progress {
+                    ProgressView(value: progress)
+                }
                 Divider()
                 HStack {
                     if session.isBusy {

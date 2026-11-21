@@ -131,6 +131,11 @@ enum VideoCropper {
         let nominalFrameRate = try await track.load(.nominalFrameRate)
         let frameRate = nominalFrameRate.isFinite && nominalFrameRate > 0 ? nominalFrameRate : 30
         composition.frameDuration = CMTime(value: 1, timescale: CMTimeScale(frameRate.rounded()))
+        // Preserve variable-frame-rate timing from ScreenCaptureKit recordings
+        // instead of synthesizing duplicate idle frames or dropping high-fps bursts.
+        if track.trackID != kCMPersistentTrackID_Invalid {
+            composition.sourceTrackIDForFrameTiming = track.trackID
+        }
 
         let layerInstruction = AVMutableVideoCompositionLayerInstruction(assetTrack: track)
         let scaleX = outputSize.width / cropRect.width

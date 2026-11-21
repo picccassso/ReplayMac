@@ -66,7 +66,15 @@ public final class ClipExportCoordinator: ObservableObject {
         }
     }
 
-    func track(_ exporter: TrimVideoTranscoder) { customExporter = exporter }
+    func track(_ exporter: TrimVideoTranscoder) {
+        customExporter = exporter
+        progressTask = Task {
+            while !Task.isCancelled {
+                progress = exporter.progress
+                try? await Task.sleep(for: .milliseconds(100))
+            }
+        }
+    }
 
     public func cancel() {
         job?.cancel()

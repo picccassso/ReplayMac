@@ -67,6 +67,17 @@ final class HDRSaveTests: XCTestCase {
             to: controlledTranscode
         )
         try await assertHDR(controlledTranscode)
+
+        let directTranscode = folder.appendingPathComponent("direct-transcode.mp4")
+        try await TrimVideoTranscoder().export(
+            asset: composition,
+            timeRange: CMTimeRange(start: .zero, duration: duration),
+            videoComposition: nil,
+            outputSize: outputSize,
+            videoBitrateMbps: 1.5,
+            to: directTranscode
+        )
+        try await assertHDR(directTranscode)
     }
 
     func testHDRAtMacBookDisplayDimensionsProducesFrames() throws {

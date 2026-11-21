@@ -206,6 +206,140 @@ final class VideoCropTests: XCTestCase {
     }
 
     @MainActor
+    func testDirectUncroppedTranscodeScalesTrimsPassesAACThroughAndReportsProgress() async throws {
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("ReplayCapDirectTranscodeTests-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+
+        let sourceURL = directory.appendingPathComponent("source.mp4")
+        let outputURL = directory.appendingPathComponent("output.mp4")
+        try await writeTestVideo(
+            to: sourceURL,
+            size: CGSize(width: 640, height: 360),
+            frameCount: 60,
+            includeAACAudio: true
+        )
+
+        let asset = AVURLAsset(url: sourceURL)
+        let outputSize = CGSize(width: 320, height: 180)
+        let trimRange = CMTimeRangeFromTimeToTime(
+            start: CMTime(seconds: 0.4, preferredTimescale: 600),
+            end: CMTime(seconds: 1.6, preferredTimescale: 600)
+        )
+        let transcoder = TrimVideoTranscoder()
+        try await transcoder.export(
+            asset: asset,
+            timeRange: trimRange,
+            videoComposition: nil,
+            outputSize: outputSize,
+            videoBitrateMbps: 2,
+            to: outputURL
+        )
+
+        XCTAssertEqual(transcoder.progress, 1.0, accuracy: 0.001)
+
+        let outputAsset = AVURLAsset(url: outputURL)
+        let resultGeometry = try await VideoCropper.geometry(for: outputAsset)
+        XCTAssertEqual(resultGeometry.displaySize.width, 320, accuracy: 0.5)
+        XCTAssertEqual(resultGeometry.displaySize.height, 180, accuracy: 0.5)
+
+        let outputDuration = try await outputAsset.load(.duration).seconds
+        XCTAssertEqual(outputDuration, 1.2, accuracy: 0.15)
+
+        let videoTracks = try await outputAsset.loadTracks(withMediaType: .video)
+        let videoFormats = try await videoTracks.first?.load(.formatDescriptions)
+        let videoFormat = try XCTUnwrap(videoFormats?.first)
+        XCTAssertEqual(CMFormatDescriptionGetMediaSubType(videoFormat), kCMVideoCodecType_HEVC)
+
+        let audioTracks = try await outputAsset.loadTracks(withMediaType: .audio)
+        XCTAssertEqual(audioTracks.count, 1)
+        let audioFormats = try await audioTracks.first?.load(.formatDescriptions)
+        let audioFormat = try XCTUnwrap(audioFormats?.first)
+        XCTAssertEqual(CMFormatDescriptionGetMediaSubType(audioFormat), kAudioFormatMPEG4AAC)
+    }
+
+    @MainActor
+    func testDirectAndCroppedTranscodesPreserveVFRFrameCount() async throws {
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("ReplayCapVFRTranscodeTests-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+
+        let sourceURL = directory.appendingPathComponent("vfr.mp4")
+        // 12 frames at 60 fps (0.0s ..< 0.2s) + 8 frames at 4 fps (0.25s .. 2.0s) = 20 frames.
+        var frameTimes = (0..<12).map { CMTime(value: CMTimeValue($0), timescale: 60) }
+        for index in 1...8 {
+            frameTimes.append(CMTime(value: CMTimeValue(index), timescale: 4))
+        }
+        try await writeTestVideo(to: sourceURL, size: CGSize(width: 320, height: 180), frameTimes: frameTimes)
+
+        let asset = AVURLAsset(url: sourceURL)
+        let duration = try await asset.load(.duration)
+        let fullRange = CMTimeRange(start: .zero, duration: duration)
+
+        let directURL = directory.appendingPathComponent("direct.mp4")
+        try await TrimVideoTranscoder().export(
+            asset: asset,
+            timeRange: fullRange,
+            videoComposition: nil,
+            outputSize: CGSize(width: 160, height: 90),
+            videoBitrateMbps: 2,
+            to: directURL
+        )
+        let directCount = try await countVideoFrames(in: directURL)
+        XCTAssertEqual(directCount, frameTimes.count)
+
+        let croppedURL = directory.appendingPathComponent("cropped.mp4")
+        let crop = NormalizedVideoCrop(CGRect(x: 0, y: 0, width: 0.5, height: 1))
+        let croppedSize = CGSize(width: 160, height: 180)
+        let composition = try await VideoCropper.videoComposition(for: asset, crop: crop, outputSize: croppedSize)
+        try await TrimVideoTranscoder().export(
+            asset: asset,
+            timeRange: fullRange,
+            videoComposition: composition,
+            outputSize: croppedSize,
+            videoBitrateMbps: 2,
+            to: croppedURL
+        )
+        let croppedCount = try await countVideoFrames(in: croppedURL)
+        XCTAssertEqual(croppedCount, frameTimes.count)
+    }
+
+    @MainActor
+    func testDirectTranscodeFallsBackToCompositionForRotatedTrack() async throws {
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("ReplayCapRotatedTranscodeTests-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+
+        let sourceURL = directory.appendingPathComponent("rotated.mp4")
+        let outputURL = directory.appendingPathComponent("portrait.mp4")
+        try await writeTestVideo(
+            to: sourceURL,
+            size: CGSize(width: 320, height: 180),
+            frameCount: 6,
+            transform: CGAffineTransform(a: 0, b: 1, c: -1, d: 0, tx: 180, ty: 0)
+        )
+
+        let asset = AVURLAsset(url: sourceURL)
+        let duration = try await asset.load(.duration)
+        let outputSize = CGSize(width: 90, height: 160)
+        try await TrimVideoTranscoder().export(
+            asset: asset,
+            timeRange: CMTimeRange(start: .zero, duration: duration),
+            videoComposition: nil,
+            outputSize: outputSize,
+            videoBitrateMbps: 2,
+            to: outputURL
+        )
+
+        let resultGeometry = try await VideoCropper.geometry(for: AVURLAsset(url: outputURL))
+        XCTAssertEqual(resultGeometry.displaySize.width, 90, accuracy: 0.5)
+        XCTAssertEqual(resultGeometry.displaySize.height, 160, accuracy: 0.5)
+    }
+
+    @MainActor
     func testGIFExporterWritesCroppedFrameDimensions() async throws {
         let directory = FileManager.default.temporaryDirectory
             .appendingPathComponent("ReplayCapGIFCropTests-\(UUID().uuidString)", isDirectory: true)
@@ -394,7 +528,31 @@ final class VideoCropTests: XCTestCase {
     }
 
     @MainActor
-    private func writeTestVideo(to url: URL, size: CGSize, frameCount: Int = 2) async throws {
+    private func writeTestVideo(
+        to url: URL,
+        size: CGSize,
+        frameCount: Int = 2,
+        includeAACAudio: Bool = false,
+        transform: CGAffineTransform = .identity
+    ) async throws {
+        let times = (0..<frameCount).map { CMTime(value: CMTimeValue($0), timescale: 30) }
+        try await writeTestVideo(
+            to: url,
+            size: size,
+            frameTimes: times,
+            includeAACAudio: includeAACAudio,
+            transform: transform
+        )
+    }
+
+    @MainActor
+    private func writeTestVideo(
+        to url: URL,
+        size: CGSize,
+        frameTimes: [CMTime],
+        includeAACAudio: Bool = false,
+        transform: CGAffineTransform = .identity
+    ) async throws {
         let writer = try AVAssetWriter(outputURL: url, fileType: .mp4)
         let input = AVAssetWriterInput(
             mediaType: .video,
@@ -404,6 +562,7 @@ final class VideoCropTests: XCTestCase {
                 AVVideoHeightKey: Int(size.height)
             ]
         )
+        input.transform = transform
         let adaptor = AVAssetWriterInputPixelBufferAdaptor(
             assetWriterInput: input,
             sourcePixelBufferAttributes: [
@@ -416,12 +575,31 @@ final class VideoCropTests: XCTestCase {
             throw TestVideoError.cannotAddInput
         }
         writer.add(input)
+
+        var audioInput: AVAssetWriterInput?
+        if includeAACAudio {
+            let audio = AVAssetWriterInput(
+                mediaType: .audio,
+                outputSettings: [
+                    AVFormatIDKey: Int(kAudioFormatMPEG4AAC),
+                    AVSampleRateKey: 48_000,
+                    AVNumberOfChannelsKey: 2,
+                    AVEncoderBitRateKey: 192_000
+                ]
+            )
+            guard writer.canAdd(audio) else {
+                throw TestVideoError.cannotAddInput
+            }
+            writer.add(audio)
+            audioInput = audio
+        }
+
         guard writer.startWriting() else {
             throw writer.error ?? TestVideoError.cannotStartWriter
         }
         writer.startSession(atSourceTime: .zero)
 
-        for frameIndex in 0..<frameCount {
+        for (frameIndex, pts) in frameTimes.enumerated() {
             while !input.isReadyForMoreMediaData {
                 guard writer.status == .writing else { throw writer.error ?? TestVideoError.cannotAppendFrame }
                 try await Task.sleep(for: .milliseconds(1))
@@ -436,22 +614,135 @@ final class VideoCropTests: XCTestCase {
             }
             CVPixelBufferLockBaseAddress(pixelBuffer, [])
             if let baseAddress = CVPixelBufferGetBaseAddress(pixelBuffer) {
-                memset(baseAddress, frameIndex == 0 ? 0x33 : 0x99, CVPixelBufferGetDataSize(pixelBuffer))
+                memset(baseAddress, frameIndex % 2 == 0 ? 0x33 : 0x99, CVPixelBufferGetDataSize(pixelBuffer))
             }
             CVPixelBufferUnlockBaseAddress(pixelBuffer, [])
-            guard adaptor.append(
-                pixelBuffer,
-                withPresentationTime: CMTime(value: CMTimeValue(frameIndex), timescale: 30)
-            ) else {
+            guard adaptor.append(pixelBuffer, withPresentationTime: pts) else {
                 throw writer.error ?? TestVideoError.cannotAppendFrame
             }
         }
-
         input.markAsFinished()
+
+        if let audioInput {
+            let durationSeconds = max(0.1, (frameTimes.last?.seconds ?? 0) + (1.0 / 30.0))
+            try await appendSilentPCM(to: audioInput, writer: writer, durationSeconds: durationSeconds)
+            audioInput.markAsFinished()
+        }
+
         await writer.finishWriting()
         guard writer.status == .completed else {
             throw writer.error ?? TestVideoError.cannotFinishWriter
         }
+    }
+
+    @MainActor
+    private func appendSilentPCM(
+        to input: AVAssetWriterInput,
+        writer: AVAssetWriter,
+        durationSeconds: Double
+    ) async throws {
+        var asbd = AudioStreamBasicDescription(
+            mSampleRate: 48_000,
+            mFormatID: kAudioFormatLinearPCM,
+            mFormatFlags: kAudioFormatFlagIsSignedInteger | kAudioFormatFlagIsPacked,
+            mBytesPerPacket: 4,
+            mFramesPerPacket: 1,
+            mBytesPerFrame: 4,
+            mChannelsPerFrame: 2,
+            mBitsPerChannel: 16,
+            mReserved: 0
+        )
+        var format: CMAudioFormatDescription?
+        guard CMAudioFormatDescriptionCreate(
+            allocator: kCFAllocatorDefault,
+            asbd: &asbd,
+            layoutSize: 0,
+            layout: nil,
+            magicCookieSize: 0,
+            magicCookie: nil,
+            extensions: nil,
+            formatDescriptionOut: &format
+        ) == noErr, let format else {
+            throw TestVideoError.cannotCreatePixelBuffer
+        }
+
+        let totalSamples = Int((durationSeconds * 48_000).rounded(.up))
+        var written = 0
+        while written < totalSamples {
+            while !input.isReadyForMoreMediaData {
+                guard writer.status == .writing else { throw writer.error ?? TestVideoError.cannotAppendFrame }
+                try await Task.sleep(for: .milliseconds(1))
+            }
+            let count = min(1024, totalSamples - written)
+            var blockBuffer: CMBlockBuffer?
+            guard CMBlockBufferCreateWithMemoryBlock(
+                allocator: kCFAllocatorDefault,
+                memoryBlock: nil,
+                blockLength: count * 4,
+                blockAllocator: kCFAllocatorDefault,
+                customBlockSource: nil,
+                offsetToData: 0,
+                dataLength: count * 4,
+                flags: 0,
+                blockBufferOut: &blockBuffer
+            ) == noErr, let blockBuffer else {
+                throw TestVideoError.cannotCreatePixelBuffer
+            }
+            CMBlockBufferFillDataBytes(
+                with: 0,
+                blockBuffer: blockBuffer,
+                offsetIntoDestination: 0,
+                dataLength: count * 4
+            )
+            var timing = CMSampleTimingInfo(
+                duration: CMTime(value: 1, timescale: 48_000),
+                presentationTimeStamp: CMTime(value: CMTimeValue(written), timescale: 48_000),
+                decodeTimeStamp: .invalid
+            )
+            var sampleSize = 4
+            var sample: CMSampleBuffer?
+            guard CMSampleBufferCreate(
+                allocator: kCFAllocatorDefault,
+                dataBuffer: blockBuffer,
+                dataReady: true,
+                makeDataReadyCallback: nil,
+                refcon: nil,
+                formatDescription: format,
+                sampleCount: count,
+                sampleTimingEntryCount: 1,
+                sampleTimingArray: &timing,
+                sampleSizeEntryCount: 1,
+                sampleSizeArray: &sampleSize,
+                sampleBufferOut: &sample
+            ) == noErr, let sample else {
+                throw TestVideoError.cannotCreatePixelBuffer
+            }
+            guard input.append(sample) else {
+                throw writer.error ?? TestVideoError.cannotAppendFrame
+            }
+            written += count
+        }
+    }
+
+    @MainActor
+    private func countVideoFrames(in url: URL) async throws -> Int {
+        let asset = AVURLAsset(url: url)
+        let tracks = try await asset.loadTracks(withMediaType: .video)
+        let track = try XCTUnwrap(tracks.first)
+        let reader = try AVAssetReader(asset: asset)
+        let output = AVAssetReaderTrackOutput(
+            track: track,
+            outputSettings: [
+                kCVPixelBufferPixelFormatTypeKey as String: kCVPixelFormatType_420YpCbCr8BiPlanarVideoRange
+            ]
+        )
+        reader.add(output)
+        XCTAssertTrue(reader.startReading())
+        var count = 0
+        while output.copyNextSampleBuffer() != nil {
+            count += 1
+        }
+        return count
     }
 }
 

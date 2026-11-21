@@ -65,11 +65,16 @@ struct ClipExportRequest {
                 guard let videoBitrateMbps = selectedQuality.videoBitrateMbps(for: outputSize) else {
                     throw TrimExportError.cannotCreateSession
                 }
-                let composition = try await VideoCropper.videoComposition(
-                    for: exportAsset,
-                    crop: crop ?? .fullFrame,
-                    outputSize: outputSize
-                )
+                let composition: AVMutableVideoComposition?
+                if let crop {
+                    composition = try await VideoCropper.videoComposition(
+                        for: exportAsset,
+                        crop: crop,
+                        outputSize: outputSize
+                    )
+                } else {
+                    composition = nil
+                }
                 let exporter = TrimVideoTranscoder()
                 coordinator.track(exporter)
                 try await exporter.export(
