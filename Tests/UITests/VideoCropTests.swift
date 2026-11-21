@@ -599,34 +599,97 @@ final class VideoCropTests: XCTestCase {
         }
         writer.startSession(atSourceTime: .zero)
 
-        for (frameIndex, pts) in frameTimes.enumerated() {
-            while !input.isReadyForMoreMediaData {
-                guard writer.status == .writing else { throw writer.error ?? TestVideoError.cannotAppendFrame }
+        // Feed video and audio interleaved by timestamp: AVAssetWriter applies
+        // backpressure (`isReadyForMoreMediaData == false`) when one track gets
+        // ahead of an unwritten sibling track, so draining them sequentially
+        // deadlocks once the video track exceeds the interleaving buffer.
+        let audioFormat: CMAudioFormatDescription?
+        let totalAudioSamples: Int
+        if audioInput != nil {
+            audioFormat = try makeSilentPCMFormat()
+            let durationSeconds = max(0.1, (frameTimes.last?.seconds ?? 0) + (1.0 / 30.0))
+            totalAudioSamples = Int((durationSeconds * 48_000).rounded(.up))
+        } else {
+            audioFormat = nil
+            totalAudioSamples = 0
+        }
+
+        var frameIndex = 0
+        var writtenAudio = 0
+        var videoFinished = false
+        var audioFinished = audioInput == nil
+
+        if frameTimes.isEmpty {
+            input.markAsFinished()
+            videoFinished = true
+        }
+        if let audioInput, totalAudioSamples == 0 {
+            audioInput.markAsFinished()
+            audioFinished = true
+        }
+
+        while !videoFinished || !audioFinished {
+            var didAppend = false
+            let nextVideoSeconds = videoFinished ? Double.infinity : frameTimes[frameIndex].seconds
+            let nextAudioSeconds = audioFinished ? Double.infinity : Double(writtenAudio) / 48_000.0
+
+            let audioReady = audioInput?.isReadyForMoreMediaData ?? false
+            if !videoFinished,
+               input.isReadyForMoreMediaData,
+               audioFinished || nextVideoSeconds <= nextAudioSeconds || !audioReady {
+                guard let pool = adaptor.pixelBufferPool else {
+                    throw TestVideoError.cannotCreatePixelBuffer
+                }
+                var pixelBuffer: CVPixelBuffer?
+                guard CVPixelBufferPoolCreatePixelBuffer(nil, pool, &pixelBuffer) == kCVReturnSuccess,
+                      let pixelBuffer else {
+                    throw TestVideoError.cannotCreatePixelBuffer
+                }
+                CVPixelBufferLockBaseAddress(pixelBuffer, [])
+                if let baseAddress = CVPixelBufferGetBaseAddress(pixelBuffer) {
+                    memset(baseAddress, frameIndex % 2 == 0 ? 0x33 : 0x99, CVPixelBufferGetDataSize(pixelBuffer))
+                }
+                CVPixelBufferUnlockBaseAddress(pixelBuffer, [])
+                guard adaptor.append(pixelBuffer, withPresentationTime: frameTimes[frameIndex]) else {
+                    throw writer.error ?? TestVideoError.cannotAppendFrame
+                }
+                frameIndex += 1
+                if frameIndex == frameTimes.count {
+                    input.markAsFinished()
+                    videoFinished = true
+                }
+                didAppend = true
+            }
+
+            let videoReady = input.isReadyForMoreMediaData
+            if !audioFinished,
+               let audioInput,
+               let audioFormat,
+               audioInput.isReadyForMoreMediaData,
+               videoFinished || nextAudioSeconds <= nextVideoSeconds || !videoReady {
+                let count = min(1024, totalAudioSamples - writtenAudio)
+                let sample = try makeSilentPCMSample(
+                    format: audioFormat,
+                    startSample: writtenAudio,
+                    sampleCount: count
+                )
+                guard audioInput.append(sample) else {
+                    throw writer.error ?? TestVideoError.cannotAppendFrame
+                }
+                writtenAudio += count
+                if writtenAudio == totalAudioSamples {
+                    audioInput.markAsFinished()
+                    audioFinished = true
+                }
+                didAppend = true
+            }
+
+            if !didAppend {
+                guard writer.status == .writing else {
+                    throw writer.error ?? TestVideoError.cannotAppendFrame
+                }
                 try await Task.sleep(for: .milliseconds(1))
             }
-            guard let pool = adaptor.pixelBufferPool else {
-                throw TestVideoError.cannotCreatePixelBuffer
-            }
-            var pixelBuffer: CVPixelBuffer?
-            guard CVPixelBufferPoolCreatePixelBuffer(nil, pool, &pixelBuffer) == kCVReturnSuccess,
-                  let pixelBuffer else {
-                throw TestVideoError.cannotCreatePixelBuffer
-            }
-            CVPixelBufferLockBaseAddress(pixelBuffer, [])
-            if let baseAddress = CVPixelBufferGetBaseAddress(pixelBuffer) {
-                memset(baseAddress, frameIndex % 2 == 0 ? 0x33 : 0x99, CVPixelBufferGetDataSize(pixelBuffer))
-            }
-            CVPixelBufferUnlockBaseAddress(pixelBuffer, [])
-            guard adaptor.append(pixelBuffer, withPresentationTime: pts) else {
-                throw writer.error ?? TestVideoError.cannotAppendFrame
-            }
-        }
-        input.markAsFinished()
-
-        if let audioInput {
-            let durationSeconds = max(0.1, (frameTimes.last?.seconds ?? 0) + (1.0 / 30.0))
-            try await appendSilentPCM(to: audioInput, writer: writer, durationSeconds: durationSeconds)
-            audioInput.markAsFinished()
         }
 
         await writer.finishWriting()
@@ -636,11 +699,7 @@ final class VideoCropTests: XCTestCase {
     }
 
     @MainActor
-    private func appendSilentPCM(
-        to input: AVAssetWriterInput,
-        writer: AVAssetWriter,
-        durationSeconds: Double
-    ) async throws {
+    private func makeSilentPCMFormat() throws -> CMAudioFormatDescription {
         var asbd = AudioStreamBasicDescription(
             mSampleRate: 48_000,
             mFormatID: kAudioFormatLinearPCM,
@@ -665,63 +724,59 @@ final class VideoCropTests: XCTestCase {
         ) == noErr, let format else {
             throw TestVideoError.cannotCreatePixelBuffer
         }
+        return format
+    }
 
-        let totalSamples = Int((durationSeconds * 48_000).rounded(.up))
-        var written = 0
-        while written < totalSamples {
-            while !input.isReadyForMoreMediaData {
-                guard writer.status == .writing else { throw writer.error ?? TestVideoError.cannotAppendFrame }
-                try await Task.sleep(for: .milliseconds(1))
-            }
-            let count = min(1024, totalSamples - written)
-            var blockBuffer: CMBlockBuffer?
-            guard CMBlockBufferCreateWithMemoryBlock(
-                allocator: kCFAllocatorDefault,
-                memoryBlock: nil,
-                blockLength: count * 4,
-                blockAllocator: kCFAllocatorDefault,
-                customBlockSource: nil,
-                offsetToData: 0,
-                dataLength: count * 4,
-                flags: 0,
-                blockBufferOut: &blockBuffer
-            ) == noErr, let blockBuffer else {
-                throw TestVideoError.cannotCreatePixelBuffer
-            }
-            CMBlockBufferFillDataBytes(
-                with: 0,
-                blockBuffer: blockBuffer,
-                offsetIntoDestination: 0,
-                dataLength: count * 4
-            )
-            var timing = CMSampleTimingInfo(
-                duration: CMTime(value: 1, timescale: 48_000),
-                presentationTimeStamp: CMTime(value: CMTimeValue(written), timescale: 48_000),
-                decodeTimeStamp: .invalid
-            )
-            var sampleSize = 4
-            var sample: CMSampleBuffer?
-            guard CMSampleBufferCreate(
-                allocator: kCFAllocatorDefault,
-                dataBuffer: blockBuffer,
-                dataReady: true,
-                makeDataReadyCallback: nil,
-                refcon: nil,
-                formatDescription: format,
-                sampleCount: count,
-                sampleTimingEntryCount: 1,
-                sampleTimingArray: &timing,
-                sampleSizeEntryCount: 1,
-                sampleSizeArray: &sampleSize,
-                sampleBufferOut: &sample
-            ) == noErr, let sample else {
-                throw TestVideoError.cannotCreatePixelBuffer
-            }
-            guard input.append(sample) else {
-                throw writer.error ?? TestVideoError.cannotAppendFrame
-            }
-            written += count
+    @MainActor
+    private func makeSilentPCMSample(
+        format: CMAudioFormatDescription,
+        startSample: Int,
+        sampleCount: Int
+    ) throws -> CMSampleBuffer {
+        var blockBuffer: CMBlockBuffer?
+        guard CMBlockBufferCreateWithMemoryBlock(
+            allocator: kCFAllocatorDefault,
+            memoryBlock: nil,
+            blockLength: sampleCount * 4,
+            blockAllocator: kCFAllocatorDefault,
+            customBlockSource: nil,
+            offsetToData: 0,
+            dataLength: sampleCount * 4,
+            flags: 0,
+            blockBufferOut: &blockBuffer
+        ) == noErr, let blockBuffer else {
+            throw TestVideoError.cannotCreatePixelBuffer
         }
+        CMBlockBufferFillDataBytes(
+            with: 0,
+            blockBuffer: blockBuffer,
+            offsetIntoDestination: 0,
+            dataLength: sampleCount * 4
+        )
+        var timing = CMSampleTimingInfo(
+            duration: CMTime(value: 1, timescale: 48_000),
+            presentationTimeStamp: CMTime(value: CMTimeValue(startSample), timescale: 48_000),
+            decodeTimeStamp: .invalid
+        )
+        var sampleSize = 4
+        var sample: CMSampleBuffer?
+        guard CMSampleBufferCreate(
+            allocator: kCFAllocatorDefault,
+            dataBuffer: blockBuffer,
+            dataReady: true,
+            makeDataReadyCallback: nil,
+            refcon: nil,
+            formatDescription: format,
+            sampleCount: sampleCount,
+            sampleTimingEntryCount: 1,
+            sampleTimingArray: &timing,
+            sampleSizeEntryCount: 1,
+            sampleSizeArray: &sampleSize,
+            sampleBufferOut: &sample
+        ) == noErr, let sample else {
+            throw TestVideoError.cannotCreatePixelBuffer
+        }
+        return sample
     }
 
     @MainActor
