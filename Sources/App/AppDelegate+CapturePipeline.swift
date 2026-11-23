@@ -1,3 +1,4 @@
+import AppKit
 import Foundation
 import os
 
@@ -56,6 +57,11 @@ extension AppDelegate {
         )
         systemAudioCapture.setHandler(replayCapAudioEncodeHandler(systemAudioEncoder))
         perAppAudioCapture.setHandler(replayCapPerAppAudioHandler(systemAudioCapture))
+        perAppAudioCapture.setUnexpectedStopHandler { [weak self] error in
+            Task { @MainActor [weak self] in
+                self?.handlePerAppAudioUnexpectedStop(error: error)
+            }
+        }
 
         micAudioEncoder.outputHandler = replayCapMicrophoneOutputHandler(
             micAudioRingBuffer: micAudioRingBuffer,
@@ -154,6 +160,9 @@ extension AppDelegate {
                     }
                 }
 
+                refreshLastFrontmostRegularAppIfNeeded()
+                let videoContentFilterConfig = currentVideoContentFilterConfig()
+
                 let isDual = AppSettings.captureMode == CaptureMode.dualSideBySide.rawValue
                 let captureHDR = AppSettings.isHDRCaptureActive
                 let codec: Encode.VideoCodec = captureHDR || AppSettings.videoCodec == "hevc" ? .hevc : .h264
@@ -169,7 +178,15 @@ extension AppDelegate {
                 let useExcludedAppsAudio = captureSystemAudioForSession
                     && !AppSettings.perAppAudioEnabled
                     && !mutedBundleIDs.isEmpty
-                var useFilteredSystemAudio = useSelectedAppAudio || useExcludedAppsAudio
+                let useSplitUnfilteredAudio = captureSystemAudioForSession
+                    && !useSelectedAppAudio
+                    && !useExcludedAppsAudio
+                    && AppSettings.videoFilterRequiresSplitSystemAudio
+                var useFilteredSystemAudio = useSelectedAppAudio || useExcludedAppsAudio || useSplitUnfilteredAudio
+
+                perAppAudioRecoveryTask?.cancel()
+                perAppAudioRecoveryTask = nil
+                perAppAudioRecoveryAttempts = 0
 
                 if useSelectedAppAudio {
                     do {
@@ -193,6 +210,16 @@ extension AppDelegate {
                         )
                     } catch {
                         // Fall back to main stream system audio if the filtered stream fails to start.
+                        useFilteredSystemAudio = false
+                    }
+                } else if useSplitUnfilteredAudio {
+                    do {
+                        try await perAppAudioCapture.start(
+                            mode: .exclude(bundleIDs: []),
+                            excludeOwnAppAudio: excludeOwn
+                        )
+                    } catch {
+                        capturePipelineLogger.error("Failed to start split unfiltered system audio stream: \(String(describing: error), privacy: .public)")
                         useFilteredSystemAudio = false
                     }
                 }
@@ -222,7 +249,8 @@ extension AppDelegate {
                             excludeOwnAppAudio: excludeOwn,
                             captureAudio: captureMainSystemAudio,
                             captureHDR: captureHDR,
-                            showsCursor: AppSettings.showCursorInRecording
+                            showsCursor: AppSettings.showCursorInRecording,
+                            contentFilterConfig: videoContentFilterConfig
                         )
                     } catch CaptureError.notEnoughDisplays {
                         dualConfigs = nil
@@ -365,6 +393,11 @@ extension AppDelegate {
         isCapturingMainSystemAudio = false
         workspaceAudioFilterRefreshTask?.cancel()
         workspaceAudioFilterRefreshTask = nil
+        workspaceVideoFilterRefreshTask?.cancel()
+        workspaceVideoFilterRefreshTask = nil
+        perAppAudioRecoveryTask?.cancel()
+        perAppAudioRecoveryTask = nil
+        perAppAudioRecoveryAttempts = 0
         menuBarState.setCapturedDisplay(name: nil, isFallback: false)
         stopVideoEncoderIdleRefresh()
         await captureManager.stop()
@@ -418,7 +451,8 @@ extension AppDelegate {
             excludeOwnAppAudio: excludeOwnAppAudio,
             captureAudio: captureAudio,
             captureHDR: captureHDR,
-            showsCursor: AppSettings.showCursorInRecording
+            showsCursor: AppSettings.showCursorInRecording,
+            contentFilterConfig: currentVideoContentFilterConfig()
         )
 
         originalDisplay = DisplayDimensions(sourceOf: config)
@@ -513,6 +547,12 @@ extension AppDelegate {
             captureRecoveryAttempts = 0
         }
 
+        workspaceVideoFilterRefreshTask?.cancel()
+        workspaceVideoFilterRefreshTask = nil
+        perAppAudioRecoveryTask?.cancel()
+        perAppAudioRecoveryTask = nil
+        perAppAudioRecoveryAttempts = 0
+
         stopVideoEncoderIdleRefresh()
         await captureManager.stop()
         await perAppAudioCapture.stop()
@@ -586,6 +626,56 @@ extension AppDelegate {
                 body: "Session recording can’t continue while dual display clips are saved as separate files. Saving what was captured…"
             )
             await stopSessionRecording(userInitiated: false)
+        }
+    }
+
+    func refreshLastFrontmostRegularAppIfNeeded() {
+        guard let frontmost = NSWorkspace.shared.frontmostApplication,
+              frontmost.activationPolicy == .regular,
+              frontmost.bundleIdentifier != Bundle.main.bundleIdentifier else {
+            return
+        }
+        lastFrontmostRegularApp = VideoAppIdentity(
+            pid: frontmost.processIdentifier,
+            bundleIdentifier: frontmost.bundleIdentifier
+        )
+    }
+
+    func currentVideoContentFilterConfig() -> VideoContentFilterConfig {
+        AppSettings.makeVideoContentFilterConfig(
+            activeAppPID: lastFrontmostRegularApp?.pid,
+            activeAppBundleID: lastFrontmostRegularApp?.bundleIdentifier
+        )
+    }
+
+    func preferredAudioDisplayID() async -> CGDirectDisplayID? {
+        if isDualMode {
+            return await captureManager.capturedDisplayID1
+        }
+        return await captureManager.capturedDisplayID
+    }
+
+    func handlePerAppAudioUnexpectedStop(error: Error) {
+        capturePipelineLogger.error("Split/per-app system audio stream stopped unexpectedly: \(String(describing: error), privacy: .public)")
+        guard isCaptureRunning,
+              isWorkspaceSessionActive,
+              areScreensAwake,
+              !isPreparingCaptureRecovery,
+              AppSettings.captureSystemAudio else {
+            return
+        }
+        guard perAppAudioRecoveryAttempts < CaptureRecoveryPolicy.maximumAttempts else {
+            capturePipelineLogger.error("Exceeded split/per-app audio recovery attempts; leaving system audio off until next setting change or restart.")
+            return
+        }
+
+        let delaySeconds = CaptureRecoveryPolicy.retryDelay(completedAttempts: perAppAudioRecoveryAttempts)
+        perAppAudioRecoveryAttempts += 1
+        perAppAudioRecoveryTask?.cancel()
+        perAppAudioRecoveryTask = Task { @MainActor [weak self] in
+            try? await Task.sleep(for: .seconds(delaySeconds))
+            guard !Task.isCancelled, let self, self.isCaptureRunning else { return }
+            await self.applySystemAudioSettingIfNeeded()
         }
     }
 

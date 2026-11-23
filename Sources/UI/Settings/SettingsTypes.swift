@@ -129,6 +129,11 @@ public struct CaptureProfile: Identifiable, Codable, Equatable, Sendable {
     public var cameraSize: String? = nil
     public var cameraBorderEnabled: Bool? = nil
     public var cameraResolution: String? = nil
+    public var videoCaptureFilterModeRawValue: String? = nil
+    public var hideMenuBarInRecording: Bool? = nil
+    public var hideFloatingUtilityApps: Bool? = nil
+    public var hiddenVideoAppBundleIDs: [String]? = nil
+    public var selectedVideoAppBundleID: String? = nil
     public var themeSnapshot: ProfileThemeSnapshot? = nil
 
     public var summary: String {

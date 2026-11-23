@@ -105,20 +105,28 @@ extension AppDelegate {
                     self.notifyCameraPermissionDeniedIfNeeded()
                 }
 
-                // Judged against the main SCK stream's samples, so it must be
-                // gated on the main stream actually carrying audio: per-app
-                // audio runs a separate stream that reports no stats here.
+                let isCapturingSplitAudio = self.perAppAudioCapture.isRunning
+                let isCapturingSystemAudio = self.isCapturingMainSystemAudio || isCapturingSplitAudio
+                let lastSystemAudioSampleDate = self.isCapturingMainSystemAudio
+                    ? captureStats.lastAudioSampleDate
+                    : self.perAppAudioCapture.lastAudioSampleDate
+                let audioMonitoringStartedAt: Date
+                if !self.isCapturingMainSystemAudio, let splitStarted = self.perAppAudioCapture.lastStreamStartedAt {
+                    audioMonitoringStartedAt = max(monitoringStartedAt, splitStarted)
+                } else {
+                    audioMonitoringStartedAt = monitoringStartedAt
+                }
                 let systemAudioStalled = CaptureHealth.isAudioStalled(
                     isCaptureRunning: self.isCaptureRunning,
-                    isCapturingAudio: self.isCapturingMainSystemAudio,
+                    isCapturingAudio: isCapturingSystemAudio,
                     isSessionActive: isSessionActive,
-                    monitoringStartedAt: monitoringStartedAt,
-                    lastAudioSampleDate: captureStats.lastAudioSampleDate,
+                    monitoringStartedAt: audioMonitoringStartedAt,
+                    lastAudioSampleDate: lastSystemAudioSampleDate,
                     now: now
                 )
                 if systemAudioStalled, !self.hasWarnedSystemAudioStalled {
                     self.hasWarnedSystemAudioStalled = true
-                    let age = captureStats.lastAudioSampleDate
+                    let age = lastSystemAudioSampleDate
                         .map { String(format: "%.0fs ago", now.timeIntervalSince($0)) } ?? "never"
                     bufferMonitorLogger.warning("System audio has not delivered a sample (\(age, privacy: .public)). Output device may have changed mid-capture.")
                 } else if !systemAudioStalled {

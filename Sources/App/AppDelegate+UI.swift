@@ -72,14 +72,47 @@ extension AppDelegate {
             name: NSWorkspace.didTerminateApplicationNotification,
             object: nil
         )
+        workspaceCenter.addObserver(
+            self,
+            selector: #selector(workspaceApplicationDidActivate(_:)),
+            name: NSWorkspace.didActivateApplicationNotification,
+            object: nil
+        )
+    }
+
+    @objc private func workspaceApplicationDidActivate(_ notification: Notification) {
+        guard let app = notification.userInfo?[NSWorkspace.applicationUserInfoKey] as? NSRunningApplication,
+              app.activationPolicy == .regular,
+              app.bundleIdentifier != Bundle.main.bundleIdentifier else {
+            return
+        }
+        lastFrontmostRegularApp = VideoAppIdentity(
+            pid: app.processIdentifier,
+            bundleIdentifier: app.bundleIdentifier
+        )
+        guard isCaptureRunning, AppSettings.videoCaptureFilterModeEnum == .activeApp else { return }
+        scheduleVideoContentFilterUpdate(updateAudioRouting: false, debounceMilliseconds: 120)
     }
 
     @objc private func workspaceApplicationLifecycleDidChange(_ notification: Notification) {
         statusItemController.refreshPresentation()
         broadcastCompanionSnapshot()
         guard isCaptureRunning else { return }
-        guard perAppAudioCapture.isRunning
-            || (AppSettings.captureSystemAudio && (AppSettings.perAppAudioEnabled || !AppSettings.mutedAudioAppBundleIDs.isEmpty)) else {
+
+        if AppSettings.videoCaptureFilterModeEnum != .fullDisplay {
+            let isLaunch = notification.name == NSWorkspace.didLaunchApplicationNotification
+            scheduleVideoContentFilterUpdate(
+                updateAudioRouting: false,
+                debounceMilliseconds: 120,
+                followUpSettleMilliseconds: isLaunch ? 700 : nil
+            )
+        }
+
+        let shouldRefreshAudio = perAppAudioCapture.needsWorkspaceRefresh
+            || (!perAppAudioCapture.isRunning
+                && AppSettings.captureSystemAudio
+                && (AppSettings.perAppAudioEnabled || !AppSettings.mutedAudioAppBundleIDs.isEmpty))
+        guard shouldRefreshAudio else {
             return
         }
 
@@ -163,7 +196,15 @@ extension AppDelegate {
                     "Display priority resolution changed (resolved: \(resolved), previous: \(String(describing: captured)), wasFallback: \(isFallback)); re-targeting capture"
                 )
                 await restartFullPipeline()
+                return
             }
+        }
+
+        if perAppAudioCapture.isRunning,
+           let audioDisplayID = perAppAudioCapture.capturedDisplayID,
+           !online.contains(audioDisplayID) {
+            captureRecoveryLogger.info("Split/per-app audio display \(audioDisplayID) disconnected; rebinding audio stream.")
+            await applySystemAudioSettingIfNeeded()
         }
     }
 

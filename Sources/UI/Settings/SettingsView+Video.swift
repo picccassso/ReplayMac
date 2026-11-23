@@ -1,3 +1,4 @@
+import Branding
 import SwiftUI
 import Defaults
 import Capture
@@ -129,6 +130,14 @@ extension SettingsView {
                 Text("Hides the mouse cursor from recorded video. The cursor stays visible on your screen.")
                     .font(.system(size: 12, design: .rounded))
                     .foregroundStyle(AppTheme.textSecondary)
+
+                Picker("Capture content", selection: $videoCaptureFilterModeRawValue) {
+                    ForEach(VideoCaptureFilterMode.allCases) { mode in
+                        Text(mode.title).tag(mode.rawValue)
+                    }
+                }
+
+                captureContentFilterControls
             } header: {
                 Text("Capture")
             }
@@ -548,5 +557,205 @@ extension SettingsView {
         if let top = list.first {
             captureDisplayID = top
         }
+    }
+
+    // MARK: - Capture Content Filter Controls
+
+    private var videoCaptureFilterModeEnum: VideoCaptureFilterMode {
+        VideoCaptureFilterMode(rawValue: videoCaptureFilterModeRawValue) ?? .fullDisplay
+    }
+
+    @ViewBuilder
+    private var captureContentFilterControls: some View {
+        switch videoCaptureFilterModeEnum {
+        case .fullDisplay:
+            EmptyView()
+
+        case .hideOverlays:
+            Text("Hides macOS notifications, volume & mute HUDs, Control Center, Spotlight, Siri, and \(AppBranding.name)'s saved-clip thumbnail.")
+                .font(.system(size: 12, design: .rounded))
+                .foregroundStyle(AppTheme.textSecondary)
+
+            Toggle("Hide floating notch & menu-bar utility apps", isOn: $hideFloatingUtilityApps)
+            Text("Excludes menu-bar utility overlays (such as MacBook notch widgets and mic-mute badges) automatically.")
+                .font(.system(size: 12, design: .rounded))
+                .foregroundStyle(AppTheme.textSecondary)
+
+            Toggle("Hide menu bar", isOn: $hideMenuBarInRecording)
+
+            hiddenVideoApplicationsSubSection
+
+        case .activeApp:
+            Text("Records only the currently active app on the captured display, automatically hiding desktop, Dock, menu bar, notifications, and overlays. Non-fullscreen windows appear on a black background. System audio continues according to your Audio settings.")
+                .font(.system(size: 12, design: .rounded))
+                .foregroundStyle(AppTheme.textSecondary)
+
+        case .selectedApp:
+            selectedVideoApplicationControls
+        }
+    }
+
+    private static let chooseVideoAppFromDiskTag = "__replaymac_choose_video_app_from_disk__"
+
+    @ViewBuilder
+    private var selectedVideoApplicationControls: some View {
+        let options = selectableVideoApplications()
+        Picker("Selected app", selection: Binding(
+            get: { selectedVideoAppBundleID },
+            set: { newValue in
+                if newValue == Self.chooseVideoAppFromDiskTag {
+                    DispatchQueue.main.async {
+                        promptToChooseApp { bundleID in
+                            selectedVideoAppBundleID = bundleID
+                        }
+                    }
+                } else {
+                    selectedVideoAppBundleID = newValue
+                }
+            }
+        )) {
+            if selectedVideoAppBundleID.isEmpty {
+                Text("Choose an app…").tag("")
+            }
+            ForEach(options) { app in
+                Text(app.name).tag(app.bundleID)
+            }
+            Divider()
+            Text("Choose Application from Disk…").tag(Self.chooseVideoAppFromDiskTag)
+        }
+
+        if !selectedVideoAppBundleID.isEmpty && !AppSettings.isApplicationRunning(selectedVideoAppBundleID) {
+            Label(
+                "\(AppSettings.appDisplayName(for: selectedVideoAppBundleID)) is not running. Video will stay blank until it opens on the captured display.",
+                systemImage: "eye.slash"
+            )
+            .font(.system(size: 12, design: .rounded))
+            .foregroundStyle(AppTheme.textSecondary)
+        } else {
+            Text("Stays locked on this app even if you switch windows. While the app isn't open on the captured display, video stays blank instead of exposing other windows. System audio continues according to your Audio settings.")
+                .font(.system(size: 12, design: .rounded))
+                .foregroundStyle(AppTheme.textSecondary)
+        }
+    }
+
+    private var hiddenVideoApplicationsSubSection: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(spacing: 10) {
+                Text("Hidden Applications")
+                    .font(.subheadline.weight(.medium))
+                Spacer()
+                if !hiddenVideoAppBundleIDs.isEmpty {
+                    Button("Show All") {
+                        AppSettings.unhideAllVideoApps()
+                    }
+                    .buttonStyle(.link)
+                    .font(.caption)
+                }
+                Menu {
+                    let running = addableHiddenVideoApps()
+                    if !running.isEmpty {
+                        Section("Running Applications") {
+                            ForEach(running) { app in
+                                Button(app.name) {
+                                    AppSettings.hideVideoApp(app.bundleID)
+                                }
+                            }
+                        }
+                    }
+                    Section {
+                        Button("Choose Application from Disk…") {
+                            promptToChooseApp { bundleID in
+                                AppSettings.hideVideoApp(bundleID)
+                            }
+                        }
+                    }
+                } label: {
+                    Label("Hide App…", systemImage: "plus")
+                }
+            }
+
+            if hiddenVideoAppBundleIDs.isEmpty {
+                Text("Optionally hide additional apps from recorded video while keeping them visible on your screen.")
+                    .font(.caption)
+                    .foregroundStyle(AppTheme.textSecondary)
+            } else {
+                ForEach(hiddenVideoAppBundleIDs, id: \.self) { bundleID in
+                    HStack(spacing: 8) {
+                        if let icon = AppSettings.appIcon(for: bundleID) {
+                            Image(nsImage: icon)
+                                .resizable()
+                                .aspectRatio(contentMode: .fit)
+                                .frame(width: 16, height: 16)
+                        }
+                        Image(systemName: "eye.slash.fill")
+                            .font(.system(size: 11, weight: .semibold))
+                            .foregroundStyle(AppTheme.textSecondary)
+                        Text(AppSettings.appDisplayName(for: bundleID))
+                            .lineLimit(1)
+                            .truncationMode(.middle)
+                        if !AppSettings.isApplicationRunning(bundleID) {
+                            Text("Not running")
+                                .font(.caption2)
+                                .foregroundStyle(AppTheme.textSecondary)
+                                .padding(.horizontal, 6)
+                                .padding(.vertical, 2)
+                                .background(
+                                    Capsule()
+                                        .fill(AppTheme.textSecondary.opacity(0.14))
+                                )
+                        }
+                        Spacer()
+                        Button {
+                            AppSettings.unhideVideoApp(bundleID)
+                        } label: {
+                            Image(systemName: "minus.circle.fill")
+                                .foregroundStyle(AppTheme.textSecondary)
+                        }
+                        .buttonStyle(.plain)
+                        .help("Show \(AppSettings.appDisplayName(for: bundleID)) in recordings")
+                    }
+                }
+            }
+        }
+        .padding(.vertical, 4)
+    }
+
+    private func selectableVideoApplications() -> [AudioApplicationOption] {
+        var combined = AppSettings.capturableRunningApplications()
+        var seen = Set(combined.map { $0.bundleID.lowercased() })
+        let ownID = Bundle.main.bundleIdentifier?.lowercased()
+
+        for app in audioApplications {
+            let lower = app.bundleID.lowercased()
+            if lower != ownID, seen.insert(lower).inserted {
+                combined.append(app)
+            }
+        }
+
+        let current = selectedVideoAppBundleID.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !current.isEmpty, seen.insert(current.lowercased()).inserted {
+            combined.append(
+                AudioApplicationOption(
+                    bundleID: current,
+                    name: "\(AppSettings.appDisplayName(for: current)) (Not running)"
+                )
+            )
+        }
+        return combined.sorted { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending }
+    }
+
+    private func addableHiddenVideoApps() -> [AudioApplicationOption] {
+        var combined = AppSettings.capturableRunningApplications(excluding: hiddenVideoAppBundleIDs)
+        var seen = Set(combined.map { $0.bundleID.lowercased() })
+        let hiddenSet = Set(hiddenVideoAppBundleIDs.map { $0.lowercased() })
+        let ownID = Bundle.main.bundleIdentifier?.lowercased()
+
+        for app in audioApplications {
+            let lower = app.bundleID.lowercased()
+            if lower != ownID, !hiddenSet.contains(lower), seen.insert(lower).inserted {
+                combined.append(app)
+            }
+        }
+        return combined.sorted { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending }
     }
 }

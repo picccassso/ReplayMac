@@ -83,6 +83,12 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     var captureRecoveryTask: Task<Void, Never>?
     var displayReconfigurationTask: Task<Void, Never>?
     var workspaceAudioFilterRefreshTask: Task<Void, Never>?
+    var workspaceVideoFilterRefreshTask: Task<Void, Never>?
+    var perAppAudioRecoveryTask: Task<Void, Never>?
+    var perAppAudioRecoveryAttempts = 0
+    /// Most recently focused regular application (excluding ReplayMac itself),
+    /// tracked for `Active app only` video capture.
+    var lastFrontmostRegularApp: VideoAppIdentity?
     var monitoringTask: Task<Void, Never>?
     /// System memory pressure, as last reported by macOS. Critical pressure
     /// shortens the replay window until it eases.

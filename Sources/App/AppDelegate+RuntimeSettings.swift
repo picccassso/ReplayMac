@@ -88,6 +88,21 @@ extension AppDelegate {
                 await self?.applyCursorVisibilitySettingIfNeeded()
             }
         })
+        settingsObservations.append(Defaults.observe(.videoCaptureFilterMode, options: []) { [weak self] _ in
+            self?.scheduleVideoContentFilterUpdate(updateAudioRouting: true)
+        })
+        settingsObservations.append(Defaults.observe(.hideMenuBarInRecording, options: []) { [weak self] _ in
+            self?.scheduleVideoContentFilterUpdate(updateAudioRouting: false)
+        })
+        settingsObservations.append(Defaults.observe(.hideFloatingUtilityApps, options: []) { [weak self] _ in
+            self?.scheduleVideoContentFilterUpdate(updateAudioRouting: false)
+        })
+        settingsObservations.append(Defaults.observe(.hiddenVideoAppBundleIDs, options: []) { [weak self] _ in
+            self?.scheduleVideoContentFilterUpdate(updateAudioRouting: false)
+        })
+        settingsObservations.append(Defaults.observe(.selectedVideoAppBundleID, options: []) { [weak self] _ in
+            self?.scheduleVideoContentFilterUpdate(updateAudioRouting: false)
+        })
         settingsObservations.append(Defaults.observe(.videoCodec) { [weak self] _ in
             self?.scheduleRuntimeSettingsReconcile()
         })
@@ -484,6 +499,41 @@ extension AppDelegate {
         }
     }
 
+    func scheduleVideoContentFilterUpdate(
+        updateAudioRouting: Bool,
+        debounceMilliseconds: Int = 60,
+        followUpSettleMilliseconds: Int? = nil
+    ) {
+        guard isCaptureRunning else { return }
+        workspaceVideoFilterRefreshTask?.cancel()
+        workspaceVideoFilterRefreshTask = Task { @MainActor [weak self] in
+            if debounceMilliseconds > 0 {
+                try? await Task.sleep(for: .milliseconds(debounceMilliseconds))
+            }
+            guard !Task.isCancelled, let self, self.isCaptureRunning else { return }
+            await self.applyVideoContentFilterSettingIfNeeded(updateAudioRouting: updateAudioRouting)
+
+            if let settle = followUpSettleMilliseconds, settle > 0 {
+                try? await Task.sleep(for: .milliseconds(settle))
+                guard !Task.isCancelled, self.isCaptureRunning else { return }
+                await self.applyVideoContentFilterSettingIfNeeded(updateAudioRouting: false)
+            }
+        }
+    }
+
+    func applyVideoContentFilterSettingIfNeeded(updateAudioRouting: Bool) async {
+        guard isCaptureRunning else { return }
+        refreshLastFrontmostRegularAppIfNeeded()
+        if updateAudioRouting {
+            await applySystemAudioSettingIfNeeded()
+        }
+        do {
+            try await captureManager.updateContentFilter(currentVideoContentFilterConfig())
+        } catch {
+            runtimeSettingsLogger.error("Failed to update video content filter: \(String(describing: error), privacy: .public)")
+        }
+    }
+
     func applySystemAudioSettingIfNeeded() async {
         guard isCaptureRunning else { return }
 
@@ -492,9 +542,13 @@ extension AppDelegate {
         let perAppEnabled = AppSettings.perAppAudioEnabled
         let perAppBundleID = AppSettings.perAppAudioBundleID
         let mutedBundleIDs = AppSettings.mutedAudioAppBundleIDs
+        let preferredDisplayID = await preferredAudioDisplayID()
 
         if !captureSystemAudio {
             isCapturingMainSystemAudio = false
+            perAppAudioRecoveryTask?.cancel()
+            perAppAudioRecoveryTask = nil
+            perAppAudioRecoveryAttempts = 0
             await perAppAudioCapture.stop()
             await updateMainStreamAudioCapture(false, excludeOwnAppAudio: excludeOwn)
             AudioLevelMonitor.shared.resetSystemAudio()
@@ -507,8 +561,10 @@ extension AppDelegate {
             do {
                 try await perAppAudioCapture.start(
                     mode: .includeOnly(bundleID: perAppBundleID),
-                    excludeOwnAppAudio: excludeOwn
+                    excludeOwnAppAudio: excludeOwn,
+                    preferredDisplayID: preferredDisplayID
                 )
+                perAppAudioRecoveryAttempts = 0
             } catch {
                 await perAppAudioCapture.stop()
                 NotificationManager.shared.showOperationalNotification(
@@ -525,9 +581,30 @@ extension AppDelegate {
             do {
                 try await perAppAudioCapture.start(
                     mode: .exclude(bundleIDs: mutedBundleIDs),
-                    excludeOwnAppAudio: excludeOwn
+                    excludeOwnAppAudio: excludeOwn,
+                    preferredDisplayID: preferredDisplayID
                 )
+                perAppAudioRecoveryAttempts = 0
             } catch {
+                await perAppAudioCapture.stop()
+                await updateMainStreamAudioCapture(true, excludeOwnAppAudio: excludeOwn)
+                isCapturingMainSystemAudio = true
+            }
+            return
+        }
+
+        if AppSettings.videoFilterRequiresSplitSystemAudio {
+            isCapturingMainSystemAudio = false
+            await updateMainStreamAudioCapture(false, excludeOwnAppAudio: excludeOwn)
+            do {
+                try await perAppAudioCapture.start(
+                    mode: .exclude(bundleIDs: []),
+                    excludeOwnAppAudio: excludeOwn,
+                    preferredDisplayID: preferredDisplayID
+                )
+                perAppAudioRecoveryAttempts = 0
+            } catch {
+                runtimeSettingsLogger.error("Failed to start split system audio stream: \(String(describing: error), privacy: .public)")
                 await perAppAudioCapture.stop()
                 await updateMainStreamAudioCapture(true, excludeOwnAppAudio: excludeOwn)
                 isCapturingMainSystemAudio = true
@@ -540,8 +617,10 @@ extension AppDelegate {
             do {
                 try await perAppAudioCapture.start(
                     mode: .exclude(bundleIDs: []),
-                    excludeOwnAppAudio: excludeOwn
+                    excludeOwnAppAudio: excludeOwn,
+                    preferredDisplayID: preferredDisplayID
                 )
+                perAppAudioRecoveryAttempts = 0
                 return
             } catch {
                 await perAppAudioCapture.stop()

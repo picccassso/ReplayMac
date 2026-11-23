@@ -311,6 +311,21 @@ extension SettingsView {
         if let cameraResolution = profile.cameraResolution {
             cameraResolutionRawValue = cameraResolution
         }
+        if let videoCaptureFilterMode = profile.videoCaptureFilterModeRawValue {
+            videoCaptureFilterModeRawValue = videoCaptureFilterMode
+        }
+        if let hideMenuBar = profile.hideMenuBarInRecording {
+            hideMenuBarInRecording = hideMenuBar
+        }
+        if let hideFloating = profile.hideFloatingUtilityApps {
+            hideFloatingUtilityApps = hideFloating
+        }
+        if let hiddenApps = profile.hiddenVideoAppBundleIDs {
+            hiddenVideoAppBundleIDs = hiddenApps
+        }
+        if let selectedApp = profile.selectedVideoAppBundleID {
+            selectedVideoAppBundleID = selectedApp
+        }
         if let themeSnapshot = profile.themeSnapshot {
             AppSettings.applyThemeSnapshot(themeSnapshot)
         }
@@ -357,6 +372,11 @@ extension SettingsView {
             cameraSize: includeCameraInProfile ? cameraSizeRawValue : nil,
             cameraBorderEnabled: includeCameraInProfile ? cameraBorderEnabled : nil,
             cameraResolution: includeCameraInProfile ? cameraResolutionRawValue : nil,
+            videoCaptureFilterModeRawValue: videoCaptureFilterModeRawValue,
+            hideMenuBarInRecording: hideMenuBarInRecording,
+            hideFloatingUtilityApps: hideFloatingUtilityApps,
+            hiddenVideoAppBundleIDs: hiddenVideoAppBundleIDs,
+            selectedVideoAppBundleID: selectedVideoAppBundleID,
             themeSnapshot: includeThemeInProfile ? AppSettings.currentThemeSnapshot() : nil
         )
     }

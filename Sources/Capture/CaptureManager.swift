@@ -68,6 +68,9 @@ public actor CaptureManager {
     private var isDualMode = false
     private var hasAudioStreamOutput = false
     private var userInitiatedStop = false
+    private var currentFilterConfig: VideoContentFilterConfig = .fullDisplay
+    private var lastActiveAppByDisplay: [CGDirectDisplayID: VideoAppIdentity] = [:]
+    private var filterUpdateGeneration: UInt64 = 0
 
     private var interruptionHandler: (@Sendable (CaptureInterruption) -> Void)?
     private let logger = Logger(subsystem: "com.replaycap", category: "CaptureRecovery")
@@ -257,6 +260,100 @@ public actor CaptureManager {
                 }
             }
         }
+    }
+
+    public func updateContentFilter(_ config: VideoContentFilterConfig) async throws {
+        currentFilterConfig = config
+        if config.mode != .activeApp {
+            lastActiveAppByDisplay.removeAll()
+        }
+
+        filterUpdateGeneration &+= 1
+        let generation = filterUpdateGeneration
+
+        if isDualMode {
+            guard let activeStream1 = stream1,
+                  let activeStream2 = stream2,
+                  let displayID1 = capturedDisplayID1,
+                  let displayID2 = capturedDisplayID2 else {
+                throw CaptureRestartError.missingConfiguration
+            }
+
+            let content = try await shareableContent(for: config)
+            guard generation == filterUpdateGeneration, isDualMode else { return }
+
+            guard let display1 = content.displays.first(where: { CGDirectDisplayID($0.displayID) == displayID1 }),
+                  let display2 = content.displays.first(where: { CGDirectDisplayID($0.displayID) == displayID2 }) else {
+                throw CaptureError.noDisplay
+            }
+
+            let activationKinds = await MainActor.run { VideoContentFilterBuilder.currentActivationKinds() }
+            guard generation == filterUpdateGeneration, isDualMode else { return }
+
+            let built1 = VideoContentFilterBuilder.makeFilter(
+                for: display1,
+                content: content,
+                activationKinds: activationKinds,
+                config: config,
+                lastActiveApp: lastActiveAppByDisplay[displayID1]
+            )
+            let built2 = VideoContentFilterBuilder.makeFilter(
+                for: display2,
+                content: content,
+                activationKinds: activationKinds,
+                config: config,
+                lastActiveApp: lastActiveAppByDisplay[displayID2]
+            )
+
+            try await activeStream1.updateContentFilter(built1.filter)
+            try await activeStream2.updateContentFilter(built2.filter)
+
+            guard generation == filterUpdateGeneration, isDualMode else { return }
+            self.dualFilter1 = built1.filter
+            self.dualFilter2 = built2.filter
+            if config.mode == .activeApp {
+                self.lastActiveAppByDisplay[displayID1] = built1.resolvedActiveApp
+                self.lastActiveAppByDisplay[displayID2] = built2.resolvedActiveApp
+            }
+        } else {
+            guard let activeStream = stream,
+                  let displayID = capturedDisplayID else {
+                throw CaptureRestartError.missingConfiguration
+            }
+
+            let content = try await shareableContent(for: config)
+            guard generation == filterUpdateGeneration, !isDualMode else { return }
+
+            guard let display = content.displays.first(where: { CGDirectDisplayID($0.displayID) == displayID }) else {
+                throw CaptureError.noDisplay
+            }
+
+            let activationKinds = await MainActor.run { VideoContentFilterBuilder.currentActivationKinds() }
+            guard generation == filterUpdateGeneration, !isDualMode else { return }
+
+            let built = VideoContentFilterBuilder.makeFilter(
+                for: display,
+                content: content,
+                activationKinds: activationKinds,
+                config: config,
+                lastActiveApp: lastActiveAppByDisplay[displayID]
+            )
+
+            try await activeStream.updateContentFilter(built.filter)
+
+            guard generation == filterUpdateGeneration, !isDualMode else { return }
+            self.currentFilter = built.filter
+            if config.mode == .activeApp {
+                self.lastActiveAppByDisplay[displayID] = built.resolvedActiveApp
+            }
+        }
+    }
+
+    private func shareableContent(for config: VideoContentFilterConfig) async throws -> SCShareableContent {
+        try await SCShareableContent.excludingDesktopWindows(
+            false,
+            onScreenWindowsOnly: config.mode == .fullDisplay
+        )
     }
 
     public func updateAudioCapture(
@@ -452,11 +549,18 @@ public actor CaptureManager {
         excludeOwnAppAudio: Bool = false,
         captureAudio: Bool = true,
         captureHDR: Bool = false,
-        showsCursor: Bool = true
+        showsCursor: Bool = true,
+        contentFilterConfig: VideoContentFilterConfig = .fullDisplay
     ) async throws -> CaptureConfig {
         delegate.resetStats()
         let permissions = CapturePermissions()
-        let content = try await permissions.requestAccess(interactive: interactivePermissionPrompt)
+        let permissionContent = try await permissions.requestAccess(interactive: interactivePermissionPrompt)
+        let content: SCShareableContent
+        if contentFilterConfig.mode == .fullDisplay {
+            content = permissionContent
+        } else {
+            content = (try? await SCShareableContent.excludingDesktopWindows(false, onScreenWindowsOnly: false)) ?? permissionContent
+        }
 
         let availableIDs = content.displays.map { CGDirectDisplayID($0.displayID) }
         let priorities: [String]
@@ -487,9 +591,19 @@ public actor CaptureManager {
             throw CaptureError.noDisplay
         }
 
-        let filter = SCContentFilter(display: display, excludingApplications: [], exceptingWindows: [])
-        let pointPixelScale = max(Double(filter.pointPixelScale), 1.0)
         let displayID = CGDirectDisplayID(display.displayID)
+        let activationKinds: [pid_t: AppActivationKind] = contentFilterConfig.mode == .fullDisplay
+            ? [:]
+            : await MainActor.run { VideoContentFilterBuilder.currentActivationKinds() }
+        let builtFilter = VideoContentFilterBuilder.makeFilter(
+            for: display,
+            content: content,
+            activationKinds: activationKinds,
+            config: contentFilterConfig,
+            lastActiveApp: nil
+        )
+        let filter = builtFilter.filter
+        let pointPixelScale = max(Double(filter.pointPixelScale), 1.0)
         let displayMode = CGDisplayCopyDisplayMode(displayID)
         let pixelWidth = max(CGDisplayPixelsWide(displayID), displayMode?.pixelWidth ?? 0)
         let pixelHeight = max(CGDisplayPixelsHigh(displayID), displayMode?.pixelHeight ?? 0)
@@ -516,6 +630,9 @@ public actor CaptureManager {
         userInitiatedStop = false
         isDualMode = false
         hasAudioStreamOutput = captureAudio
+        currentFilterConfig = contentFilterConfig
+        lastActiveAppByDisplay = builtFilter.resolvedActiveApp.map { [displayID: $0] } ?? [:]
+        filterUpdateGeneration &+= 1
         currentFilter = filter
         currentConfiguration = config
         self.stream = newStream
@@ -550,12 +667,19 @@ public actor CaptureManager {
         excludeOwnAppAudio: Bool = false,
         captureAudio: Bool = true,
         captureHDR: Bool = false,
-        showsCursor: Bool = true
+        showsCursor: Bool = true,
+        contentFilterConfig: VideoContentFilterConfig = .fullDisplay
     ) async throws -> (config1: CaptureConfig, config2: CaptureConfig) {
         delegate1.resetStats()
         delegate2.resetStats()
         let permissions = CapturePermissions()
-        let content = try await permissions.requestAccess(interactive: interactivePermissionPrompt)
+        let permissionContent = try await permissions.requestAccess(interactive: interactivePermissionPrompt)
+        let content: SCShareableContent
+        if contentFilterConfig.mode == .fullDisplay {
+            content = permissionContent
+        } else {
+            content = (try? await SCShareableContent.excludingDesktopWindows(false, onScreenWindowsOnly: false)) ?? permissionContent
+        }
 
         let displays = content.displays
         guard displays.count >= 2 else {
@@ -587,12 +711,29 @@ public actor CaptureManager {
             throw CaptureError.sameDisplay
         }
 
-        let filter1 = SCContentFilter(display: display1, excludingApplications: [], exceptingWindows: [])
-        let filter2 = SCContentFilter(display: display2, excludingApplications: [], exceptingWindows: [])
-        let pointPixelScale1 = max(Double(filter1.pointPixelScale), 1.0)
-        let pointPixelScale2 = max(Double(filter2.pointPixelScale), 1.0)
         let displayID1 = CGDirectDisplayID(display1.displayID)
         let displayID2 = CGDirectDisplayID(display2.displayID)
+        let activationKinds: [pid_t: AppActivationKind] = contentFilterConfig.mode == .fullDisplay
+            ? [:]
+            : await MainActor.run { VideoContentFilterBuilder.currentActivationKinds() }
+        let built1 = VideoContentFilterBuilder.makeFilter(
+            for: display1,
+            content: content,
+            activationKinds: activationKinds,
+            config: contentFilterConfig,
+            lastActiveApp: nil
+        )
+        let built2 = VideoContentFilterBuilder.makeFilter(
+            for: display2,
+            content: content,
+            activationKinds: activationKinds,
+            config: contentFilterConfig,
+            lastActiveApp: nil
+        )
+        let filter1 = built1.filter
+        let filter2 = built2.filter
+        let pointPixelScale1 = max(Double(filter1.pointPixelScale), 1.0)
+        let pointPixelScale2 = max(Double(filter2.pointPixelScale), 1.0)
         let displayMode1 = CGDisplayCopyDisplayMode(displayID1)
         let displayMode2 = CGDisplayCopyDisplayMode(displayID2)
         let pixelWidth1 = max(CGDisplayPixelsWide(displayID1), displayMode1?.pixelWidth ?? 0)
@@ -637,6 +778,12 @@ public actor CaptureManager {
         userInitiatedStop = false
         isDualMode = true
         hasAudioStreamOutput = captureAudio
+        currentFilterConfig = contentFilterConfig
+        var activeByDisplay: [CGDirectDisplayID: VideoAppIdentity] = [:]
+        if let app1 = built1.resolvedActiveApp { activeByDisplay[displayID1] = app1 }
+        if let app2 = built2.resolvedActiveApp { activeByDisplay[displayID2] = app2 }
+        lastActiveAppByDisplay = activeByDisplay
+        filterUpdateGeneration &+= 1
         dualFilter1 = filter1
         dualFilter2 = filter2
         dualConfiguration1 = config1
@@ -704,6 +851,9 @@ public actor CaptureManager {
         isDualMode = false
         hasAudioStreamOutput = false
         userInitiatedStop = false
+        currentFilterConfig = .fullDisplay
+        lastActiveAppByDisplay.removeAll()
+        filterUpdateGeneration &+= 1
         capturedDisplayID = nil
         capturedDisplayID1 = nil
         capturedDisplayID2 = nil

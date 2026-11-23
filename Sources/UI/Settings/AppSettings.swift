@@ -447,6 +447,21 @@ public enum AppSettings {
         if let value = profile.cameraResolution, Defaults[.cameraResolution] != value {
             return false
         }
+        if let value = profile.videoCaptureFilterModeRawValue, Defaults[.videoCaptureFilterMode] != value {
+            return false
+        }
+        if let value = profile.hideMenuBarInRecording, Defaults[.hideMenuBarInRecording] != value {
+            return false
+        }
+        if let value = profile.hideFloatingUtilityApps, Defaults[.hideFloatingUtilityApps] != value {
+            return false
+        }
+        if let value = profile.hiddenVideoAppBundleIDs, Defaults[.hiddenVideoAppBundleIDs] != value {
+            return false
+        }
+        if let value = profile.selectedVideoAppBundleID, Defaults[.selectedVideoAppBundleID] != value {
+            return false
+        }
         if let theme = profile.themeSnapshot, currentThemeSnapshot() != theme {
             return false
         }
@@ -545,6 +560,21 @@ public enum AppSettings {
         if let cameraResolution = profile.cameraResolution {
             Defaults[.cameraResolution] = cameraResolution
         }
+        if let videoCaptureFilterMode = profile.videoCaptureFilterModeRawValue {
+            Defaults[.videoCaptureFilterMode] = videoCaptureFilterMode
+        }
+        if let hideMenuBar = profile.hideMenuBarInRecording {
+            Defaults[.hideMenuBarInRecording] = hideMenuBar
+        }
+        if let hideFloating = profile.hideFloatingUtilityApps {
+            Defaults[.hideFloatingUtilityApps] = hideFloating
+        }
+        if let hiddenApps = profile.hiddenVideoAppBundleIDs {
+            Defaults[.hiddenVideoAppBundleIDs] = hiddenApps
+        }
+        if let selectedApp = profile.selectedVideoAppBundleID {
+            Defaults[.selectedVideoAppBundleID] = selectedApp
+        }
         if let themeSnapshot = profile.themeSnapshot {
             applyThemeSnapshot(themeSnapshot)
         }
@@ -577,6 +607,63 @@ public enum AppSettings {
     }
     public static var effectiveVideoCodec: String { isHDRCaptureActive ? "hevc" : videoCodec }
     public static var showCursorInRecording: Bool { Defaults[.showCursorInRecording] }
+    public static var videoCaptureFilterMode: String { Defaults[.videoCaptureFilterMode] }
+    public static var videoCaptureFilterModeEnum: VideoCaptureFilterMode {
+        VideoCaptureFilterMode(rawValue: Defaults[.videoCaptureFilterMode]) ?? .fullDisplay
+    }
+    public static var hideMenuBarInRecording: Bool { Defaults[.hideMenuBarInRecording] }
+    public static var hideFloatingUtilityApps: Bool { Defaults[.hideFloatingUtilityApps] }
+    public static var hiddenVideoAppBundleIDs: [String] { Defaults[.hiddenVideoAppBundleIDs] }
+    public static var selectedVideoAppBundleID: String { Defaults[.selectedVideoAppBundleID] }
+    /// True whenever video content filtering excludes applications from the
+    /// video SCStream, requiring system audio to be routed through a separate
+    /// unfiltered audio stream so other apps are not silently muted.
+    public static var videoFilterRequiresSplitSystemAudio: Bool {
+        videoCaptureFilterModeEnum != .fullDisplay
+    }
+
+    public static func makeVideoContentFilterConfig(
+        activeAppPID: pid_t? = nil,
+        activeAppBundleID: String? = nil
+    ) -> VideoContentFilterConfig {
+        VideoContentFilterConfig(
+            mode: videoCaptureFilterModeEnum,
+            hideMenuBar: hideMenuBarInRecording,
+            hideFloatingUtilityApps: hideFloatingUtilityApps,
+            hiddenBundleIDs: hiddenVideoAppBundleIDs,
+            selectedAppBundleID: selectedVideoAppBundleID,
+            activeAppPID: activeAppPID,
+            activeAppBundleID: activeAppBundleID,
+            ownBundleID: Bundle.main.bundleIdentifier
+        )
+    }
+
+    public static func isVideoAppHidden(_ bundleID: String) -> Bool {
+        let trimmed = bundleID.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return false }
+        return Defaults[.hiddenVideoAppBundleIDs].contains {
+            $0.caseInsensitiveCompare(trimmed) == .orderedSame
+        }
+    }
+
+    public static func hideVideoApp(_ bundleID: String) {
+        let trimmed = bundleID.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty, !isVideoAppHidden(trimmed) else { return }
+        Defaults[.hiddenVideoAppBundleIDs].append(trimmed)
+    }
+
+    public static func unhideVideoApp(_ bundleID: String) {
+        let trimmed = bundleID.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return }
+        Defaults[.hiddenVideoAppBundleIDs].removeAll {
+            $0.caseInsensitiveCompare(trimmed) == .orderedSame
+        }
+    }
+
+    public static func unhideAllVideoApps() {
+        guard !Defaults[.hiddenVideoAppBundleIDs].isEmpty else { return }
+        Defaults[.hiddenVideoAppBundleIDs] = []
+    }
 
     public static var videoCodec: String {
         isFeatureEnabled(.proVideo) ? Defaults[.videoCodec] : VideoCodec.hevc.rawValue
@@ -956,6 +1043,11 @@ public extension Defaults.Keys {
 
     static let captureHDR = Key<Bool>("captureHDR", default: false)
     static let showCursorInRecording = Key<Bool>("showCursorInRecording", default: true)
+    static let videoCaptureFilterMode = Key<String>("videoCaptureFilterMode", default: VideoCaptureFilterMode.fullDisplay.rawValue)
+    static let hideMenuBarInRecording = Key<Bool>("hideMenuBarInRecording", default: false)
+    static let hideFloatingUtilityApps = Key<Bool>("hideFloatingUtilityApps", default: true)
+    static let hiddenVideoAppBundleIDs = Key<[String]>("hiddenVideoAppBundleIDs", default: [])
+    static let selectedVideoAppBundleID = Key<String>("selectedVideoAppBundleID", default: "")
     static let staticMenuBarIcon = Key<Bool>("staticMenuBarIcon", default: false)
     static let videoCodec = Key<String>("videoCodec", default: VideoCodec.hevc.rawValue)
     static let captureMode = Key<String>("captureMode", default: "single")

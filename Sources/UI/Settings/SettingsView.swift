@@ -17,6 +17,11 @@ public struct SettingsView: View {
 
     @Default(.captureHDR) var captureHDR
     @Default(.showCursorInRecording) var showCursorInRecording
+    @Default(.videoCaptureFilterMode) var videoCaptureFilterModeRawValue
+    @Default(.hideMenuBarInRecording) var hideMenuBarInRecording
+    @Default(.hideFloatingUtilityApps) var hideFloatingUtilityApps
+    @Default(.hiddenVideoAppBundleIDs) var hiddenVideoAppBundleIDs
+    @Default(.selectedVideoAppBundleID) var selectedVideoAppBundleID
     @Default(.staticMenuBarIcon) var staticMenuBarIcon
     @Default(.videoCodec) var videoCodecRawValue
     @Default(.captureMode) var captureModeRawValue
