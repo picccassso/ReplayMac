@@ -3,38 +3,66 @@ import AVFoundation
 import Combine
 import Foundation
 
+public enum ClipExportOrigin: Equatable, Sendable {
+    case mainWindow
+    case editor
+}
+
 /// App-owned jobs survive navigation and the destruction of a window's hosting view.
 @MainActor
 public final class ClipExportCoordinator: ObservableObject {
+    public static let defaultAutoDismissDelay: Duration = .seconds(6)
+    public static let defaultHoverResumeDelay: Duration = .seconds(2.5)
+    static let mainWindowPauseSource = "mainWindow"
+
+    static func editorPauseSource(for url: URL) -> String {
+        "trimEditor:\(ExternalVideoOpenPolicy.canonicalURL(for: url).path)"
+    }
+
     @Published public private(set) var isBusy = false
     @Published public private(set) var sourceURL: URL?
     @Published public private(set) var title = ""
     @Published public private(set) var progress: Double?
+    @Published public private(set) var origin: ClipExportOrigin?
     @Published public private(set) var completedURL: URL?
     @Published public private(set) var errorMessage: String?
     /// Canonical URL of the clip that produced `completedURL` or `errorMessage`,
     /// so a standalone editor window can surface completion/error feedback even
     /// when the main window is closed.
     @Published public private(set) var resultSourceURL: URL?
+    @Published public private(set) var resultOrigin: ClipExportOrigin?
+    private let autoDismissDelay: Duration
+    private let hoverResumeDelay: Duration
     private var job: Task<Void, Never>?
     private var progressTask: Task<Void, Never>?
+    private var autoDismissTask: Task<Void, Never>?
+    private var autoDismissPauseSources: Set<String> = []
+    private var resultID = UUID()
     private var session: AVAssetExportSession?
     private var customExporter: TrimVideoTranscoder?
 
-    public init() {}
+    public init(autoDismissDelay: Duration = ClipExportCoordinator.defaultAutoDismissDelay,
+                hoverResumeDelay: Duration = ClipExportCoordinator.defaultHoverResumeDelay) {
+        self.autoDismissDelay = autoDismissDelay
+        self.hoverResumeDelay = hoverResumeDelay
+    }
 
     @discardableResult
-    func start(source: URL, title: String,
+    func start(source: URL, title: String, origin: ClipExportOrigin = .mainWindow,
                operation: @escaping @MainActor () async throws -> URL?) -> Bool {
         guard !isBusy else { return false }
         let canonicalSource = ExternalVideoOpenPolicy.canonicalURL(for: source)
+        cancelAutoDismiss()
+        resultID = UUID()
         sourceURL = canonicalSource
         self.title = title
+        self.origin = origin
         isBusy = true
         progress = nil
         completedURL = nil
         errorMessage = nil
         resultSourceURL = nil
+        resultOrigin = nil
         job = Task {
             defer {
                 progressTask?.cancel()
@@ -43,6 +71,7 @@ public final class ClipExportCoordinator: ObservableObject {
                 customExporter = nil
                 isBusy = false
                 sourceURL = nil
+                self.origin = nil
                 progress = nil
                 job = nil
             }
@@ -51,6 +80,9 @@ public final class ClipExportCoordinator: ObservableObject {
                 if let url = try await operation() {
                     completedURL = url
                     resultSourceURL = canonicalSource
+                    resultOrigin = origin
+                    resultID = UUID()
+                    scheduleAutoDismiss(after: autoDismissDelay)
                     NotificationCenter.default.post(name: .replayCapLibraryShouldReload, object: nil)
                 }
             } catch is CancellationError {
@@ -60,6 +92,8 @@ public final class ClipExportCoordinator: ObservableObject {
                 else {
                     errorMessage = error.localizedDescription
                     resultSourceURL = canonicalSource
+                    resultOrigin = origin
+                    resultID = UUID()
                 }
             }
         }
@@ -98,12 +132,58 @@ public final class ClipExportCoordinator: ObservableObject {
         await runningJob?.value
     }
 
+    func setAutoDismissPaused(_ paused: Bool, source: String) {
+        if paused {
+            autoDismissPauseSources.insert(source)
+            cancelAutoDismiss()
+        } else {
+            guard autoDismissPauseSources.remove(source) != nil else { return }
+            if autoDismissPauseSources.isEmpty,
+               !isBusy,
+               completedURL != nil,
+               errorMessage == nil {
+                scheduleAutoDismiss(after: min(autoDismissDelay, hoverResumeDelay))
+            }
+        }
+    }
+
     func dismissResult() {
         guard !isBusy else { return }
+        cancelAutoDismiss()
+        resultID = UUID()
         completedURL = nil
         errorMessage = nil
         resultSourceURL = nil
+        resultOrigin = nil
         title = ""
+    }
+
+    private func cancelAutoDismiss() {
+        autoDismissTask?.cancel()
+        autoDismissTask = nil
+    }
+
+    private func scheduleAutoDismiss(after delay: Duration) {
+        cancelAutoDismiss()
+        guard autoDismissPauseSources.isEmpty,
+              completedURL != nil,
+              errorMessage == nil else { return }
+        let expectedID = resultID
+        autoDismissTask = Task { [weak self] in
+            do {
+                try await Task.sleep(for: delay)
+            } catch {
+                return
+            }
+            guard let self,
+                  !Task.isCancelled,
+                  !self.isBusy,
+                  self.resultID == expectedID,
+                  self.autoDismissPauseSources.isEmpty,
+                  self.errorMessage == nil,
+                  self.completedURL != nil else { return }
+            self.dismissResult()
+        }
     }
 
     /// Stage outside the selected destination: failure/cancellation never destroys

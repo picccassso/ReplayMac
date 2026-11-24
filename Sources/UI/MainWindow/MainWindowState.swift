@@ -99,7 +99,7 @@ public final class MainWindowState: ObservableObject {
     @Published var hasVisitedSettings: Bool
     @Published var settingsTab: SettingsTab = .general
     @Published public var isPresentingFeatureCustomiser = false
-    public let exports = ClipExportCoordinator()
+    public let exports: ClipExportCoordinator
     /// Capture actions for the Home page, wired by the app delegate.
     public var controls = ReplayControls()
     /// Clips saved since launch, newest first. Deliberately never persisted,
@@ -114,8 +114,10 @@ public final class MainWindowState: ObservableObject {
     private var subscriptions = Set<AnyCancellable>()
     private var defaultsObservations: [Defaults.Observation] = []
 
-    public init(defaults: UserDefaults = .standard) {
+    public init(defaults: UserDefaults = .standard,
+                exports: ClipExportCoordinator = ClipExportCoordinator()) {
         self.defaults = defaults
+        self.exports = exports
         if defaults.string(forKey: Self.startPageKey) == MainWindowLaunchBehavior.hidden.rawValue {
             if defaults.string(forKey: Self.launchBehaviorKey) == nil {
                 defaults.set(MainWindowLaunchBehavior.hidden.rawValue, forKey: Self.launchBehaviorKey)
@@ -247,9 +249,41 @@ public final class MainWindowState: ObservableObject {
         presentEditor?(session)
     }
 
+    /// Whether the main window should display its export status toast.
+    /// Results from an editor-initiated export are suppressed here while that
+    /// clip's Trim window is still open (it already shows its own result banner),
+    /// but surface in the main window if the Trim window was closed mid-export.
+    public var showsMainWindowExportStatus: Bool {
+        if exports.isBusy {
+            return true
+        }
+        guard exports.completedURL != nil || exports.errorMessage != nil else {
+            return false
+        }
+        if exports.resultOrigin == .editor,
+           let source = exports.resultSourceURL,
+           hasOpenEditor(for: source) {
+            return false
+        }
+        return true
+    }
+
+    func hasOpenEditor(for url: URL) -> Bool {
+        editors[ExternalVideoOpenPolicy.canonicalURL(for: url)] != nil
+    }
+
     /// Ends the edit. A running export keeps going; the coordinator owns it.
+    /// A finished result that belonged to this editor is cleared so closing
+    /// the Trim window doesn't make a stale toast pop into the main window.
     func closeEditor(_ url: URL) {
-        editors.removeValue(forKey: ExternalVideoOpenPolicy.canonicalURL(for: url))?.dispose()
+        let source = ExternalVideoOpenPolicy.canonicalURL(for: url)
+        editors.removeValue(forKey: source)?.dispose()
+        exports.setAutoDismissPaused(false, source: ClipExportCoordinator.editorPauseSource(for: source))
+        if !exports.isBusy,
+           exports.resultOrigin == .editor,
+           exports.resultSourceURL == source {
+            exports.dismissResult()
+        }
     }
 
     public func recordSavedClips(_ urls: [URL], kind: SavedClipKind, at date: Date = Date()) {
@@ -299,6 +333,7 @@ public final class MainWindowState: ObservableObject {
 
     public func windowDidHide() {
         isWindowVisible = false
+        exports.setAutoDismissPaused(false, source: ClipExportCoordinator.mainWindowPauseSource)
     }
 
     /// Closing marks the window as closed and hidden. Destination routing is

@@ -417,6 +417,153 @@ final class MainWindowStateTests: XCTestCase {
     }
 
     @MainActor
+    func testCompletedExportAutoDismissesAndPausesOnHover() async throws {
+        let exports = ClipExportCoordinator(autoDismissDelay: .milliseconds(80),
+                                            hoverResumeDelay: .milliseconds(60))
+        let source = URL(fileURLWithPath: "/private/tmp/clip.mp4")
+        let result = URL(fileURLWithPath: "/private/tmp/clip.gif")
+        XCTAssertTrue(exports.start(source: source, title: "Exporting GIF", origin: .mainWindow) { result })
+        for _ in 0..<20 where exports.isBusy { await Task.yield() }
+        XCTAssertEqual(exports.completedURL, result)
+
+        // Hovering pauses auto-dismiss beyond the normal timeout.
+        exports.setAutoDismissPaused(true, source: ClipExportCoordinator.mainWindowPauseSource)
+        try await Task.sleep(for: .milliseconds(140))
+        XCTAssertEqual(exports.completedURL, result)
+
+        // Unhovering resumes auto-dismiss and clears the result cleanly.
+        exports.setAutoDismissPaused(false, source: ClipExportCoordinator.mainWindowPauseSource)
+        try await Task.sleep(for: .milliseconds(150))
+        XCTAssertNil(exports.completedURL)
+        XCTAssertNil(exports.resultSourceURL)
+        XCTAssertNil(exports.resultOrigin)
+    }
+
+    @MainActor
+    func testFailedExportStaysStickyAndDoesNotAutoDismiss() async throws {
+        struct Failure: LocalizedError { var errorDescription: String? { "Disk full" } }
+        let exports = ClipExportCoordinator(autoDismissDelay: .milliseconds(40),
+                                            hoverResumeDelay: .milliseconds(40))
+        let source = URL(fileURLWithPath: "/private/tmp/clip.mp4")
+        XCTAssertTrue(exports.start(source: source, title: "Exporting MP4", origin: .mainWindow) { throw Failure() })
+        for _ in 0..<20 where exports.isBusy { await Task.yield() }
+        XCTAssertEqual(exports.errorMessage, "Disk full")
+
+        try await Task.sleep(for: .milliseconds(120))
+        XCTAssertEqual(exports.errorMessage, "Disk full")
+    }
+
+    @MainActor
+    func testStartingNewExportCancelsPreviousAutoDismissTimer() async throws {
+        let exports = ClipExportCoordinator(autoDismissDelay: .milliseconds(100),
+                                            hoverResumeDelay: .milliseconds(100))
+        let source = URL(fileURLWithPath: "/private/tmp/clip.mp4")
+        let firstResult = URL(fileURLWithPath: "/private/tmp/first.gif")
+        let secondResult = URL(fileURLWithPath: "/private/tmp/second.gif")
+
+        XCTAssertTrue(exports.start(source: source, title: "Export 1") { firstResult })
+        for _ in 0..<20 where exports.isBusy { await Task.yield() }
+        XCTAssertEqual(exports.completedURL, firstResult)
+
+        // Start a second export before the first timer fires; it finishes after the first timer would have fired.
+        try await Task.sleep(for: .milliseconds(40))
+        XCTAssertTrue(exports.start(source: source, title: "Export 2") {
+            try await Task.sleep(for: .milliseconds(90))
+            return secondResult
+        })
+        try await Task.sleep(for: .milliseconds(120))
+        XCTAssertEqual(exports.completedURL, secondResult)
+
+        // Eventually the second result's own timer clears it.
+        try await Task.sleep(for: .milliseconds(150))
+        XCTAssertNil(exports.completedURL)
+    }
+
+    @MainActor
+    func testEditorExportSuppressionAndCloseBehavior() async throws {
+        let name = "MainWindowTests.\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: name)!
+        defer { defaults.removePersistentDomain(forName: name) }
+        let exports = ClipExportCoordinator(autoDismissDelay: .seconds(30))
+        let state = MainWindowState(defaults: defaults, exports: exports)
+        state.presentEditor = nil
+
+        let clipA = URL(fileURLWithPath: "/private/tmp/clipA.mp4")
+        let clipB = URL(fileURLWithPath: "/private/tmp/clipB.mp4")
+        let outA = URL(fileURLWithPath: "/private/tmp/clipA_trimmed.mp4")
+
+        // 1. Editor export finishes while editor A is open -> suppressed in main window.
+        state.openEditor(clipA)
+        state.openEditor(clipB)
+        XCTAssertTrue(exports.start(source: clipA, title: "Exporting MP4", origin: .editor) { outA })
+        for _ in 0..<20 where exports.isBusy { await Task.yield() }
+        XCTAssertEqual(exports.completedURL, outA)
+        XCTAssertFalse(state.showsMainWindowExportStatus)
+
+        // Closing unrelated editor B does not clear clip A's result.
+        state.closeEditor(clipB)
+        XCTAssertEqual(exports.completedURL, outA)
+        XCTAssertFalse(state.showsMainWindowExportStatus)
+
+        // Closing editor A clears its finished result so it does not flash in the main window.
+        state.closeEditor(clipA)
+        XCTAssertNil(exports.completedURL)
+        XCTAssertFalse(state.showsMainWindowExportStatus)
+
+        // 2. Editor export where editor closes mid-export -> surfaces in main window on completion.
+        state.openEditor(clipA)
+        let started = expectation(description: "Export running")
+        XCTAssertTrue(exports.start(source: clipA, title: "Exporting MP4", origin: .editor) {
+            started.fulfill()
+            try await Task.sleep(for: .milliseconds(40))
+            return outA
+        })
+        await fulfillment(of: [started], timeout: 2)
+        state.closeEditor(clipA)
+        XCTAssertTrue(exports.isBusy)
+        XCTAssertTrue(state.showsMainWindowExportStatus)
+        try await Task.sleep(for: .milliseconds(90))
+        XCTAssertFalse(exports.isBusy)
+        XCTAssertEqual(exports.completedURL, outA)
+        XCTAssertTrue(state.showsMainWindowExportStatus)
+        exports.dismissResult()
+
+        // 3. Main-window export still shows in main window even if an editor is open for the same clip,
+        // and closing that editor does not dismiss the main-window toast.
+        state.openEditor(clipA)
+        XCTAssertTrue(exports.start(source: clipA, title: "Exporting GIF", origin: .mainWindow) { outA })
+        for _ in 0..<20 where exports.isBusy { await Task.yield() }
+        XCTAssertTrue(state.showsMainWindowExportStatus)
+        state.closeEditor(clipA)
+        XCTAssertEqual(exports.completedURL, outA)
+        XCTAssertTrue(state.showsMainWindowExportStatus)
+    }
+
+    @MainActor
+    func testHidingMainWindowReleasesHoverPauseSoAutoDismissStillFires() async throws {
+        let name = "MainWindowTests.\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: name)!
+        defer { defaults.removePersistentDomain(forName: name) }
+        let exports = ClipExportCoordinator(autoDismissDelay: .milliseconds(60),
+                                            hoverResumeDelay: .milliseconds(50))
+        let state = MainWindowState(defaults: defaults, exports: exports)
+        state.presentEditor = nil
+
+        let clip = URL(fileURLWithPath: "/private/tmp/clip.mp4")
+        let out = URL(fileURLWithPath: "/private/tmp/clip.gif")
+        XCTAssertTrue(exports.start(source: clip, title: "Exporting GIF", origin: .mainWindow) { out })
+        for _ in 0..<20 where exports.isBusy { await Task.yield() }
+
+        exports.setAutoDismissPaused(true, source: ClipExportCoordinator.mainWindowPauseSource)
+        try await Task.sleep(for: .milliseconds(100))
+        XCTAssertEqual(exports.completedURL, out)
+
+        state.windowDidHide()
+        try await Task.sleep(for: .milliseconds(120))
+        XCTAssertNil(exports.completedURL)
+    }
+
+    @MainActor
     func testStagedExportPreservesDestinationOnFailureAndCancellation() async throws {
         let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)

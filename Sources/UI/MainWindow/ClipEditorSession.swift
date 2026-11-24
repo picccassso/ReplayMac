@@ -158,7 +158,7 @@ final class ClipEditorSession: ObservableObject {
         player?.pause()
         previewBuildID = UUID()
         gifEstimateGeneration.invalidate()
-        exports.start(source: url, title: "Exporting MP4") { [exports] in
+        exports.start(source: url, title: "Exporting MP4", origin: .editor) { [exports] in
             try await request.exportMP4(using: exports)
         }
     }
@@ -169,7 +169,7 @@ final class ClipEditorSession: ObservableObject {
         player?.pause()
         previewBuildID = UUID()
         gifEstimateGeneration.invalidate()
-        exports.start(source: url, title: "Exporting GIF") {
+        exports.start(source: url, title: "Exporting GIF", origin: .editor) {
             try await request.exportGIF()
         }
     }

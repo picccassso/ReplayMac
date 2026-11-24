@@ -722,7 +722,7 @@ public struct ClipLibraryView: View {
         let sourceURL = row.info.fileURL
         let end = row.info.duration.isFinite ? row.info.duration : 0
         guard end > 0 else { return }
-        windowState.exports.start(source: sourceURL, title: "Exporting GIF") {
+        windowState.exports.start(source: sourceURL, title: "Exporting GIF", origin: .mainWindow) {
             let suggestedURL = GIFExporter.uniqueOutputURL(basedOn: sourceURL)
             guard let outputURL = await ExportDestinationPicker.chooseDestination(
                 suggestedURL: suggestedURL, contentType: .gif, title: "Export GIF"

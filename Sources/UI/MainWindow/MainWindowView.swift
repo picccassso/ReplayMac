@@ -10,6 +10,7 @@ public struct MainWindowView: View {
     @ObservedObject private var themeController = ThemeController.shared
     private let menuBar: MenuBarState
     @Environment(\.accessibilityShowBorders) private var showBorders
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Environment(\.colorSchemeContrast) private var contrast
 
     public init(state: MainWindowState, menuBar: MenuBarState) {
@@ -222,7 +223,7 @@ public struct MainWindowView: View {
                 ? Color.clear
                 : AppTheme.backgroundPrimary
         )
-        .floatingBottomBar { statusBars }
+        .overlay(alignment: .topTrailing) { statusToast }
     }
 
     private var pageTitle: String { state.page.title }
@@ -238,50 +239,86 @@ public struct MainWindowView: View {
 
     // MARK: Floating status
 
-    private var showsExportStatus: Bool {
-        exports.isBusy || exports.completedURL != nil || exports.errorMessage != nil
+    private var toastAnimation: Animation {
+        reduceMotion ? .easeInOut(duration: 0.15) : .spring(response: 0.28, dampingFraction: 0.86)
     }
 
-    @ViewBuilder
-    private var statusBars: some View {
-        if showsExportStatus {
-            GlassGroup(spacing: 8) {
-                exportStatus
+    private var statusToast: some View {
+        Group {
+            if state.showsMainWindowExportStatus {
+                GlassGroup(spacing: 8) {
+                    exportStatus
+                }
+                .frame(maxWidth: 460, alignment: .trailing)
+                .padding(.top, 12)
+                .padding(.horizontal, 16)
+                .transition(reduceMotion ? .opacity : .move(edge: .top).combined(with: .opacity))
             }
-            .frame(maxWidth: 620)
-            .padding(.horizontal, 16)
-            .padding(.bottom, 12)
         }
+        .animation(toastAnimation, value: state.showsMainWindowExportStatus)
+        .animation(toastAnimation, value: exports.isBusy)
+    }
+
+    private var exportCompleteLabel: String {
+        if let filename = exports.completedURL?.lastPathComponent, !filename.isEmpty {
+            return "Exported \(filename)"
+        }
+        return "Export complete"
     }
 
     private var exportStatus: some View {
-        HStack(spacing: 12) {
+        HStack(spacing: 10) {
             if exports.isBusy {
                 if let progress = exports.progress {
-                    ProgressView(value: progress).frame(width: 100)
-                } else { ProgressView().controlSize(.small) }
-                Text(exports.title)
-                if let source = exports.sourceURL {
-                    Text(source.lastPathComponent).foregroundStyle(.secondary).lineLimit(1).truncationMode(.middle)
+                    ProgressView(value: progress).frame(width: 84)
+                } else {
+                    ProgressView().controlSize(.small)
                 }
-                Spacer(minLength: 8)
-                Button("Cancel Export") { exports.cancel() }
+                Text(exports.title)
+                    .fontWeight(.medium)
+                    .fixedSize()
+                if let source = exports.sourceURL {
+                    Text(source.lastPathComponent)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                        .truncationMode(.middle)
+                }
+                Button("Cancel") { exports.cancel() }
+                    .fixedSize()
+                    .help("Cancel Export")
+                    .accessibilityLabel("Cancel Export")
             } else {
-                Image(systemName: exports.errorMessage == nil ? "checkmark.circle.fill" : "exclamationmark.triangle.fill")
-                    .foregroundStyle(exports.errorMessage == nil ? AppTheme.success : .orange)
-                Text(exports.errorMessage ?? "Export complete")
-                    .lineLimit(2).textSelection(.enabled)
-                Spacer(minLength: 8)
+                let isError = exports.errorMessage != nil
+                Image(systemName: isError ? "exclamationmark.triangle.fill" : "checkmark.circle.fill")
+                    .foregroundStyle(isError ? .orange : AppTheme.success)
+                if let errorMessage = exports.errorMessage {
+                    Text(errorMessage)
+                        .lineLimit(3)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .textSelection(.enabled)
+                } else {
+                    Text(exportCompleteLabel)
+                        .fontWeight(.medium)
+                        .lineLimit(1)
+                        .truncationMode(.middle)
+                }
                 if let url = exports.completedURL {
-                    Button("Show in Finder") { NSWorkspace.shared.activateFileViewerSelecting([url]) }
+                    Button("Show in Finder") {
+                        NSWorkspace.shared.activateFileViewerSelecting([url])
+                        exports.dismissResult()
+                    }
+                    .fixedSize()
                 }
                 Button { exports.dismissResult() } label: { Image(systemName: "xmark") }
                     .buttonStyle(.borderless)
+                    .fixedSize()
                     .help("Dismiss export result")
                     .accessibilityLabel("Dismiss export result")
             }
         }
         .floatingPill()
+        .onHover { exports.setAutoDismissPaused($0, source: ClipExportCoordinator.mainWindowPauseSource) }
+        .onDisappear { exports.setAutoDismissPaused(false, source: ClipExportCoordinator.mainWindowPauseSource) }
     }
 }
 

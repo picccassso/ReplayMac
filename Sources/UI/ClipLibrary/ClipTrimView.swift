@@ -12,6 +12,18 @@ struct ClipTrimView: View {
     @ObservedObject var session: ClipEditorSession
     @ObservedObject var exports: ClipExportCoordinator
     let onClose: () -> Void
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+    private var showsExportResultBanner: Bool {
+        !exports.isBusy
+            && exports.resultOrigin == .editor
+            && exports.resultSourceURL == ExternalVideoOpenPolicy.canonicalURL(for: session.url)
+            && (exports.completedURL != nil || exports.errorMessage != nil)
+    }
+
+    private var exportBannerPauseSource: String {
+        ClipExportCoordinator.editorPauseSource(for: session.url)
+    }
 
     var body: some View {
         HStack(spacing: 0) {
@@ -200,10 +212,9 @@ struct ClipTrimView: View {
                         .foregroundStyle(.orange)
                         .textSelection(.enabled)
                 }
-                if !exports.isBusy,
-                   exports.resultSourceURL == ExternalVideoOpenPolicy.canonicalURL(for: session.url),
-                   exports.completedURL != nil || exports.errorMessage != nil {
+                if showsExportResultBanner {
                     exportResultBanner
+                        .transition(reduceMotion ? .opacity : .opacity.combined(with: .scale(scale: 0.98)))
                 }
                 estimateSummary
                 if session.isBusy, let progress = exports.progress {
@@ -237,6 +248,7 @@ struct ClipTrimView: View {
                 }
             }
             .padding(16)
+            .animation(reduceMotion ? .easeInOut(duration: 0.15) : .easeOut(duration: 0.2), value: showsExportResultBanner)
         }
         .tint(AppTheme.accent)
     }
@@ -277,11 +289,20 @@ struct ClipTrimView: View {
             HStack(alignment: .top, spacing: 8) {
                 Image(systemName: exports.errorMessage == nil ? "checkmark.circle.fill" : "exclamationmark.triangle.fill")
                     .foregroundStyle(exports.errorMessage == nil ? AppTheme.success : .orange)
-                Text(exports.errorMessage ?? "Export complete")
-                    .font(.system(size: 12, weight: .medium))
-                    .foregroundStyle(exports.errorMessage == nil ? AppTheme.textPrimary : .orange)
-                    .lineLimit(3)
-                    .textSelection(.enabled)
+                if let errorMessage = exports.errorMessage {
+                    Text(errorMessage)
+                        .font(.system(size: 12, weight: .medium))
+                        .foregroundStyle(.orange)
+                        .lineLimit(3)
+                        .textSelection(.enabled)
+                } else {
+                    let label = exports.completedURL.map { "Exported \($0.lastPathComponent)" } ?? "Export complete"
+                    Text(label)
+                        .font(.system(size: 12, weight: .medium))
+                        .foregroundStyle(AppTheme.textPrimary)
+                        .lineLimit(2)
+                        .truncationMode(.middle)
+                }
                 Spacer(minLength: 4)
                 Button { exports.dismissResult() } label: {
                     Image(systemName: "xmark")
@@ -294,6 +315,7 @@ struct ClipTrimView: View {
             if let completedURL = exports.completedURL {
                 Button("Show in Finder") {
                     NSWorkspace.shared.activateFileViewerSelecting([completedURL])
+                    exports.dismissResult()
                 }
                 .controlSize(.small)
             }
@@ -303,6 +325,8 @@ struct ClipTrimView: View {
             RoundedRectangle(cornerRadius: AppTheme.cornerRadiusSmall)
                 .fill(AppTheme.backgroundPrimary.opacity(0.6))
         )
+        .onHover { exports.setAutoDismissPaused($0, source: exportBannerPauseSource) }
+        .onDisappear { exports.setAutoDismissPaused(false, source: exportBannerPauseSource) }
     }
 
     private var estimateSummary: some View {
