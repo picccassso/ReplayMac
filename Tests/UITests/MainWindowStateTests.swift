@@ -417,24 +417,36 @@ final class MainWindowStateTests: XCTestCase {
     }
 
     @MainActor
+    private func waitUntil(timeout: Duration = .seconds(3), _ condition: () -> Bool) async -> Bool {
+        let clock = ContinuousClock()
+        let deadline = clock.now.advanced(by: timeout)
+        while !condition() {
+            if clock.now >= deadline { return false }
+            try? await Task.sleep(for: .milliseconds(10))
+        }
+        return true
+    }
+
+    @MainActor
     func testCompletedExportAutoDismissesAndPausesOnHover() async throws {
-        let exports = ClipExportCoordinator(autoDismissDelay: .milliseconds(80),
-                                            hoverResumeDelay: .milliseconds(60))
+        let exports = ClipExportCoordinator(autoDismissDelay: .milliseconds(150),
+                                            hoverResumeDelay: .milliseconds(80))
         let source = URL(fileURLWithPath: "/private/tmp/clip.mp4")
         let result = URL(fileURLWithPath: "/private/tmp/clip.gif")
         XCTAssertTrue(exports.start(source: source, title: "Exporting GIF", origin: .mainWindow) { result })
-        for _ in 0..<20 where exports.isBusy { await Task.yield() }
+        let finished = await waitUntil { !exports.isBusy }
+        XCTAssertTrue(finished)
         XCTAssertEqual(exports.completedURL, result)
 
         // Hovering pauses auto-dismiss beyond the normal timeout.
         exports.setAutoDismissPaused(true, source: ClipExportCoordinator.mainWindowPauseSource)
-        try await Task.sleep(for: .milliseconds(140))
+        try await Task.sleep(for: .milliseconds(250))
         XCTAssertEqual(exports.completedURL, result)
 
         // Unhovering resumes auto-dismiss and clears the result cleanly.
         exports.setAutoDismissPaused(false, source: ClipExportCoordinator.mainWindowPauseSource)
-        try await Task.sleep(for: .milliseconds(150))
-        XCTAssertNil(exports.completedURL)
+        let dismissed = await waitUntil { exports.completedURL == nil }
+        XCTAssertTrue(dismissed)
         XCTAssertNil(exports.resultSourceURL)
         XCTAssertNil(exports.resultOrigin)
     }
@@ -446,37 +458,49 @@ final class MainWindowStateTests: XCTestCase {
                                             hoverResumeDelay: .milliseconds(40))
         let source = URL(fileURLWithPath: "/private/tmp/clip.mp4")
         XCTAssertTrue(exports.start(source: source, title: "Exporting MP4", origin: .mainWindow) { throw Failure() })
-        for _ in 0..<20 where exports.isBusy { await Task.yield() }
+        let finished = await waitUntil { !exports.isBusy }
+        XCTAssertTrue(finished)
         XCTAssertEqual(exports.errorMessage, "Disk full")
 
-        try await Task.sleep(for: .milliseconds(120))
+        try await Task.sleep(for: .milliseconds(150))
         XCTAssertEqual(exports.errorMessage, "Disk full")
     }
 
     @MainActor
     func testStartingNewExportCancelsPreviousAutoDismissTimer() async throws {
-        let exports = ClipExportCoordinator(autoDismissDelay: .milliseconds(100),
+        let exports = ClipExportCoordinator(autoDismissDelay: .milliseconds(200),
                                             hoverResumeDelay: .milliseconds(100))
         let source = URL(fileURLWithPath: "/private/tmp/clip.mp4")
         let firstResult = URL(fileURLWithPath: "/private/tmp/first.gif")
         let secondResult = URL(fileURLWithPath: "/private/tmp/second.gif")
 
         XCTAssertTrue(exports.start(source: source, title: "Export 1") { firstResult })
-        for _ in 0..<20 where exports.isBusy { await Task.yield() }
+        let firstFinished = await waitUntil { !exports.isBusy }
+        XCTAssertTrue(firstFinished)
         XCTAssertEqual(exports.completedURL, firstResult)
 
-        // Start a second export before the first timer fires; it finishes after the first timer would have fired.
-        try await Task.sleep(for: .milliseconds(40))
+        // Start a second export before the first timer fires, hold it past the first timer's deadline,
+        // then let it finish and verify its result appears and is later cleared by its own timer.
+        var releaseSecond: CheckedContinuation<Void, Never>?
+        let secondStarted = expectation(description: "Second export started")
         XCTAssertTrue(exports.start(source: source, title: "Export 2") {
-            try await Task.sleep(for: .milliseconds(90))
+            await withCheckedContinuation { continuation in
+                releaseSecond = continuation
+                secondStarted.fulfill()
+            }
             return secondResult
         })
-        try await Task.sleep(for: .milliseconds(120))
+        await fulfillment(of: [secondStarted], timeout: 2)
+        try await Task.sleep(for: .milliseconds(250))
+        releaseSecond?.resume()
+        releaseSecond = nil
+
+        let secondFinished = await waitUntil { !exports.isBusy }
+        XCTAssertTrue(secondFinished)
         XCTAssertEqual(exports.completedURL, secondResult)
 
-        // Eventually the second result's own timer clears it.
-        try await Task.sleep(for: .milliseconds(150))
-        XCTAssertNil(exports.completedURL)
+        let secondDismissed = await waitUntil { exports.completedURL == nil }
+        XCTAssertTrue(secondDismissed)
     }
 
     @MainActor
@@ -496,7 +520,8 @@ final class MainWindowStateTests: XCTestCase {
         state.openEditor(clipA)
         state.openEditor(clipB)
         XCTAssertTrue(exports.start(source: clipA, title: "Exporting MP4", origin: .editor) { outA })
-        for _ in 0..<20 where exports.isBusy { await Task.yield() }
+        let firstFinished = await waitUntil { !exports.isBusy }
+        XCTAssertTrue(firstFinished)
         XCTAssertEqual(exports.completedURL, outA)
         XCTAssertFalse(state.showsMainWindowExportStatus)
 
@@ -512,18 +537,24 @@ final class MainWindowStateTests: XCTestCase {
 
         // 2. Editor export where editor closes mid-export -> surfaces in main window on completion.
         state.openEditor(clipA)
+        var releaseExport: CheckedContinuation<Void, Never>?
         let started = expectation(description: "Export running")
         XCTAssertTrue(exports.start(source: clipA, title: "Exporting MP4", origin: .editor) {
-            started.fulfill()
-            try await Task.sleep(for: .milliseconds(40))
+            await withCheckedContinuation { continuation in
+                releaseExport = continuation
+                started.fulfill()
+            }
             return outA
         })
         await fulfillment(of: [started], timeout: 2)
         state.closeEditor(clipA)
         XCTAssertTrue(exports.isBusy)
         XCTAssertTrue(state.showsMainWindowExportStatus)
-        try await Task.sleep(for: .milliseconds(90))
-        XCTAssertFalse(exports.isBusy)
+        releaseExport?.resume()
+        releaseExport = nil
+
+        let secondFinished = await waitUntil { !exports.isBusy }
+        XCTAssertTrue(secondFinished)
         XCTAssertEqual(exports.completedURL, outA)
         XCTAssertTrue(state.showsMainWindowExportStatus)
         exports.dismissResult()
@@ -532,7 +563,8 @@ final class MainWindowStateTests: XCTestCase {
         // and closing that editor does not dismiss the main-window toast.
         state.openEditor(clipA)
         XCTAssertTrue(exports.start(source: clipA, title: "Exporting GIF", origin: .mainWindow) { outA })
-        for _ in 0..<20 where exports.isBusy { await Task.yield() }
+        let thirdFinished = await waitUntil { !exports.isBusy }
+        XCTAssertTrue(thirdFinished)
         XCTAssertTrue(state.showsMainWindowExportStatus)
         state.closeEditor(clipA)
         XCTAssertEqual(exports.completedURL, outA)
@@ -544,23 +576,24 @@ final class MainWindowStateTests: XCTestCase {
         let name = "MainWindowTests.\(UUID().uuidString)"
         let defaults = UserDefaults(suiteName: name)!
         defer { defaults.removePersistentDomain(forName: name) }
-        let exports = ClipExportCoordinator(autoDismissDelay: .milliseconds(60),
-                                            hoverResumeDelay: .milliseconds(50))
+        let exports = ClipExportCoordinator(autoDismissDelay: .milliseconds(150),
+                                            hoverResumeDelay: .milliseconds(60))
         let state = MainWindowState(defaults: defaults, exports: exports)
         state.presentEditor = nil
 
         let clip = URL(fileURLWithPath: "/private/tmp/clip.mp4")
         let out = URL(fileURLWithPath: "/private/tmp/clip.gif")
         XCTAssertTrue(exports.start(source: clip, title: "Exporting GIF", origin: .mainWindow) { out })
-        for _ in 0..<20 where exports.isBusy { await Task.yield() }
+        let finished = await waitUntil { !exports.isBusy }
+        XCTAssertTrue(finished)
 
         exports.setAutoDismissPaused(true, source: ClipExportCoordinator.mainWindowPauseSource)
-        try await Task.sleep(for: .milliseconds(100))
+        try await Task.sleep(for: .milliseconds(250))
         XCTAssertEqual(exports.completedURL, out)
 
         state.windowDidHide()
-        try await Task.sleep(for: .milliseconds(120))
-        XCTAssertNil(exports.completedURL)
+        let dismissed = await waitUntil { exports.completedURL == nil }
+        XCTAssertTrue(dismissed)
     }
 
     @MainActor
