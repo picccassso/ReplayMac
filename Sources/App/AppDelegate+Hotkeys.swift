@@ -143,6 +143,10 @@ extension AppDelegate {
     /// Brings ReplayMac forward and opens the Trim & Export window, even when
     /// the app is running from the menu bar with no window open.
     func openClipEditor(_ url: URL) {
+        guard !enforceOnboardingWindowExclusivity() else {
+            pendingExternalOpenURLs.append(url)
+            return
+        }
         NSApp.setActivationPolicy(.regular)
         NSApp.activate(ignoringOtherApps: true)
         mainWindowState.openEditor(url)

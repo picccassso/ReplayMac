@@ -70,6 +70,24 @@ struct ClipTrimView: View {
                         TrimPlayerView(player: player, cropEnabled: session.cropEnabled,
                                        cropRect: $session.cropRect, videoSize: session.videoDisplaySize,
                                        isBusy: session.isBusy, onManualChange: { session.cropAspect = .free })
+                    } else if let loadError = session.loadErrorMessage {
+                        VStack(spacing: 12) {
+                            Image(systemName: "film.slash")
+                                .font(.system(size: 32))
+                                .foregroundStyle(.secondary)
+                            Text("Unable to Open Video")
+                                .font(.headline)
+                                .foregroundStyle(.white)
+                            Text(loadError)
+                                .font(.system(size: 12))
+                                .foregroundStyle(.white.opacity(0.75))
+                                .multilineTextAlignment(.center)
+                                .frame(maxWidth: 340)
+                            Button("Close", action: onClose)
+                                .controlSize(.regular)
+                                .padding(.top, 4)
+                        }
+                        .padding(24)
                     } else {
                         ProgressView("Loading clip…")
                             .foregroundStyle(.white)
@@ -182,6 +200,11 @@ struct ClipTrimView: View {
                         .foregroundStyle(.orange)
                         .textSelection(.enabled)
                 }
+                if !exports.isBusy,
+                   exports.resultSourceURL == ExternalVideoOpenPolicy.canonicalURL(for: session.url),
+                   exports.completedURL != nil || exports.errorMessage != nil {
+                    exportResultBanner
+                }
                 estimateSummary
                 if session.isBusy, let progress = exports.progress {
                     ProgressView(value: progress)
@@ -247,6 +270,39 @@ struct ClipTrimView: View {
             TrimHelpButton(text: help, arrowEdge: .leading)
         }
         .font(.system(size: 11))
+    }
+
+    private var exportResultBanner: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(alignment: .top, spacing: 8) {
+                Image(systemName: exports.errorMessage == nil ? "checkmark.circle.fill" : "exclamationmark.triangle.fill")
+                    .foregroundStyle(exports.errorMessage == nil ? AppTheme.success : .orange)
+                Text(exports.errorMessage ?? "Export complete")
+                    .font(.system(size: 12, weight: .medium))
+                    .foregroundStyle(exports.errorMessage == nil ? AppTheme.textPrimary : .orange)
+                    .lineLimit(3)
+                    .textSelection(.enabled)
+                Spacer(minLength: 4)
+                Button { exports.dismissResult() } label: {
+                    Image(systemName: "xmark")
+                        .font(.system(size: 10, weight: .semibold))
+                }
+                .buttonStyle(.borderless)
+                .help("Dismiss export result")
+                .accessibilityLabel("Dismiss export result")
+            }
+            if let completedURL = exports.completedURL {
+                Button("Show in Finder") {
+                    NSWorkspace.shared.activateFileViewerSelecting([completedURL])
+                }
+                .controlSize(.small)
+            }
+        }
+        .padding(10)
+        .background(
+            RoundedRectangle(cornerRadius: AppTheme.cornerRadiusSmall)
+                .fill(AppTheme.backgroundPrimary.opacity(0.6))
+        )
     }
 
     private var estimateSummary: some View {

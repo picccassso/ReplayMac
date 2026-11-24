@@ -12,6 +12,10 @@ public final class ClipExportCoordinator: ObservableObject {
     @Published public private(set) var progress: Double?
     @Published public private(set) var completedURL: URL?
     @Published public private(set) var errorMessage: String?
+    /// Canonical URL of the clip that produced `completedURL` or `errorMessage`,
+    /// so a standalone editor window can surface completion/error feedback even
+    /// when the main window is closed.
+    @Published public private(set) var resultSourceURL: URL?
     private var job: Task<Void, Never>?
     private var progressTask: Task<Void, Never>?
     private var session: AVAssetExportSession?
@@ -23,12 +27,14 @@ public final class ClipExportCoordinator: ObservableObject {
     func start(source: URL, title: String,
                operation: @escaping @MainActor () async throws -> URL?) -> Bool {
         guard !isBusy else { return false }
-        sourceURL = source.standardizedFileURL
+        let canonicalSource = ExternalVideoOpenPolicy.canonicalURL(for: source)
+        sourceURL = canonicalSource
         self.title = title
         isBusy = true
         progress = nil
         completedURL = nil
         errorMessage = nil
+        resultSourceURL = nil
         job = Task {
             defer {
                 progressTask?.cancel()
@@ -44,13 +50,17 @@ public final class ClipExportCoordinator: ObservableObject {
                 try Task.checkCancellation()
                 if let url = try await operation() {
                     completedURL = url
+                    resultSourceURL = canonicalSource
                     NotificationCenter.default.post(name: .replayCapLibraryShouldReload, object: nil)
                 }
             } catch is CancellationError {
                 self.title = "Export cancelled"
             } catch {
                 if Task.isCancelled { self.title = "Export cancelled" }
-                else { errorMessage = error.localizedDescription }
+                else {
+                    errorMessage = error.localizedDescription
+                    resultSourceURL = canonicalSource
+                }
             }
         }
         return true
@@ -92,6 +102,7 @@ public final class ClipExportCoordinator: ObservableObject {
         guard !isBusy else { return }
         completedURL = nil
         errorMessage = nil
+        resultSourceURL = nil
         title = ""
     }
 
@@ -102,6 +113,8 @@ public final class ClipExportCoordinator: ObservableObject {
         guard source.standardizedFileURL.resolvingSymlinksInPath() != destination.standardizedFileURL.resolvingSymlinksInPath() else {
             throw ExportFileError.sourceOverwrite
         }
+        let sourceAccess = source.startAccessingSecurityScopedResource()
+        defer { if sourceAccess { source.stopAccessingSecurityScopedResource() } }
         let directory = FileManager.default.temporaryDirectory.appendingPathComponent("ReplayMacExport-\(UUID().uuidString)", isDirectory: true)
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
         defer { try? FileManager.default.removeItem(at: directory) }

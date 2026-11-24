@@ -1,6 +1,7 @@
 import Branding
 import Capture
 import Cocoa
+import Feedback
 import SwiftUI
 import UI
 import Defaults
@@ -388,7 +389,63 @@ extension AppDelegate {
     private func completeOnboarding() {
         Defaults[.hasCompletedOnboarding] = true
         onboardingWindowController?.close()
-        openMainWindow()
+        if !pendingExternalOpenURLs.isEmpty {
+            let queued = pendingExternalOpenURLs
+            pendingExternalOpenURLs.removeAll()
+            openExternalVideoURLs(queued)
+        } else {
+            openMainWindow()
+        }
+    }
+
+    func openExternalVideoURLs(_ urls: [URL]) {
+        guard !enforceOnboardingWindowExclusivity() else {
+            pendingExternalOpenURLs.append(contentsOf: urls)
+            return
+        }
+        let resolution = ExternalVideoOpenPolicy.resolve(urls)
+        guard !resolution.accepted.isEmpty else {
+            if resolution.skippedCount > 0 {
+                NotificationManager.shared.showOperationalNotification(
+                    title: "Could Not Open Item",
+                    body: "\(AppBranding.name) can open MP4, MOV, and M4V video files."
+                )
+            }
+            updateActivationPolicy()
+            return
+        }
+        for url in resolution.accepted {
+            openClipEditor(url)
+        }
+        if resolution.truncatedCount > 0 {
+            NotificationManager.shared.showOperationalNotification(
+                title: "Opened First \(resolution.accepted.count) Videos",
+                body: "Skipped \(resolution.truncatedCount) additional file\(resolution.truncatedCount == 1 ? "" : "s") to keep memory usage steady."
+            )
+        }
+    }
+
+    func openExternalVideoPanel() {
+        guard !enforceOnboardingWindowExclusivity() else { return }
+        NSApp.setActivationPolicy(.regular)
+        NSApp.activate(ignoringOtherApps: true)
+        let panel = NSOpenPanel()
+        panel.title = "Open Video in Trim & Export"
+        panel.prompt = "Open"
+        panel.canChooseFiles = true
+        panel.canChooseDirectories = false
+        panel.allowsMultipleSelection = true
+        panel.allowedContentTypes = ExternalVideoOpenPolicy.supportedContentTypes
+        panel.begin { [weak self] response in
+            Task { @MainActor [weak self] in
+                guard let self else { return }
+                if response == .OK {
+                    self.openExternalVideoURLs(panel.urls)
+                } else {
+                    self.updateActivationPolicy()
+                }
+            }
+        }
     }
 
     /// Cleans up the window and starts recording only after the setup assistant
@@ -417,7 +474,7 @@ extension AppDelegate {
     /// presenting first-run setup. Keep onboarding as the only visible titled
     /// window until the user has completed the required folder selection.
     @discardableResult
-    private func enforceOnboardingWindowExclusivity() -> Bool {
+    func enforceOnboardingWindowExclusivity() -> Bool {
         guard !Defaults[.hasCompletedOnboarding],
               let onboardingWindow = onboardingWindowController?.window,
               onboardingWindow.isVisible else {

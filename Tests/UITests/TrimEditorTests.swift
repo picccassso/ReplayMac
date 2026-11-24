@@ -77,4 +77,82 @@ final class TrimEditorTests: XCTestCase {
             NSRect(x: 4000, y: -100, width: 960, height: 640), within: screen)
         XCTAssertTrue(screen.contains(smaller))
     }
+
+    func testExternalVideoOpenPolicyFiltersDeduplicatesAndCapsBatch() throws {
+        let dir = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        let subDir = dir.appendingPathComponent("folder")
+        try FileManager.default.createDirectory(at: subDir, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: dir) }
+
+        var created: [URL] = []
+        for idx in 1...4 {
+            let file = dir.appendingPathComponent("clip_\(idx).MP4")
+            try Data("video".utf8).write(to: file)
+            created.append(file)
+        }
+        let symlink = dir.appendingPathComponent("alias.mp4")
+        try FileManager.default.createSymbolicLink(at: symlink, withDestinationURL: created[0])
+
+        let webURL = try XCTUnwrap(URL(string: "https://example.com/clip.mp4"))
+        let missing = dir.appendingPathComponent("missing.mp4")
+
+        let resolution = ExternalVideoOpenPolicy.resolve(
+            [webURL, subDir, missing, created[0], symlink, created[1], created[2], created[3]],
+            maxBatchCount: 3
+        )
+
+        XCTAssertEqual(resolution.skippedCount, 3)
+        XCTAssertEqual(resolution.truncatedCount, 1)
+        XCTAssertEqual(
+            resolution.accepted,
+            Array(created.prefix(3)).map { ExternalVideoOpenPolicy.canonicalURL(for: $0) }
+        )
+    }
+
+    func testSuggestedMP4URLPreservesSourceStemAndNeverCreatesDirectory() throws {
+        let nonExistentDir = FileManager.default.temporaryDirectory
+            .appendingPathComponent("ReplayMacMissingDir-\(UUID().uuidString)", isDirectory: true)
+        let externalSource = nonExistentDir.appendingPathComponent("1a20ac9177e40-master_playlist.MP4")
+
+        let suggested = ClipExportRequest.suggestedMP4URL(for: externalSource, suffix: "Trimmed")
+        XCTAssertEqual(suggested.lastPathComponent, "1a20ac9177e40-master_playlist_Trimmed.mp4")
+        XCTAssertEqual(suggested.deletingLastPathComponent(), nonExistentDir)
+        XCTAssertFalse(
+            FileManager.default.fileExists(atPath: nonExistentDir.path),
+            "Suggested URL generation must never call createDirectory on external folders"
+        )
+
+        let existingDir = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: existingDir, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: existingDir) }
+
+        let source = existingDir.appendingPathComponent("match.mov")
+        let firstExisting = existingDir.appendingPathComponent("match_Trimmed.mp4")
+        try Data("existing".utf8).write(to: firstExisting)
+
+        let deduped = ClipExportRequest.suggestedMP4URL(for: source, suffix: "Trimmed")
+        XCTAssertEqual(deduped.lastPathComponent, "match_Trimmed_1.mp4")
+    }
+
+    @MainActor
+    func testEditorSessionReportsLoadErrorForUnplayableFile() async throws {
+        let dir = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: dir) }
+
+        let corrupt = dir.appendingPathComponent("not-a-video.mp4")
+        try Data("plain text, not an mp4".utf8).write(to: corrupt)
+
+        let session = ClipEditorSession(url: corrupt, exports: ClipExportCoordinator())
+        defer { session.dispose() }
+
+        for _ in 0..<100 where session.isLoading {
+            try await Task.sleep(for: .milliseconds(20))
+        }
+
+        XCTAssertFalse(session.isLoading)
+        XCTAssertNil(session.player)
+        XCTAssertEqual(session.duration, 0)
+        XCTAssertNotNil(session.loadErrorMessage)
+    }
 }

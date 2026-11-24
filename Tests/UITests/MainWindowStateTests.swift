@@ -143,6 +143,17 @@ final class MainWindowStateTests: XCTestCase {
         serviceItemEvent.setParam(NSAppleEventDescriptor(enumCode: keyAELaunchedAsServiceItem), forKeyword: keyAEPropData)
         XCTAssertTrue(MainWindowState.isLoginItemLaunchEvent(serviceItemEvent))
 
+        XCTAssertFalse(MainWindowState.isOpenDocumentsLaunchEvent(nil))
+        XCTAssertFalse(MainWindowState.isOpenDocumentsLaunchEvent(plainOpenEvent))
+        let openDocumentsEvent = NSAppleEventDescriptor(
+            eventClass: AEEventClass(kCoreEventClass),
+            eventID: AEEventID(kAEOpenDocuments),
+            targetDescriptor: nil,
+            returnID: AEReturnID(kAutoGenerateReturnID),
+            transactionID: AETransactionID(kAnyTransactionID)
+        )
+        XCTAssertTrue(MainWindowState.isOpenDocumentsLaunchEvent(openDocumentsEvent))
+
         withState { state, defaults in
             defaults.set(MainWindowLaunchBehavior.mainWindow.rawValue, forKey: MainWindowState.launchBehaviorKey)
             XCTAssertTrue(state.opensWindowOnLaunch)
@@ -156,6 +167,15 @@ final class MainWindowStateTests: XCTestCase {
 
             // Manual launches open the window when On launch is mainWindow.
             XCTAssertTrue(state.shouldOpenWindowOnLaunch(hasCompletedOnboarding: true, isLaunchedAsLoginItem: false))
+
+            // Opening external files via Finder Open With suppresses auto-opening the main window.
+            XCTAssertFalse(
+                state.shouldOpenWindowOnLaunch(
+                    hasCompletedOnboarding: true,
+                    isLaunchedAsLoginItem: false,
+                    isOpeningExternalFiles: true
+                )
+            )
 
             // Hidden launch behavior keeps manual launches quiet in the menu bar too.
             defaults.set(MainWindowLaunchBehavior.hidden.rawValue, forKey: MainWindowState.launchBehaviorKey)
@@ -266,6 +286,27 @@ final class MainWindowStateTests: XCTestCase {
     }
 
     @MainActor
+    func testOpenEditorDeduplicatesSymlinkAndCanonicalPath() throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let realFile = directory.appendingPathComponent("clip.mp4")
+        try Data("stub".utf8).write(to: realFile)
+        let symlink = directory.appendingPathComponent("clip-link.mp4")
+        try FileManager.default.createSymbolicLink(at: symlink, withDestinationURL: realFile)
+
+        withState { state, _ in
+            state.openEditor(realFile)
+            state.openEditor(symlink)
+            XCTAssertEqual(state.editors.count, 1)
+            let canonical = ExternalVideoOpenPolicy.canonicalURL(for: realFile)
+            XCTAssertNotNil(state.editors[canonical])
+            state.closeEditor(symlink)
+            XCTAssertTrue(state.editors.isEmpty)
+        }
+    }
+
+    @MainActor
     func testClosingAnEditorDisposesItAndReleasesProtection() throws {
         try withState { state, _ in
             let first = URL(fileURLWithPath: "/private/tmp/first.mp4")
@@ -336,8 +377,11 @@ final class MainWindowStateTests: XCTestCase {
         await state.exports.cancelAndWait()
         XCTAssertEqual(state.page, .general)
         XCTAssertEqual(state.exports.completedURL, result)
+        XCTAssertEqual(state.exports.resultSourceURL, ExternalVideoOpenPolicy.canonicalURL(for: source))
         XCTAssertFalse(state.exports.isBusy)
         XCTAssertFalse(state.isProtected(source))
+        state.exports.dismissResult()
+        XCTAssertNil(state.exports.resultSourceURL)
     }
 
     @MainActor
@@ -365,9 +409,11 @@ final class MainWindowStateTests: XCTestCase {
         // Let the job start before waiting for it without cancellation.
         for _ in 0..<20 where exports.isBusy { await Task.yield() }
         XCTAssertEqual(exports.errorMessage, "Example failure")
+        XCTAssertEqual(exports.resultSourceURL, ExternalVideoOpenPolicy.canonicalURL(for: URL(fileURLWithPath: "/private/tmp/first.mp4")))
         XCTAssertFalse(exports.isBusy)
         exports.dismissResult()
         XCTAssertNil(exports.errorMessage)
+        XCTAssertNil(exports.resultSourceURL)
     }
 
     @MainActor

@@ -12,9 +12,10 @@ final class ClipEditorWindowController: NSWindowController, NSWindowDelegate {
     private var fullScreenTransition = false
 
     static func show(session: ClipEditorSession, state: MainWindowState) {
-        let controller = windows[session.url] ?? {
+        let key = ExternalVideoOpenPolicy.canonicalURL(for: session.url)
+        let controller = windows[key] ?? {
             let controller = ClipEditorWindowController(session: session, state: state)
-            windows[session.url] = controller
+            windows[key] = controller
             return controller
         }()
         controller.window?.deminiaturize(nil)
@@ -59,9 +60,31 @@ final class ClipEditorWindowController: NSWindowController, NSWindowDelegate {
         if let visible = (screenWithOverlap ?? screen)?.visibleFrame {
             window.contentMinSize = NSSize(width: min(960, visible.width),
                                            height: min(640, max(1, visible.height - titleBarHeight)))
-            window.setFrame(MainWindowGeometry.visibleFrame(window.frame, within: visible), display: false)
+            let targetFrame = Self.cascadedFrame(
+                for: MainWindowGeometry.visibleFrame(window.frame, within: visible),
+                within: visible
+            )
+            window.setFrame(targetFrame, display: false)
         }
         window.delegate = self
+    }
+
+    /// Offsets a newly opened editor window when another editor already sits at
+    /// the exact same position (for example, opening multiple clips via Finder).
+    private static func cascadedFrame(for initial: NSRect, within visible: NSRect) -> NSRect {
+        let existingOrigins = windows.values.compactMap { $0.window?.frame.origin }
+        var frame = initial
+        let step: CGFloat = 24
+        for _ in 0..<12 {
+            let overlaps = existingOrigins.contains { origin in
+                abs(origin.x - frame.origin.x) < 8 && abs(origin.y - frame.origin.y) < 8
+            }
+            guard overlaps else { break }
+            frame.origin.x += step
+            frame.origin.y -= step
+            frame = MainWindowGeometry.visibleFrame(frame, within: visible)
+        }
+        return frame
     }
 
     required init?(coder: NSCoder) { nil }
@@ -99,7 +122,7 @@ final class ClipEditorWindowController: NSWindowController, NSWindowDelegate {
 
     func windowWillClose(_ notification: Notification) {
         saveFrame()
-        Self.windows.removeValue(forKey: session.url)
+        Self.windows.removeValue(forKey: ExternalVideoOpenPolicy.canonicalURL(for: session.url))
         state?.closeEditor(session.url)
         // Release the hosting view and its player even if an asynchronous callback still
         // retains the controller until the end of this run-loop iteration.

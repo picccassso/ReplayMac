@@ -42,10 +42,7 @@ struct ClipExportRequest {
             suffixParts.append(qualityLabel)
         }
         let suffix = suffixParts.joined(separator: "_")
-        let suggestedURL = try ClipMetadata.generateUniqueFileURL(
-            in: url.deletingLastPathComponent(),
-            suffix: suffix
-        )
+        let suggestedURL = Self.suggestedMP4URL(for: url, suffix: suffix)
         guard let outputURL = await ExportDestinationPicker.chooseDestination(
             suggestedURL: suggestedURL,
             contentType: .mpeg4Movie,
@@ -127,5 +124,27 @@ struct ClipExportRequest {
             try await GIFExporter.export(sourceURL: url, startSeconds: trimStart,
                 endSeconds: trimEnd, maxWidth: gifWidth, crop: crop, to: stagedURL)
         }
+    }
+
+    /// Builds a suggested `<source>_<suffix>.mp4` URL next to the source clip
+    /// without calling `createDirectory`. Under App Sandbox, opening a video via
+    /// Finder grants access only to that file and not its parent folder; letting
+    /// `NSSavePanel` navigate the folder out-of-process avoids permission errors.
+    nonisolated static func suggestedMP4URL(
+        for sourceURL: URL,
+        suffix: String,
+        fileManager: FileManager = .default
+    ) -> URL {
+        let directory = sourceURL.deletingLastPathComponent()
+        let rawBase = sourceURL.deletingPathExtension().lastPathComponent
+        let baseName = rawBase.isEmpty ? ClipMetadata.defaultBaseName() : rawBase
+        let stem = suffix.isEmpty ? baseName : "\(baseName)_\(suffix)"
+        var candidate = directory.appendingPathComponent("\(stem).mp4")
+        var counter = 1
+        while fileManager.fileExists(atPath: candidate.path) {
+            candidate = directory.appendingPathComponent("\(stem)_\(counter).mp4")
+            counter += 1
+        }
+        return candidate
     }
 }

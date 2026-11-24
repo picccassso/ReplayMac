@@ -189,13 +189,15 @@ public final class MainWindowState: ObservableObject {
     }
 
     /// Whether the main window should open automatically during app launch.
-    /// Login-item launches always stay quiet in the menu bar; manual launches
-    /// follow the user's "On launch" preference once onboarding is complete.
+    /// Login-item launches and external "Open With" launches stay out of the
+    /// main window's way; manual launches follow the user's "On launch"
+    /// preference once onboarding is complete.
     public func shouldOpenWindowOnLaunch(
         hasCompletedOnboarding: Bool,
-        isLaunchedAsLoginItem: Bool
+        isLaunchedAsLoginItem: Bool,
+        isOpeningExternalFiles: Bool = false
     ) -> Bool {
-        hasCompletedOnboarding && !isLaunchedAsLoginItem && opensWindowOnLaunch
+        hasCompletedOnboarding && !isLaunchedAsLoginItem && !isOpeningExternalFiles && opensWindowOnLaunch
     }
 
     /// Detects whether an `oapp` Apple Event was sent by macOS Login Items / `SMAppService`.
@@ -207,6 +209,14 @@ public final class MainWindowState: ObservableObject {
             return false
         }
         return propData == keyAELaunchedAsLogInItem || propData == keyAELaunchedAsServiceItem
+    }
+
+    /// Detects whether the app was launched to open files via Finder "Open With",
+    /// Dock drag-and-drop, or `open -a` (`odoc` Apple Event).
+    /// Must be evaluated synchronously inside `applicationDidFinishLaunching`.
+    nonisolated public static func isOpenDocumentsLaunchEvent(_ event: NSAppleEventDescriptor?) -> Bool {
+        guard let event else { return false }
+        return event.eventID == kAEOpenDocuments
     }
     var isSettingsPage: Bool { SettingsTab(rawValue: page.rawValue) != nil }
 
@@ -231,7 +241,7 @@ public final class MainWindowState: ObservableObject {
     }
 
     public func openEditor(_ url: URL) {
-        let source = url.standardizedFileURL
+        let source = ExternalVideoOpenPolicy.canonicalURL(for: url)
         let session = editors[source] ?? ClipEditorSession(url: source, exports: exports)
         editors[source] = session
         presentEditor?(session)
@@ -239,7 +249,7 @@ public final class MainWindowState: ObservableObject {
 
     /// Ends the edit. A running export keeps going; the coordinator owns it.
     func closeEditor(_ url: URL) {
-        editors.removeValue(forKey: url.standardizedFileURL)?.dispose()
+        editors.removeValue(forKey: ExternalVideoOpenPolicy.canonicalURL(for: url))?.dispose()
     }
 
     public func recordSavedClips(_ urls: [URL], kind: SavedClipKind, at date: Date = Date()) {

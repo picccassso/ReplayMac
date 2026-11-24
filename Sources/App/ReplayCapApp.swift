@@ -16,7 +16,12 @@ struct ReplayCapApp: App {
         .defaultSize(width: 1120, height: 720)
         .defaultLaunchBehavior(.suppressed)
         .windowResizability(.automatic)
+        .handlesExternalEvents(matching: [])
         .commands {
+            CommandGroup(replacing: .newItem) {
+                Button("Open Video…") { appDelegate.openExternalVideoPanel() }
+                    .keyboardShortcut("o", modifiers: .command)
+            }
             CommandGroup(replacing: .appSettings) {
                 Button("Settings…") { appDelegate.openSettingsWindow() }
                     .keyboardShortcut(",", modifiers: .command)

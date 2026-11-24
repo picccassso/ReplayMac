@@ -99,6 +99,10 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     var mainWindowOpener: (() -> Void)?
     var mainWindowDelegate: SharedWindowDelegate?
     var isQuittingAfterExportCancellation = false
+    var hasFinishedLaunching = false
+    var hasCompletedLaunchWindowDecision = false
+    var launchedToOpenExternalFiles = false
+    var pendingExternalOpenURLs: [URL] = []
     var onboardingWindowController: NSWindowController?
     var bufferDurationObservation: Defaults.Observation?
     var settingsObservations: [Defaults.Observation] = []
@@ -295,17 +299,48 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         // Capture the launch Apple Event synchronously before it is popped when
         // applicationDidFinishLaunching returns.
         let launchedAsLoginItem = isLaunchedAsLoginItem
+        if MainWindowState.isOpenDocumentsLaunchEvent(NSAppleEventManager.shared().currentAppleEvent) {
+            launchedToOpenExternalFiles = true
+        }
+        hasFinishedLaunching = true
 
         DispatchQueue.main.async { [weak self] in
             guard let self else { return }
+            self.hasCompletedLaunchWindowDecision = true
+            let openingExternalFiles = self.launchedToOpenExternalFiles || !self.pendingExternalOpenURLs.isEmpty
             if self.mainWindowState.shouldOpenWindowOnLaunch(
                 hasCompletedOnboarding: Defaults[.hasCompletedOnboarding],
-                isLaunchedAsLoginItem: launchedAsLoginItem
+                isLaunchedAsLoginItem: launchedAsLoginItem,
+                isOpeningExternalFiles: openingExternalFiles
             ) {
                 self.openMainWindow()
             }
+            if Defaults[.hasCompletedOnboarding], !self.pendingExternalOpenURLs.isEmpty {
+                let queued = self.pendingExternalOpenURLs
+                self.pendingExternalOpenURLs.removeAll()
+                self.openExternalVideoURLs(queued)
+            }
             self.updateActivationPolicy(bringVisibleWindowToFront: true)
         }
+    }
+
+    func application(_ application: NSApplication, open urls: [URL]) {
+        guard !urls.isEmpty else { return }
+        if !hasFinishedLaunching {
+            launchedToOpenExternalFiles = true
+            pendingExternalOpenURLs.append(contentsOf: urls)
+            return
+        }
+        if !Defaults[.hasCompletedOnboarding] {
+            launchedToOpenExternalFiles = true
+            pendingExternalOpenURLs.append(contentsOf: urls)
+            showOnboardingWindow()
+            return
+        }
+        if !hasCompletedLaunchWindowDecision {
+            launchedToOpenExternalFiles = true
+        }
+        openExternalVideoURLs(urls)
     }
 
     func applicationWillTerminate(_ notification: Notification) {

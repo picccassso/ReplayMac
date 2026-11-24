@@ -17,6 +17,8 @@ final class ClipEditorSession: ObservableObject {
     @Published var trimStart: Double = 0
     @Published var trimEnd: Double = 0
     @Published var gifWidth: GIFWidth = .medium
+    @Published var isLoading = true
+    @Published var loadErrorMessage: String?
     @Published var errorMessage: String?
     @Published var audioTrackChoices: [AudioTrackChoice] = []
     @Published var selectedAudioTrackID = AudioTrackChoice.allTracksID
@@ -67,11 +69,13 @@ final class ClipEditorSession: ObservableObject {
 
     var isExporting: Bool { exports.isBusy && exports.title == "Exporting MP4" }
     var isExportingGIF: Bool { exports.isBusy && exports.title == "Exporting GIF" }
+    private let securityScope: SecurityScopedAccess
     private var loadTask: Task<Void, Never>?
 
     init(url: URL, exports: ClipExportCoordinator) {
         self.url = url
         self.exports = exports
+        self.securityScope = SecurityScopedAccess(url: url)
         loadTask = Task { await loadClip() }
     }
 
@@ -87,13 +91,28 @@ final class ClipEditorSession: ObservableObject {
         isClosed = true
         loadTask?.cancel()
         player = nil
+        securityScope.stop()
     }
 
     func loadClip() async {
         let asset = AVURLAsset(url: url)
+        let isPlayable = (try? await asset.load(.isPlayable)) ?? false
+        let videoTracks = (try? await asset.loadTracks(withMediaType: .video)) ?? []
         let loadedDuration = (try? await asset.load(.duration)) ?? .zero
         let loadedSeconds = CMTimeGetSeconds(loadedDuration)
         let seconds = loadedSeconds.isFinite ? max(loadedSeconds, 0) : 0
+
+        guard isPlayable, !videoTracks.isEmpty, seconds > 0 else {
+            await MainActor.run {
+                guard !isClosed else { return }
+                isLoading = false
+                loadErrorMessage = (isPlayable && videoTracks.isEmpty)
+                    ? "This file has no video track to edit."
+                    : "This file can’t be opened in the clip editor. Choose a playable MP4, MOV, or M4V video."
+            }
+            return
+        }
+
         let choices = await ClipAudioTracks.choices(for: asset)
         let audioTrackCount = ((try? await asset.loadTracks(withMediaType: .audio)) ?? []).count
         let displaySize = (try? await VideoCropper.geometry(for: asset).displaySize)
@@ -109,6 +128,8 @@ final class ClipEditorSession: ObservableObject {
 
         await MainActor.run {
             guard !isClosed else { return }
+            isLoading = false
+            loadErrorMessage = nil
             duration = seconds
             trimStart = 0
             trimEnd = seconds
@@ -255,5 +276,32 @@ final class ClipEditorSession: ObservableObject {
                   gifEstimateGeneration.accepts(generation) else { return }
             gifEstimateFailed = true
         }
+    }
+}
+
+/// Balances `startAccessingSecurityScopedResource` / `stopAccessingSecurityScopedResource`
+/// across both explicit `dispose()` and `deinit`, safely under Swift 6 strict concurrency.
+private final class SecurityScopedAccess: @unchecked Sendable {
+    private let url: URL
+    private let lock = NSLock()
+    private var active: Bool
+
+    init(url: URL) {
+        self.url = url
+        self.active = url.startAccessingSecurityScopedResource()
+    }
+
+    func stop() {
+        lock.lock()
+        let shouldStop = active
+        active = false
+        lock.unlock()
+        if shouldStop {
+            url.stopAccessingSecurityScopedResource()
+        }
+    }
+
+    deinit {
+        stop()
     }
 }

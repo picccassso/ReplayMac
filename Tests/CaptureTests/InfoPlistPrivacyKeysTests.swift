@@ -43,4 +43,27 @@ final class InfoPlistPrivacyKeysTests: XCTestCase {
         let unknown = plist.keys.filter { $0.hasSuffix("UsageDescription") && !Self.knownKeys.contains($0) }
         XCTAssertEqual(unknown.sorted(), [], "Unrecognised usage-description keys; macOS ignores these")
     }
+
+    func testVideoDocumentTypesRegisterAsAlternateViewer() throws {
+        let plist = try loadInfoPlist()
+        let documentTypes = try XCTUnwrap(plist["CFBundleDocumentTypes"] as? [[String: Any]])
+        XCTAssertFalse(documentTypes.isEmpty, "CFBundleDocumentTypes must declare video types for Finder Open With")
+
+        let videoEntry = try XCTUnwrap(documentTypes.first { entry in
+            let types = entry["LSItemContentTypes"] as? [String] ?? []
+            return types.contains("public.mpeg-4")
+        })
+
+        let contentTypes = Set(videoEntry["LSItemContentTypes"] as? [String] ?? [])
+        XCTAssertEqual(
+            contentTypes,
+            ["public.mpeg-4", "com.apple.quicktime-movie", "com.apple.m4v-video"]
+        )
+        // Must stay Viewer (not Editor): QuickTime Player declares public.mpeg-4
+        // and com.apple.m4v-video as Viewer/Default, and LaunchServices ranks
+        // Editor above Viewer even with LSHandlerRank=Alternate.
+        XCTAssertEqual(videoEntry["CFBundleTypeRole"] as? String, "Viewer")
+        XCTAssertEqual(videoEntry["LSHandlerRank"] as? String, "Alternate")
+        XCTAssertNil(videoEntry["NSDocumentClass"], "Omit NSDocumentClass so AppKit routes to application(_:open:)")
+    }
 }
