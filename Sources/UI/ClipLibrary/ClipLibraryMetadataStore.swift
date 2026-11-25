@@ -1,13 +1,20 @@
 import Foundation
 import os
 
-struct ClipUserMetadata: Codable, Equatable {
-    var displayName: String
-    var isFavorite: Bool
-    var tags: [String]
-    var notes: String
+public struct ClipUserMetadata: Codable, Equatable, Sendable {
+    public var displayName: String
+    public var isFavorite: Bool
+    public var tags: [String]
+    public var notes: String
 
-    static let empty = ClipUserMetadata(displayName: "", isFavorite: false, tags: [], notes: "")
+    public init(displayName: String = "", isFavorite: Bool = false, tags: [String] = [], notes: String = "") {
+        self.displayName = displayName
+        self.isFavorite = isFavorite
+        self.tags = tags
+        self.notes = notes
+    }
+
+    public static let empty = ClipUserMetadata(displayName: "", isFavorite: false, tags: [], notes: "")
 }
 
 struct ClipLibraryStorageSummary: Equatable {
@@ -16,7 +23,7 @@ struct ClipLibraryStorageSummary: Equatable {
     var oldestClipDate: Date?
 }
 
-enum ClipLibraryMetadataStore {
+public enum ClipLibraryMetadataStore {
     static let logger = Logger(subsystem: "com.replaycap", category: "ClipLibrary")
     private static let metadataFileName = ".ReplayCapClipLibrary.json"
     private static let legacyMetadataFileName = ".ReplayMacClipLibrary.json"
@@ -25,7 +32,7 @@ enum ClipLibraryMetadataStore {
         directory.appendingPathComponent(metadataFileName, isDirectory: false)
     }
 
-    static func load(in directory: URL) -> [String: ClipUserMetadata] {
+    public static func load(in directory: URL) -> [String: ClipUserMetadata] {
         let currentURL = metadataURL(in: directory)
         let legacyURL = directory.appendingPathComponent(legacyMetadataFileName, isDirectory: false)
         let sourceURL = FileManager.default.fileExists(atPath: currentURL.path)
@@ -83,7 +90,7 @@ enum ClipLibraryMetadataStore {
         }
     }
 
-    static func save(_ metadata: [String: ClipUserMetadata], in directory: URL) {
+    public static func save(_ metadata: [String: ClipUserMetadata], in directory: URL) {
         do {
             try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
             let data = try JSONEncoder.prettyReplayCap.encode(metadata)
@@ -93,7 +100,7 @@ enum ClipLibraryMetadataStore {
         }
     }
 
-    static func key(for url: URL) -> String {
+    public static func key(for url: URL) -> String {
         url.standardizedFileURL.path(percentEncoded: false)
     }
 }

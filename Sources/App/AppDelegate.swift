@@ -108,6 +108,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     var settingsObservations: [Defaults.Observation] = []
     var settingsReconcileTask: Task<Void, Never>?
     var companionThemeSubscription: AnyCancellable?
+    var companionVolumeBroadcastTask: Task<Void, Never>?
     var pendingRuntimeSettingsReconcile = false
     var pendingVideoShapeReconcile = false
     var pendingRuntimeFullRestart = false
@@ -135,6 +136,9 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     /// Latches the system-audio stall warning so a persistent stall logs once
     /// per outage instead of every monitoring tick.
     var hasWarnedSystemAudioStalled = false
+    /// Latches the microphone stall state so companion clients get one update
+    /// when the stall appears or clears.
+    var hasWarnedMicrophoneStalled = false
     /// Whether system audio is coming from the main ScreenCaptureKit stream
     /// this session. Per-app audio runs its own stream and reports no stats, so
     /// the stall watchdog must not judge it by the main stream's samples.

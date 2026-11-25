@@ -31,12 +31,21 @@ final class GameActivityMonitor: NSObject {
     private let workspace = NSWorkspace.shared
 
     private var isRunning = false
-    /// Process ids of games currently considered "playing", keyed so repeated
-    /// activations of an already-tracked game don't re-fire the start callback.
-    private var activeGamePIDs: Set<pid_t> = []
+    /// Process ids of games currently considered "playing", mapped to display names.
+    private var activeGames: [pid_t: String] = [:]
+    private var activeGameOrder: [pid_t] = []
     /// Caches whether a bundle path's declared category is a game, so we read
     /// each app's Info.plist at most once.
     private var categoryIsGameCache: [String: Bool] = [:]
+
+    var activeGameName: String? {
+        for pid in activeGameOrder {
+            if let name = activeGames[pid] {
+                return name
+            }
+        }
+        return activeGames.values.first
+    }
 
     /// Begins watching for game activity and immediately evaluates apps that are
     /// already running (so enabling the feature while a game is open records it).
@@ -74,7 +83,8 @@ final class GameActivityMonitor: NSObject {
         guard isRunning else { return }
         isRunning = false
         workspace.notificationCenter.removeObserver(self)
-        activeGamePIDs.removeAll()
+        activeGames.removeAll()
+        activeGameOrder.removeAll()
         logger.info("Game auto-record monitoring stopped")
     }
 
@@ -99,9 +109,10 @@ final class GameActivityMonitor: NSObject {
             return
         }
         let pid = app.processIdentifier
-        guard activeGamePIDs.remove(pid) != nil else { return }
-        logger.info("Tracked game terminated (pid \(pid, privacy: .public)); \(self.activeGamePIDs.count, privacy: .public) remaining")
-        if activeGamePIDs.isEmpty {
+        guard activeGames.removeValue(forKey: pid) != nil else { return }
+        activeGameOrder.removeAll { $0 == pid }
+        logger.info("Tracked game terminated (pid \(pid, privacy: .public)); \(self.activeGames.count, privacy: .public) remaining")
+        if activeGames.isEmpty {
             onGameActivityStopped?()
         }
     }
@@ -116,9 +127,10 @@ final class GameActivityMonitor: NSObject {
             }
         }
 
-        let previousPIDs = activeGamePIDs
-        activeGamePIDs.formIntersection(currentMatchingPIDs)
-        if !previousPIDs.isEmpty && activeGamePIDs.isEmpty {
+        let previousEmpty = activeGames.isEmpty
+        activeGames = activeGames.filter { currentMatchingPIDs.contains($0.key) }
+        activeGameOrder.removeAll { !currentMatchingPIDs.contains($0) }
+        if !previousEmpty && activeGames.isEmpty {
             logger.info("All active games closed or excluded; stopping game recording")
             onGameActivityStopped?()
         }
@@ -132,12 +144,15 @@ final class GameActivityMonitor: NSObject {
         guard isGame(app) else { return false }
 
         let pid = app.processIdentifier
-        let wasIdle = activeGamePIDs.isEmpty
-        let inserted = activeGamePIDs.insert(pid).inserted
-        if inserted {
+        let wasIdle = activeGames.isEmpty
+        let isNew = activeGames[pid] == nil
+        let gameName = app.localizedName ?? app.bundleIdentifier ?? "a game"
+        activeGames[pid] = gameName
+        if isNew {
+            activeGameOrder.append(pid)
             logger.info("Detected game \(app.bundleIdentifier ?? "?", privacy: .public) (pid \(pid, privacy: .public))")
             if wasIdle {
-                onGameActivityStarted?(app.localizedName ?? app.bundleIdentifier ?? "a game")
+                onGameActivityStarted?(gameName)
             }
         }
         return true

@@ -15,6 +15,15 @@ public enum CompanionClientMessageType: String, Codable, Sendable {
     case unmuteAllApps = "unmute_all_apps"
     case selectDisplay = "select_display"
     case applyProfile = "apply_profile"
+    case saveReplayDuration = "save_replay_duration"
+    case subscribeAudioLevels = "subscribe_audio_levels"
+    case unsubscribeAudioLevels = "unsubscribe_audio_levels"
+    case toggleClipFavorite = "toggle_clip_favorite"
+    case updateClipMetadata = "update_clip_metadata"
+    case renameClip = "rename_clip"
+    case setCameraLayout = "set_camera_layout"
+    case pushToMute = "push_to_mute"
+    case requestClipMedia = "request_clip_media"
     case authProof = "auth_proof"
     case ping
 }
@@ -41,6 +50,22 @@ public struct CompanionClientMessage: Codable, Sendable {
     public let displayId: String?
     /// Capture profile UUID string for `apply_profile`.
     public let profileId: String?
+    /// Duration in seconds for `save_replay_duration`.
+    public let durationSeconds: Int?
+    /// Favourite state for `update_clip_metadata`.
+    public let isFavorite: Bool?
+    /// Tag list for `update_clip_metadata`.
+    public let tags: [String]?
+    /// Note text for `update_clip_metadata`.
+    public let note: String?
+    /// Requested new clip name for `rename_clip`.
+    public let newName: String?
+    /// Camera overlay corner position (`"topLeft"`, `"topRight"`, `"bottomLeft"`, `"bottomRight"`) for `set_camera_layout`.
+    public let position: String?
+    /// Camera overlay size (`"small"`, `"medium"`, `"large"`) for `set_camera_layout`.
+    public let size: String?
+    /// Active flag for `push_to_mute`.
+    public let active: Bool?
 
     public init(
         type: String,
@@ -55,7 +80,15 @@ public struct CompanionClientMessage: Codable, Sendable {
         target: String? = nil,
         volume: Double? = nil,
         displayId: String? = nil,
-        profileId: String? = nil
+        profileId: String? = nil,
+        durationSeconds: Int? = nil,
+        isFavorite: Bool? = nil,
+        tags: [String]? = nil,
+        note: String? = nil,
+        newName: String? = nil,
+        position: String? = nil,
+        size: String? = nil,
+        active: Bool? = nil
     ) {
         self.type = type
         self.deviceId = deviceId
@@ -70,6 +103,14 @@ public struct CompanionClientMessage: Codable, Sendable {
         self.volume = volume
         self.displayId = displayId
         self.profileId = profileId
+        self.durationSeconds = durationSeconds
+        self.isFavorite = isFavorite
+        self.tags = tags
+        self.note = note
+        self.newName = newName
+        self.position = position
+        self.size = size
+        self.active = active
     }
 }
 
@@ -83,6 +124,8 @@ public enum CompanionClientAction: String, Sendable, CaseIterable {
     case toggleMicrophone
     case toggleSystemAudio
     case toggleCamera
+    case toggleCursor
+    case toggleAutoRecordGames
 }
 
 // MARK: - Server Messages (macOS Server -> Android Companion)
@@ -94,6 +137,9 @@ public enum CompanionServerMessageType: String, Codable, Sendable {
     case stateChanged = "state_changed"
     case telemetryTick = "telemetry_tick"
     case thumbnailResponse = "thumbnail_response"
+    case audioLevels = "audio_levels"
+    case actionFeedback = "action_feedback"
+    case clipMediaResponse = "clip_media_response"
     case pong
     case error
 }
@@ -106,6 +152,9 @@ public struct CompanionClipSummary: Codable, Sendable, Identifiable, Equatable {
     public let duration: Double?
     public let fileSize: Int64?
     public let hasThumbnail: Bool
+    public let isFavorite: Bool
+    public let tags: [String]
+    public let note: String
 
     public init(
         id: String,
@@ -114,7 +163,10 @@ public struct CompanionClipSummary: Codable, Sendable, Identifiable, Equatable {
         savedAt: Double,
         duration: Double? = nil,
         fileSize: Int64? = nil,
-        hasThumbnail: Bool = false
+        hasThumbnail: Bool = false,
+        isFavorite: Bool = false,
+        tags: [String] = [],
+        note: String = ""
     ) {
         self.id = id
         self.filename = filename
@@ -123,6 +175,28 @@ public struct CompanionClipSummary: Codable, Sendable, Identifiable, Equatable {
         self.duration = duration
         self.fileSize = fileSize
         self.hasThumbnail = hasThumbnail
+        self.isFavorite = isFavorite
+        self.tags = tags
+        self.note = note
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case id, filename, kind, savedAt, duration, fileSize, hasThumbnail
+        case isFavorite, tags, note
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        self.id = try container.decode(String.self, forKey: .id)
+        self.filename = try container.decode(String.self, forKey: .filename)
+        self.kind = try container.decode(String.self, forKey: .kind)
+        self.savedAt = try container.decode(Double.self, forKey: .savedAt)
+        self.duration = try container.decodeIfPresent(Double.self, forKey: .duration)
+        self.fileSize = try container.decodeIfPresent(Int64.self, forKey: .fileSize)
+        self.hasThumbnail = try container.decodeIfPresent(Bool.self, forKey: .hasThumbnail) ?? false
+        self.isFavorite = try container.decodeIfPresent(Bool.self, forKey: .isFavorite) ?? false
+        self.tags = try container.decodeIfPresent([String].self, forKey: .tags) ?? []
+        self.note = try container.decodeIfPresent(String.self, forKey: .note) ?? ""
     }
 }
 
@@ -276,6 +350,18 @@ public struct CompanionStateSnapshot: Codable, Sendable, Equatable {
     /// only show a camera control the Mac will act on. Absent from builds that
     /// predate it; decodes as unavailable.
     public let isCameraOverlayAvailable: Bool
+    public let isExtendedReplayAvailable: Bool
+    public let isSessionRecordingAvailable: Bool
+    public let isAudioMixingAvailable: Bool
+    public let isQuickSavePresetsAvailable: Bool
+    public let isCaptureProfilesAvailable: Bool
+    public let isAutoRecordGamesAvailable: Bool
+    public let autoRecordGamesEnabled: Bool
+    public let activeGameName: String?
+    public let showCursorInRecordings: Bool
+    public let cameraOverlayPosition: String?
+    public let cameraOverlaySize: String?
+    public let warnings: [String]
     public let audioApps: [CompanionAudioApp]
     public let displays: [CompanionDisplayInfo]
     public let profiles: [CompanionProfileSummary]
@@ -310,6 +396,18 @@ public struct CompanionStateSnapshot: Codable, Sendable, Equatable {
         perAppAudioEnabled: Bool = false,
         isCameraOverlayEnabled: Bool = false,
         isCameraOverlayAvailable: Bool = false,
+        isExtendedReplayAvailable: Bool = true,
+        isSessionRecordingAvailable: Bool = true,
+        isAudioMixingAvailable: Bool = true,
+        isQuickSavePresetsAvailable: Bool = true,
+        isCaptureProfilesAvailable: Bool = true,
+        isAutoRecordGamesAvailable: Bool = false,
+        autoRecordGamesEnabled: Bool = false,
+        activeGameName: String? = nil,
+        showCursorInRecordings: Bool = true,
+        cameraOverlayPosition: String? = nil,
+        cameraOverlaySize: String? = nil,
+        warnings: [String] = [],
         audioApps: [CompanionAudioApp] = [],
         displays: [CompanionDisplayInfo] = [],
         profiles: [CompanionProfileSummary] = [],
@@ -342,11 +440,71 @@ public struct CompanionStateSnapshot: Codable, Sendable, Equatable {
         self.perAppAudioEnabled = perAppAudioEnabled
         self.isCameraOverlayEnabled = isCameraOverlayEnabled
         self.isCameraOverlayAvailable = isCameraOverlayAvailable
+        self.isExtendedReplayAvailable = isExtendedReplayAvailable
+        self.isSessionRecordingAvailable = isSessionRecordingAvailable
+        self.isAudioMixingAvailable = isAudioMixingAvailable
+        self.isQuickSavePresetsAvailable = isQuickSavePresetsAvailable
+        self.isCaptureProfilesAvailable = isCaptureProfilesAvailable
+        self.isAutoRecordGamesAvailable = isAutoRecordGamesAvailable
+        self.autoRecordGamesEnabled = autoRecordGamesEnabled
+        self.activeGameName = activeGameName
+        self.showCursorInRecordings = showCursorInRecordings
+        self.cameraOverlayPosition = cameraOverlayPosition
+        self.cameraOverlaySize = cameraOverlaySize
+        self.warnings = warnings
         self.audioApps = audioApps
         self.displays = displays
         self.profiles = profiles
         self.recentClips = recentClips
         self.theme = theme
+    }
+
+    public func withType(_ newType: String) -> CompanionStateSnapshot {
+        CompanionStateSnapshot(
+            type: newType,
+            isRecording: isRecording,
+            isSessionRecording: isSessionRecording,
+            saveStatus: saveStatus,
+            recordingElapsedSeconds: recordingElapsedSeconds,
+            extendedBufferElapsedSeconds: extendedBufferElapsedSeconds,
+            sessionElapsedSeconds: sessionElapsedSeconds,
+            bufferedSeconds: bufferedSeconds,
+            bufferDurationSeconds: bufferDurationSeconds,
+            bufferMemoryBytes: bufferMemoryBytes,
+            bufferMemoryFormatted: bufferMemoryFormatted,
+            longBufferEnabled: longBufferEnabled,
+            longBufferDurationSeconds: longBufferDurationSeconds,
+            capturedDisplayName: capturedDisplayName,
+            isUsingFallbackDisplay: isUsingFallbackDisplay,
+            isMicrophoneEnabled: isMicrophoneEnabled,
+            isMicrophoneMuted: isMicrophoneMuted,
+            isSystemAudioEnabled: isSystemAudioEnabled,
+            isSystemAudioMuted: isSystemAudioMuted,
+            microphoneVolume: microphoneVolume,
+            systemAudioVolume: systemAudioVolume,
+            microphoneGain: microphoneGain,
+            microphoneGainMax: microphoneGainMax,
+            perAppAudioEnabled: perAppAudioEnabled,
+            isCameraOverlayEnabled: isCameraOverlayEnabled,
+            isCameraOverlayAvailable: isCameraOverlayAvailable,
+            isExtendedReplayAvailable: isExtendedReplayAvailable,
+            isSessionRecordingAvailable: isSessionRecordingAvailable,
+            isAudioMixingAvailable: isAudioMixingAvailable,
+            isQuickSavePresetsAvailable: isQuickSavePresetsAvailable,
+            isCaptureProfilesAvailable: isCaptureProfilesAvailable,
+            isAutoRecordGamesAvailable: isAutoRecordGamesAvailable,
+            autoRecordGamesEnabled: autoRecordGamesEnabled,
+            activeGameName: activeGameName,
+            showCursorInRecordings: showCursorInRecordings,
+            cameraOverlayPosition: cameraOverlayPosition,
+            cameraOverlaySize: cameraOverlaySize,
+            warnings: warnings,
+            audioApps: audioApps,
+            displays: displays,
+            profiles: profiles,
+            recentClips: recentClips,
+            theme: theme
+        )
     }
 
     private enum CodingKeys: String, CodingKey {
@@ -357,6 +515,10 @@ public struct CompanionStateSnapshot: Codable, Sendable, Equatable {
         case isMicrophoneEnabled, isMicrophoneMuted, isSystemAudioEnabled, isSystemAudioMuted
         case microphoneVolume, systemAudioVolume, microphoneGain, microphoneGainMax
         case perAppAudioEnabled, isCameraOverlayEnabled, isCameraOverlayAvailable
+        case isExtendedReplayAvailable, isSessionRecordingAvailable, isAudioMixingAvailable
+        case isQuickSavePresetsAvailable, isCaptureProfilesAvailable, isAutoRecordGamesAvailable
+        case autoRecordGamesEnabled, activeGameName, showCursorInRecordings
+        case cameraOverlayPosition, cameraOverlaySize, warnings
         case audioApps, displays, profiles, recentClips, theme
     }
 
@@ -388,6 +550,18 @@ public struct CompanionStateSnapshot: Codable, Sendable, Equatable {
         self.perAppAudioEnabled = try container.decodeIfPresent(Bool.self, forKey: .perAppAudioEnabled) ?? false
         self.isCameraOverlayEnabled = try container.decodeIfPresent(Bool.self, forKey: .isCameraOverlayEnabled) ?? false
         self.isCameraOverlayAvailable = try container.decodeIfPresent(Bool.self, forKey: .isCameraOverlayAvailable) ?? false
+        self.isExtendedReplayAvailable = try container.decodeIfPresent(Bool.self, forKey: .isExtendedReplayAvailable) ?? true
+        self.isSessionRecordingAvailable = try container.decodeIfPresent(Bool.self, forKey: .isSessionRecordingAvailable) ?? true
+        self.isAudioMixingAvailable = try container.decodeIfPresent(Bool.self, forKey: .isAudioMixingAvailable) ?? true
+        self.isQuickSavePresetsAvailable = try container.decodeIfPresent(Bool.self, forKey: .isQuickSavePresetsAvailable) ?? true
+        self.isCaptureProfilesAvailable = try container.decodeIfPresent(Bool.self, forKey: .isCaptureProfilesAvailable) ?? true
+        self.isAutoRecordGamesAvailable = try container.decodeIfPresent(Bool.self, forKey: .isAutoRecordGamesAvailable) ?? false
+        self.autoRecordGamesEnabled = try container.decodeIfPresent(Bool.self, forKey: .autoRecordGamesEnabled) ?? false
+        self.activeGameName = try container.decodeIfPresent(String.self, forKey: .activeGameName)
+        self.showCursorInRecordings = try container.decodeIfPresent(Bool.self, forKey: .showCursorInRecordings) ?? true
+        self.cameraOverlayPosition = try container.decodeIfPresent(String.self, forKey: .cameraOverlayPosition)
+        self.cameraOverlaySize = try container.decodeIfPresent(String.self, forKey: .cameraOverlaySize)
+        self.warnings = try container.decodeIfPresent([String].self, forKey: .warnings) ?? []
         self.audioApps = try container.decodeIfPresent([CompanionAudioApp].self, forKey: .audioApps) ?? []
         self.displays = try container.decodeIfPresent([CompanionDisplayInfo].self, forKey: .displays) ?? []
         self.profiles = try container.decodeIfPresent([CompanionProfileSummary].self, forKey: .profiles) ?? []
@@ -528,6 +702,90 @@ public struct CompanionThumbnailResponse: Codable, Sendable, Equatable {
     }
 }
 
+public struct CompanionAudioLevelsMessage: Codable, Sendable, Equatable {
+    public let type: String
+    public let microphone: Double
+    public let systemAudio: Double
+
+    public init(
+        type: String = "audio_levels",
+        microphone: Double,
+        systemAudio: Double
+    ) {
+        self.type = type
+        self.microphone = microphone
+        self.systemAudio = systemAudio
+    }
+}
+
+public enum CompanionActionFeedbackKind: String, Codable, Sendable {
+    case error
+    case info
+    case success
+}
+
+public struct CompanionActionFeedbackMessage: Codable, Sendable, Equatable {
+    public let type: String
+    public let kind: String
+    public let title: String
+    public let message: String
+
+    public init(
+        type: String = "action_feedback",
+        kind: CompanionActionFeedbackKind,
+        title: String,
+        message: String
+    ) {
+        self.type = type
+        self.kind = kind.rawValue
+        self.title = title
+        self.message = message
+    }
+
+    public init(
+        type: String = "action_feedback",
+        kind: String,
+        title: String,
+        message: String
+    ) {
+        self.type = type
+        self.kind = kind
+        self.title = title
+        self.message = message
+    }
+}
+
+public struct CompanionClipMediaResponse: Codable, Sendable, Equatable {
+    public let type: String
+    public let clipId: String
+    public let httpPort: UInt16?
+    public let token: String?
+    public let filename: String?
+    public let fileSize: Int64?
+    public let mimeType: String?
+    public let error: String?
+
+    public init(
+        type: String = "clip_media_response",
+        clipId: String,
+        httpPort: UInt16? = nil,
+        token: String? = nil,
+        filename: String? = nil,
+        fileSize: Int64? = nil,
+        mimeType: String? = nil,
+        error: String? = nil
+    ) {
+        self.type = type
+        self.clipId = clipId
+        self.httpPort = httpPort
+        self.token = token
+        self.filename = filename
+        self.fileSize = fileSize
+        self.mimeType = mimeType
+        self.error = error
+    }
+}
+
 public struct CompanionPongMessage: Codable, Sendable, Equatable {
     public let type: String
 
@@ -561,4 +819,28 @@ public enum CompanionErrorCode: String, Sendable {
     case unsupportedClient = "unsupported_client"
     case tooManyConnections = "too_many_connections"
     case notAuthorized = "not_authorized"
+}
+
+/// Builds `replaycap://pair?...` QR pairing URIs for companion apps.
+public enum CompanionPairingURI {
+    public static func make(
+        hosts: [String],
+        port: UInt16,
+        serverId: String,
+        serverName: String
+    ) -> String {
+        let cleanHosts = hosts
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty }
+        var components = URLComponents()
+        components.scheme = "replaycap"
+        components.host = "pair"
+        components.queryItems = [
+            URLQueryItem(name: "hosts", value: (cleanHosts.isEmpty ? ["127.0.0.1"] : cleanHosts).joined(separator: ",")),
+            URLQueryItem(name: "port", value: String(port)),
+            URLQueryItem(name: "id", value: serverId),
+            URLQueryItem(name: "name", value: serverName)
+        ]
+        return components.string ?? "replaycap://pair?port=\(port)&id=\(serverId)"
+    }
 }

@@ -53,7 +53,11 @@ public final class AudioLevelPreview {
     private let microphoneTap = MicrophoneLevelTap()
     private let systemAudioTap = SystemAudioLevelTap()
 
-    private var requested: Configuration?
+    private var settingsRequested: Configuration?
+    private var companionRequested: Configuration?
+    private var requested: Configuration? {
+        settingsRequested ?? companionRequested
+    }
     private var requestedAt: TimeInterval?
     private var isCaptureActive = false
 
@@ -76,8 +80,16 @@ public final class AudioLevelPreview {
 
     /// Called by whatever UI is showing meters. Pass nil when it goes away.
     public func setConfiguration(_ configuration: Configuration?) {
-        requested = configuration
-        requestedAt = configuration == nil ? nil : ProcessInfo.processInfo.systemUptime
+        settingsRequested = configuration
+        requestedAt = requested == nil ? nil : ProcessInfo.processInfo.systemUptime
+        updateHeartbeat()
+        scheduleReconcile()
+    }
+
+    /// Called by CompanionServer when remote clients subscribe to live audio levels.
+    public func setCompanionConfiguration(_ configuration: Configuration?) {
+        companionRequested = configuration
+        requestedAt = requested == nil ? nil : ProcessInfo.processInfo.systemUptime
         updateHeartbeat()
         scheduleReconcile()
     }

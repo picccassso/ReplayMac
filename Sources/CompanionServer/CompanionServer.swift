@@ -39,6 +39,7 @@ public final class CompanionServer: ObservableObject {
 
     @Published public private(set) var isRunning: Bool = false
     @Published public private(set) var listeningPort: UInt16 = defaultPort
+    @Published public private(set) var mediaPort: UInt16 = 0
     @Published public private(set) var connectedClientsCount: Int = 0
     @Published public private(set) var connectedDeviceIds: Set<String> = []
     @Published public private(set) var localIPAddresses: [String] = []
@@ -57,22 +58,37 @@ public final class CompanionServer: ObservableObject {
     // Callback hooks for application integration
     public var onSaveReplay: (@MainActor () -> Void)?
     public var onSaveExtendedReplay: (@MainActor () -> Void)?
+    public var onSaveReplayDuration: (@MainActor (Int) -> Void)?
     public var onToggleBuffer: (@MainActor () -> Void)?
     public var onToggleSession: (@MainActor () -> Void)?
     public var onToggleMicrophone: (@MainActor () -> Void)?
     public var onToggleSystemAudio: (@MainActor () -> Void)?
     public var onToggleCamera: (@MainActor () -> Void)?
+    public var onToggleCursor: (@MainActor () -> Void)?
+    public var onToggleAutoRecordGames: (@MainActor () -> Void)?
     public var onRevealClip: (@MainActor (String) -> Void)?
     public var onDeleteClip: (@MainActor (String) -> Void)?
     public var onTrimClip: (@MainActor (String) -> Void)?
     public var onCopyClip: (@MainActor (String) -> Void)?
+    public var onToggleClipFavorite: (@MainActor (String) -> Void)?
+    public var onUpdateClipMetadata: (@MainActor (String, Bool?, [String]?, String?) -> Void)?
+    public var onRenameClip: (@MainActor (String, String) -> Void)?
+    public var onSetCameraLayout: (@MainActor (String?, String?) -> Void)?
+    public var onPushToMute: (@MainActor (Bool) -> Void)?
+    public var onResolveClipMediaURL: (@MainActor (String) -> URL?)?
     public var onSetVolume: (@MainActor (String, Double) -> Void)?
     public var onToggleAppMute: (@MainActor (String) -> Void)?
     public var onUnmuteAllApps: (@MainActor () -> Void)?
     public var onSelectDisplay: (@MainActor (String) -> Void)?
     public var onApplyProfile: (@MainActor (String) -> Void)?
     public var onGetThumbnail: (@MainActor (String) async -> Data?)?
+    public var audioLevelProvider: (@MainActor () -> (microphone: Double, systemAudio: Double))?
+    public var onAudioLevelSubscriptionChanged: (@MainActor (Bool) -> Void)?
     public var snapshotProvider: (@MainActor () -> CompanionStateSnapshot)?
+
+    public var hasAudioLevelSubscribers: Bool {
+        !audioLevelSubscribers.isEmpty
+    }
 
     /// How long a connection may take to send `hello` and answer the challenge.
     var authDeadline: TimeInterval = 10
@@ -80,12 +96,16 @@ public final class CompanionServer: ObservableObject {
     var pairingCooldown: TimeInterval = 30
 
     private var listener: NWListener?
+    public let mediaServer = CompanionMediaServer()
     private let serverQueue = DispatchQueue(label: "com.replaymac.companion-server", qos: .userInitiated)
     private var activeConnections: [UUID: NWConnection] = [:]
     /// Connections that have signed in, and the device each belongs to.
     private var connectionDevices: [UUID: String] = [:]
     /// Connections still signing in.
     private var pendingAuth: [UUID: PendingAuth] = [:]
+    private var audioLevelSubscribers: Set<UUID> = []
+    private var audioLevelTask: Task<Void, Never>?
+    private var pushToMuteConnections: Set<UUID> = []
     /// The one pairing request the Mac is currently prompting for.
     private var pairingRequest: PairingRequest?
     private var pairingCooldowns: [String: Date] = [:]
@@ -110,6 +130,9 @@ public final class CompanionServer: ObservableObject {
         self.defaults = defaults
         self.serverId = Self.loadOrCreateServerId(in: defaults)
         self.localIPAddresses = Self.resolveLocalIPAddresses()
+        self.mediaServer.onListeningPortChanged = { [weak self] port in
+            self?.mediaPort = port
+        }
         self.pairingManager.onDeviceRevoked = { [weak self] revokedId in
             self?.handleDeviceRevoked(revokedId)
         }
@@ -166,10 +189,26 @@ public final class CompanionServer: ObservableObject {
         self.listeningPort = port
         self.lastError = nil
         self.localIPAddresses = Self.resolveLocalIPAddresses()
+
+        let preferredMediaPort: UInt16 = (port > 0 && port < UInt16.max) ? port + 1 : 0
+        mediaServer.start(preferredPort: preferredMediaPort)
     }
 
     public func stop() {
         guard isRunning || listener != nil else { return }
+
+        audioLevelTask?.cancel()
+        audioLevelTask = nil
+        if !audioLevelSubscribers.isEmpty {
+            audioLevelSubscribers.removeAll()
+            onAudioLevelSubscriptionChanged?(false)
+        }
+        if !pushToMuteConnections.isEmpty {
+            pushToMuteConnections.removeAll()
+            onPushToMute?(false)
+        }
+        mediaServer.stop()
+        mediaPort = 0
 
         if let request = pairingRequest {
             pairingRequest = nil
@@ -323,6 +362,10 @@ public final class CompanionServer: ObservableObject {
         activeConnections.removeValue(forKey: connectionId)
         pendingAuth.removeValue(forKey: connectionId)
         let wasSignedIn = connectionDevices.removeValue(forKey: connectionId) != nil
+        unsubscribeAudioLevels(connectionId: connectionId)
+        if pushToMuteConnections.remove(connectionId) != nil, pushToMuteConnections.isEmpty {
+            onPushToMute?(false)
+        }
         if let request = pairingRequest, request.connectionId == connectionId {
             // The phone gave up, so the prompt has no one to answer to.
             pairingRequest = nil
@@ -403,6 +446,10 @@ public final class CompanionServer: ObservableObject {
                 onSaveReplay?()
             case "saveExtendedReplay", "save_extended_replay":
                 onSaveExtendedReplay?()
+            case "save_replay_duration", "saveReplayDuration":
+                if let durationSeconds = message.durationSeconds, durationSeconds > 0 {
+                    onSaveReplayDuration?(durationSeconds)
+                }
             case "toggleBuffer", "toggle_buffer":
                 onToggleBuffer?()
             case "toggleSession", "toggle_session":
@@ -413,6 +460,14 @@ public final class CompanionServer: ObservableObject {
                 onToggleSystemAudio?()
             case "toggleCamera", "toggle_camera":
                 onToggleCamera?()
+            case "toggleCursor", "toggle_cursor":
+                onToggleCursor?()
+            case "toggleAutoRecordGames", "toggle_auto_record_games":
+                onToggleAutoRecordGames?()
+            case "subscribe_audio_levels", "subscribeAudioLevels":
+                subscribeAudioLevels(connectionId: connectionId)
+            case "unsubscribe_audio_levels", "unsubscribeAudioLevels":
+                unsubscribeAudioLevels(connectionId: connectionId)
             case "reveal_clip", "revealClip":
                 if let clipId = message.clipId {
                     onRevealClip?(clipId)
@@ -428,6 +483,28 @@ public final class CompanionServer: ObservableObject {
             case "copy_clip", "copyClip":
                 if let clipId = message.clipId {
                     onCopyClip?(clipId)
+                }
+            case "toggle_clip_favorite", "toggleClipFavorite":
+                if let clipId = message.clipId {
+                    onToggleClipFavorite?(clipId)
+                }
+            case "update_clip_metadata", "updateClipMetadata":
+                if let clipId = message.clipId {
+                    onUpdateClipMetadata?(clipId, message.isFavorite, message.tags, message.note)
+                }
+            case "rename_clip", "renameClip":
+                if let clipId = message.clipId, let newName = message.newName {
+                    onRenameClip?(clipId, newName)
+                }
+            case "set_camera_layout", "setCameraLayout":
+                onSetCameraLayout?(message.position, message.size)
+            case "push_to_mute", "pushToMute":
+                if let active = message.active {
+                    handlePushToMute(active: active, connectionId: connectionId)
+                }
+            case "request_clip_media", "requestClipMedia":
+                if let clipId = message.clipId {
+                    handleRequestClipMedia(clipId: clipId, to: connection)
                 }
             case "set_volume", "setVolume":
                 if let target = message.target, let volume = message.volume {
@@ -732,40 +809,127 @@ public final class CompanionServer: ObservableObject {
     }
 
     public func broadcastStateChanged(_ snapshot: CompanionStateSnapshot) {
-        let changed = CompanionStateSnapshot(
-            type: "state_changed",
-            isRecording: snapshot.isRecording,
-            isSessionRecording: snapshot.isSessionRecording,
-            saveStatus: snapshot.saveStatus,
-            recordingElapsedSeconds: snapshot.recordingElapsedSeconds,
-            extendedBufferElapsedSeconds: snapshot.extendedBufferElapsedSeconds,
-            sessionElapsedSeconds: snapshot.sessionElapsedSeconds,
-            bufferedSeconds: snapshot.bufferedSeconds,
-            bufferDurationSeconds: snapshot.bufferDurationSeconds,
-            bufferMemoryBytes: snapshot.bufferMemoryBytes,
-            bufferMemoryFormatted: snapshot.bufferMemoryFormatted,
-            longBufferEnabled: snapshot.longBufferEnabled,
-            longBufferDurationSeconds: snapshot.longBufferDurationSeconds,
-            capturedDisplayName: snapshot.capturedDisplayName,
-            isUsingFallbackDisplay: snapshot.isUsingFallbackDisplay,
-            isMicrophoneEnabled: snapshot.isMicrophoneEnabled,
-            isMicrophoneMuted: snapshot.isMicrophoneMuted,
-            isSystemAudioEnabled: snapshot.isSystemAudioEnabled,
-            isSystemAudioMuted: snapshot.isSystemAudioMuted,
-            microphoneVolume: snapshot.microphoneVolume,
-            systemAudioVolume: snapshot.systemAudioVolume,
-            microphoneGain: snapshot.microphoneGain,
-            microphoneGainMax: snapshot.microphoneGainMax,
-            perAppAudioEnabled: snapshot.perAppAudioEnabled,
-            isCameraOverlayEnabled: snapshot.isCameraOverlayEnabled,
-            isCameraOverlayAvailable: snapshot.isCameraOverlayAvailable,
-            audioApps: snapshot.audioApps,
-            displays: snapshot.displays,
-            profiles: snapshot.profiles,
-            recentClips: snapshot.recentClips,
-            theme: snapshot.theme
+        broadcast(snapshot.withType("state_changed"))
+    }
+
+    public func broadcastActionFeedback(
+        kind: CompanionActionFeedbackKind,
+        title: String,
+        message: String
+    ) {
+        broadcast(CompanionActionFeedbackMessage(kind: kind, title: title, message: message))
+    }
+
+    // MARK: - Live Audio Levels, Push-to-Mute & Clip Media
+
+    private func subscribeAudioLevels(connectionId: UUID) {
+        let wasEmpty = audioLevelSubscribers.isEmpty
+        audioLevelSubscribers.insert(connectionId)
+        guard wasEmpty else { return }
+        onAudioLevelSubscriptionChanged?(true)
+        startAudioLevelBroadcastLoop()
+    }
+
+    private func unsubscribeAudioLevels(connectionId: UUID) {
+        guard audioLevelSubscribers.remove(connectionId) != nil else { return }
+        if audioLevelSubscribers.isEmpty {
+            audioLevelTask?.cancel()
+            audioLevelTask = nil
+            onAudioLevelSubscriptionChanged?(false)
+        }
+    }
+
+    private func startAudioLevelBroadcastLoop() {
+        audioLevelTask?.cancel()
+        audioLevelTask = Task { @MainActor [weak self] in
+            while let self, !Task.isCancelled, self.isRunning, !self.audioLevelSubscribers.isEmpty {
+                let levels = self.audioLevelProvider?() ?? (microphone: 0.0, systemAudio: 0.0)
+                let msg = CompanionAudioLevelsMessage(
+                    microphone: levels.microphone,
+                    systemAudio: levels.systemAudio
+                )
+                self.sendToAudioLevelSubscribers(msg)
+                try? await Task.sleep(for: .milliseconds(66))
+            }
+        }
+    }
+
+    private func sendToAudioLevelSubscribers(_ message: CompanionAudioLevelsMessage) {
+        guard isRunning, !audioLevelSubscribers.isEmpty else { return }
+        let data: Data
+        do {
+            data = try JSONEncoder().encode(message)
+        } catch {
+            logger.error("Could not encode audio levels: \(error.localizedDescription, privacy: .public)")
+            return
+        }
+        let metadata = NWProtocolWebSocket.Metadata(opcode: .text)
+        let context = NWConnection.ContentContext(identifier: "text", metadata: [metadata])
+        for connId in audioLevelSubscribers {
+            guard connectionDevices[connId] != nil,
+                  let connection = activeConnections[connId],
+                  connection.state == .ready else {
+                continue
+            }
+            connection.send(
+                content: data,
+                contentContext: context,
+                isComplete: true,
+                completion: .contentProcessed { [weak self] error in
+                    if error != nil {
+                        Task { @MainActor in
+                            self?.handleConnectionDisconnection(connectionId: connId)
+                        }
+                    }
+                }
+            )
+        }
+    }
+
+    private func handlePushToMute(active: Bool, connectionId: UUID) {
+        if active {
+            let wasEmpty = pushToMuteConnections.isEmpty
+            pushToMuteConnections.insert(connectionId)
+            if wasEmpty {
+                onPushToMute?(true)
+            }
+        } else {
+            pushToMuteConnections.remove(connectionId)
+            if pushToMuteConnections.isEmpty {
+                onPushToMute?(false)
+            }
+        }
+    }
+
+    private func handleRequestClipMedia(clipId: String, to connection: NWConnection) {
+        guard let fileURL = onResolveClipMediaURL?(clipId) else {
+            send(CompanionClipMediaResponse(clipId: clipId, error: "Clip not found."), to: connection)
+            return
+        }
+        guard FileManager.default.fileExists(atPath: fileURL.path),
+              let attributes = try? FileManager.default.attributesOfItem(atPath: fileURL.path),
+              let sizeNumber = attributes[.size] as? NSNumber else {
+            send(CompanionClipMediaResponse(clipId: clipId, error: "Clip file is missing on disk."), to: connection)
+            return
+        }
+        guard mediaServer.isRunning, mediaServer.listeningPort > 0 else {
+            send(CompanionClipMediaResponse(clipId: clipId, error: "Media server is not ready."), to: connection)
+            return
+        }
+
+        let token = mediaServer.issueToken(for: clipId, fileURL: fileURL)
+        send(
+            CompanionClipMediaResponse(
+                clipId: clipId,
+                httpPort: mediaServer.listeningPort,
+                token: token,
+                filename: fileURL.lastPathComponent,
+                fileSize: sizeNumber.int64Value,
+                mimeType: "video/mp4",
+                error: nil
+            ),
+            to: connection
         )
-        broadcast(changed)
     }
 
     private func broadcast<T: Encodable>(_ message: T) {

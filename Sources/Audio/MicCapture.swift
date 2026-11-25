@@ -123,6 +123,14 @@ public final class MicCapture: @unchecked Sendable {
         return max(0, ProcessInfo.processInfo.systemUptime - lastSampleUptime)
     }
 
+    /// True once the mic watchdog has exhausted its rebuild attempts without
+    /// receiving any audio samples.
+    public var isStalled: Bool {
+        lock.lock()
+        defer { lock.unlock() }
+        return hasReportedStallGiveUp
+    }
+
     public func start(deviceID: String? = nil) throws {
         lock.lock()
         requestedDeviceID = deviceID

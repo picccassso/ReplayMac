@@ -129,8 +129,16 @@ extension AppDelegate {
                     let age = lastSystemAudioSampleDate
                         .map { String(format: "%.0fs ago", now.timeIntervalSince($0)) } ?? "never"
                     bufferMonitorLogger.warning("System audio has not delivered a sample (\(age, privacy: .public)). Output device may have changed mid-capture.")
-                } else if !systemAudioStalled {
+                    self.broadcastCompanionSnapshot()
+                } else if !systemAudioStalled, self.hasWarnedSystemAudioStalled {
                     self.hasWarnedSystemAudioStalled = false
+                    self.broadcastCompanionSnapshot()
+                }
+
+                let micStalled = self.micAudioCapture.isStalled
+                if micStalled != self.hasWarnedMicrophoneStalled {
+                    self.hasWarnedMicrophoneStalled = micStalled
+                    self.broadcastCompanionSnapshot()
                 }
 
                 let videoDuration = self.videoRingBuffer.duration
@@ -245,5 +253,6 @@ extension AppDelegate {
         } else {
             bufferMonitorLogger.info("Memory pressure eased: replay buffer back to \(after, privacy: .public)s")
         }
+        broadcastCompanionSnapshot()
     }
 }

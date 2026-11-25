@@ -300,6 +300,166 @@ public final class MainWindowState: ObservableObject {
         onRecentClipsUpdated?()
     }
 
+    public enum CompanionClipError: Error, LocalizedError {
+        case notFound
+        case protected
+        case fileMissing
+        case invalidName
+        case operationFailed(String)
+
+        public var errorDescription: String? {
+            switch self {
+            case .notFound:
+                return "That clip is no longer in the recent clips list."
+            case .protected:
+                return "Close the clip editor or wait for the active export to finish before modifying this clip."
+            case .fileMissing:
+                return "The clip file could not be found on disk."
+            case .invalidName:
+                return "Enter a valid clip name."
+            case .operationFailed(let reason):
+                return reason
+            }
+        }
+    }
+
+    public func recentClip(matchingId clipId: String) -> RecentClip? {
+        recentClips.first {
+            $0.id.uuidString.caseInsensitiveCompare(clipId) == .orderedSame || $0.id.uuidString == clipId
+        }
+    }
+
+    public func clipMetadataMap(for clips: [RecentClip]) -> [String: ClipUserMetadata] {
+        var directories = Set<URL>()
+        for clip in clips {
+            directories.insert(clip.url.deletingLastPathComponent().standardizedFileURL)
+        }
+        var combined: [String: ClipUserMetadata] = [:]
+        for dir in directories {
+            for (key, value) in ClipLibraryMetadataStore.load(in: dir) {
+                combined[key] = value
+            }
+        }
+        return combined
+    }
+
+    @discardableResult
+    public func toggleRecentClipFavorite(id: UUID) -> Result<Void, CompanionClipError> {
+        guard let clip = recentClips.first(where: { $0.id == id }) else {
+            return .failure(.notFound)
+        }
+        let dir = clip.url.deletingLastPathComponent()
+        var metadataByPath = ClipLibraryMetadataStore.load(in: dir)
+        let key = ClipLibraryMetadataStore.key(for: clip.url)
+        var metadata = metadataByPath[key] ?? .empty
+        metadata.isFavorite.toggle()
+        metadataByPath[key] = metadata
+        ClipLibraryMetadataStore.save(metadataByPath, in: dir)
+        NotificationCenter.default.post(name: .replayCapLibraryShouldReload, object: nil)
+        onRecentClipsUpdated?()
+        return .success(())
+    }
+
+    @discardableResult
+    public func updateRecentClipMetadata(
+        id: UUID,
+        isFavorite: Bool?,
+        tags: [String]?,
+        note: String?
+    ) -> Result<Void, CompanionClipError> {
+        guard let clip = recentClips.first(where: { $0.id == id }) else {
+            return .failure(.notFound)
+        }
+        let dir = clip.url.deletingLastPathComponent()
+        var metadataByPath = ClipLibraryMetadataStore.load(in: dir)
+        let key = ClipLibraryMetadataStore.key(for: clip.url)
+        var metadata = metadataByPath[key] ?? .empty
+        if let isFavorite {
+            metadata.isFavorite = isFavorite
+        }
+        if let tags {
+            var seen = Set<String>()
+            var cleaned: [String] = []
+            for rawTag in tags {
+                let tag = rawTag.trimmingCharacters(in: .whitespacesAndNewlines)
+                guard !tag.isEmpty else { continue }
+                if seen.insert(tag.lowercased()).inserted {
+                    cleaned.append(tag)
+                }
+            }
+            metadata.tags = cleaned
+        }
+        if let note {
+            metadata.notes = note
+        }
+        metadataByPath[key] = metadata
+        ClipLibraryMetadataStore.save(metadataByPath, in: dir)
+        NotificationCenter.default.post(name: .replayCapLibraryShouldReload, object: nil)
+        onRecentClipsUpdated?()
+        return .success(())
+    }
+
+    public func renameRecentClip(id: UUID, newName: String) -> Result<URL, CompanionClipError> {
+        guard let index = recentClips.firstIndex(where: { $0.id == id }) else {
+            return .failure(.notFound)
+        }
+        let clip = recentClips[index]
+        let oldURL = clip.url
+        guard !isProtected(oldURL) else {
+            return .failure(.protected)
+        }
+        guard FileManager.default.fileExists(atPath: oldURL.path) else {
+            return .failure(.fileMissing)
+        }
+
+        let ext = oldURL.pathExtension.isEmpty ? "mp4" : oldURL.pathExtension
+        var rawBase = newName.trimmingCharacters(in: .whitespacesAndNewlines)
+        let suffix = ".\(ext)"
+        if rawBase.lowercased().hasSuffix(suffix.lowercased()) {
+            rawBase = String(rawBase.dropLast(suffix.count))
+        }
+        let illegal = CharacterSet(charactersIn: "/\\:?%*|\"<>").union(.controlCharacters)
+        let cleanBase = rawBase
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .components(separatedBy: illegal)
+            .joined(separator: "-")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !cleanBase.isEmpty, cleanBase != ".", cleanBase != ".." else {
+            return .failure(.invalidName)
+        }
+
+        let dir = oldURL.deletingLastPathComponent()
+        if cleanBase == oldURL.deletingPathExtension().lastPathComponent {
+            return .success(oldURL)
+        }
+
+        var candidate = dir.appendingPathComponent(cleanBase).appendingPathExtension(ext)
+        var counter = 1
+        while FileManager.default.fileExists(atPath: candidate.path) {
+            candidate = dir.appendingPathComponent("\(cleanBase)_\(counter)").appendingPathExtension(ext)
+            counter += 1
+        }
+
+        do {
+            try FileManager.default.moveItem(at: oldURL, to: candidate)
+        } catch {
+            return .failure(.operationFailed(error.localizedDescription))
+        }
+
+        var metadataByPath = ClipLibraryMetadataStore.load(in: dir)
+        let oldKey = ClipLibraryMetadataStore.key(for: oldURL)
+        let newKey = ClipLibraryMetadataStore.key(for: candidate)
+        if let existing = metadataByPath.removeValue(forKey: oldKey) {
+            metadataByPath[newKey] = existing
+            ClipLibraryMetadataStore.save(metadataByPath, in: dir)
+        }
+
+        recentClips[index].url = candidate.standardizedFileURL
+        NotificationCenter.default.post(name: .replayCapLibraryShouldReload, object: nil)
+        onRecentClipsUpdated?()
+        return .success(candidate.standardizedFileURL)
+    }
+
     public func thumbnailData(for id: UUID) async -> Data? {
         if let clip = recentClips.first(where: { $0.id == id }), let data = clip.thumbnail {
             return data

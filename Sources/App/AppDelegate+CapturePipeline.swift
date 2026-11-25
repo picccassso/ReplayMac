@@ -577,6 +577,7 @@ extension AppDelegate {
         isCaptureRunning = false
         isCapturingMainSystemAudio = false
         hasWarnedSystemAudioStalled = false
+        hasWarnedMicrophoneStalled = false
         sessionOwnsCapturePipeline = false
         replayBufferGate.setEnabled(true)
         menuBarState.setRecording(false)

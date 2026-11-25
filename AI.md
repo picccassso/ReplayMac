@@ -1,16 +1,9 @@
 # Use of AI
 
-ReplayMac is being built and maintained with the assistance of Kimi K2.6, GPT 5.x, DeepSeek V4 Flash/Pro, Composer 2.5 and Opus 4.8
+ReplayMac is built and maintained via AI!
 
-Anthropic pls bring back Fable 5, I didn't get to try it :'). 
+Here are the models that have been used to help build and maintain ReplayMac:
 
-Update: They ain't believe in us... CLAUDE DID! 
-
-AI was used for:
-- Writing and debugging Swift code
-- Fixing edge cases during development
-
-All code has been reviewed, tested, and validated by a human.
-The architecture, product decisions, and testing are my own.
-
-ReplayMac works. It's free, and I don't need your data. I just wanted a way to clip Rocket League with sound.  Make of that what you will.
+- Gemini: 3.8 Flash/ 4 Argon / 4 Hydrgeon / 4 Neon (Favourite model so far!)
+- Claude: Opus 4.8/5/5.5 & Fable 5/5.2
+- GPT: GPT 5.5/5.6 Sol

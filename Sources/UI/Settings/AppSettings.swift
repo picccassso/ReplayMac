@@ -790,13 +790,15 @@ public enum AppSettings {
 
     // NSCache is documented as thread-safe, but the SDK doesn't mark it Sendable.
     nonisolated(unsafe) private static let appIconBase64Cache = NSCache<NSString, NSString>()
+    private static let missingIconSentinel = "__none__"
 
     public static func appIconBase64(for bundleID: String, dimension: Int = 64) -> String? {
         let trimmed = bundleID.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return nil }
         let cacheKey = "\(trimmed.lowercased()):\(dimension)" as NSString
         if let cached = appIconBase64Cache.object(forKey: cacheKey) {
-            return cached as String
+            let value = cached as String
+            return value == missingIconSentinel ? nil : value
         }
         guard let icon = appIcon(for: trimmed),
               let bitmap = NSBitmapImageRep(
@@ -811,6 +813,7 @@ public enum AppSettings {
                   bytesPerRow: 0,
                   bitsPerPixel: 0
               ) else {
+            appIconBase64Cache.setObject(missingIconSentinel as NSString, forKey: cacheKey)
             return nil
         }
         bitmap.size = NSSize(width: dimension, height: dimension)
@@ -826,6 +829,7 @@ public enum AppSettings {
         )
         NSGraphicsContext.restoreGraphicsState()
         guard let pngData = bitmap.representation(using: .png, properties: [:]) else {
+            appIconBase64Cache.setObject(missingIconSentinel as NSString, forKey: cacheKey)
             return nil
         }
         let encoded = pngData.base64EncodedString()

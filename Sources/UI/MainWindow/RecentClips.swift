@@ -18,7 +18,7 @@ public enum SavedClipKind: Sendable {
 /// after the entry is added, so a new save appears immediately.
 public struct RecentClip: Identifiable, Equatable, Sendable {
     public let id: UUID
-    public let url: URL
+    public var url: URL
     public let kind: SavedClipKind
     public let savedAt: Date
     public var duration: TimeInterval?

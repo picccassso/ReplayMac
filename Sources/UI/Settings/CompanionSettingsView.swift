@@ -1,5 +1,6 @@
 import SwiftUI
 import AppKit
+import CoreImage.CIFilterBuiltins
 import Branding
 import Defaults
 import CompanionServer
@@ -21,6 +22,7 @@ public struct CompanionSettingsView: View {
     @State private var serverNameDraft: String = ""
     @State private var isEditingServerName: Bool = false
     @State private var showRevokeAllAlert = false
+    @State private var showQRCode = false
     @State private var deviceToRevoke: PairedDevice? = nil
     @State private var deviceToRename: PairedDevice? = nil
     @State private var renameDraft: String = ""
@@ -32,6 +34,7 @@ public struct CompanionSettingsView: View {
         Form {
             serverStatusSection
             networkSection
+            qrPairingSection
             pairedDevicesSection
         }
         .formStyle(.grouped)
@@ -307,7 +310,10 @@ public struct CompanionSettingsView: View {
                     .foregroundStyle(AppTheme.textSecondary)
 
                 HStack(spacing: 8) {
-                    let adbCmd = "adb reverse tcp:\(companionServerPort) tcp:\(companionServerPort)"
+                    let mediaPort = server.isRunning && server.mediaPort > 0
+                        ? Int(server.mediaPort)
+                        : min(companionServerPort + 1, 65535)
+                    let adbCmd = "adb reverse tcp:\(companionServerPort) tcp:\(companionServerPort) && adb reverse tcp:\(mediaPort) tcp:\(mediaPort)"
                     Text(adbCmd)
                         .font(.system(size: 11, design: .monospaced))
                         .lineLimit(1)
@@ -321,7 +327,10 @@ public struct CompanionSettingsView: View {
                     CopyButton(text: adbCmd, label: "Copy Command", tooltip: "Copy adb reverse command")
                 }
 
-                Text("Then tap USB Cable in the ReplayCap Companion app. iPhone and iPad connect over Wi-Fi.")
+                let mediaPortNote = server.isRunning && server.mediaPort > 0
+                    ? Int(server.mediaPort)
+                    : min(companionServerPort + 1, 65535)
+                Text("Forwards control (port \(companionServerPort)) and clip video playback (port \(mediaPortNote)). Then tap USB Cable in the ReplayCap Companion app. iPhone and iPad connect over Wi-Fi.")
                     .font(.caption2)
                     .foregroundStyle(AppTheme.textSecondary)
             }
@@ -349,6 +358,79 @@ public struct CompanionSettingsView: View {
                 .font(.caption)
                 .foregroundStyle(AppTheme.textSecondary)
         }
+    }
+
+    // MARK: - QR Code Pairing Section
+
+    private var qrPairingSection: some View {
+        Section {
+            Toggle(isOn: $showQRCode.animation(.easeInOut(duration: 0.2))) {
+                Label("Pair with QR Code", systemImage: "qrcode")
+                    .font(.system(size: 13, weight: .semibold, design: .rounded))
+            }
+
+            if showQRCode {
+                let effectivePort = server.isRunning && server.listeningPort > 0
+                    ? server.listeningPort
+                    : UInt16(clamping: companionServerPort)
+                let hosts = server.localIPAddresses.isEmpty ? ["127.0.0.1"] : server.localIPAddresses
+                let pairingURI = CompanionPairingURI.make(
+                    hosts: hosts,
+                    port: effectivePort,
+                    serverId: server.serverId,
+                    serverName: currentServerName
+                )
+
+                VStack(spacing: 10) {
+                    ZStack {
+                        if let qrImage = Self.qrCodeImage(for: pairingURI) {
+                            Image(nsImage: qrImage)
+                                .interpolation(.none)
+                                .resizable()
+                                .scaledToFit()
+                                .frame(width: 164, height: 164)
+                                .padding(10)
+                                .background(Color.white, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+                                .blur(radius: hideSensitiveInfo ? 12 : 0)
+                        }
+
+                        if hideSensitiveInfo {
+                            VStack(spacing: 6) {
+                                Image(systemName: "eye.slash.fill")
+                                    .font(.system(size: 20))
+                                Text("Hidden while IP is hidden")
+                                    .font(.system(size: 11, weight: .semibold, design: .rounded))
+                            }
+                            .padding(.horizontal, 12)
+                            .padding(.vertical, 8)
+                            .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+                        }
+                    }
+
+                    Text("Scan in the ReplayCap Companion app to connect using your Mac’s local address and port.")
+                        .font(.caption)
+                        .foregroundStyle(AppTheme.textSecondary)
+                        .multilineTextAlignment(.center)
+                        .frame(maxWidth: 340)
+                }
+                .frame(maxWidth: .infinity)
+                .padding(.vertical, 6)
+            }
+        } header: {
+            Text("Quick Pairing")
+        }
+    }
+
+    private static let qrContext = CIContext()
+
+    private static func qrCodeImage(for text: String) -> NSImage? {
+        let filter = CIFilter.qrCodeGenerator()
+        filter.message = Data(text.utf8)
+        filter.correctionLevel = "M"
+        guard let outputImage = filter.outputImage else { return nil }
+        let scaled = outputImage.transformed(by: CGAffineTransform(scaleX: 8, y: 8))
+        guard let cgImage = qrContext.createCGImage(scaled, from: scaled.extent) else { return nil }
+        return NSImage(cgImage: cgImage, size: NSSize(width: scaled.extent.width, height: scaled.extent.height))
     }
 
     // MARK: - Paired Devices Section

@@ -39,6 +39,7 @@ extension AppDelegate {
     /// it would race the normal auto-start path that already runs at launch.
     private func handleGameAutoRecordSettingToggled() {
         syncGameAutoRecordMonitoringState()
+        broadcastCompanionSnapshot()
 
         // Turning the feature off hands control back to normal behaviour: if the
         // app would otherwise record on launch, start buffering again right away
@@ -74,6 +75,7 @@ extension AppDelegate {
         }
         recordingAutoStartedByGame = true
         startCapturePipeline(userInitiated: false)
+        broadcastCompanionSnapshot()
         NotificationManager.shared.showOperationalNotification(
             title: "Recording Started",
             body: "\(AppBranding.name) is recording because \(gameName) is running."
@@ -84,6 +86,7 @@ extension AppDelegate {
         guard AppSettings.autoRecordStopWhenGameCloses else { return }
         guard recordingAutoStartedByGame, isCaptureRunning else { return }
         recordingAutoStartedByGame = false
+        broadcastCompanionSnapshot()
         Task { await stopCapturePipelineAsync() }
         NotificationManager.shared.showOperationalNotification(
             title: "Recording Stopped",

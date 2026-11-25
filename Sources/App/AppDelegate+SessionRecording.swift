@@ -3,6 +3,7 @@ import os
 import Save
 import UI
 import Feedback
+import CompanionServer
 
 private let sessionRecordingLogger = Logger(subsystem: "com.replaycap", category: "SessionRecording")
 
@@ -30,10 +31,10 @@ extension AppDelegate {
         }
 
         if isSeparateDualSaveMode {
-            NotificationManager.shared.showOperationalNotification(
-                title: "Session Recording Unavailable",
-                body: "Session recording is not available while dual display clips are saved as separate files. Switch to a side-by-side save, or use single-display capture."
-            )
+            let title = "Session Recording Unavailable"
+            let body = "Session recording is not available while dual display clips are saved as separate files. Switch to a side-by-side save, or use single-display capture."
+            NotificationManager.shared.showOperationalNotification(title: title, body: body)
+            companionServer.broadcastActionFeedback(kind: .error, title: title, message: body)
             return
         }
 
@@ -41,6 +42,7 @@ extension AppDelegate {
         if let diskFailure = diskSpaceFailure(lastSeconds: 5 * 60, streamCount: 1) {
             let message = SavePreflight.notificationMessage(for: diskFailure)
             NotificationManager.shared.showOperationalNotification(title: message.title, body: message.body)
+            companionServer.broadcastActionFeedback(kind: .error, title: message.title, message: message.body)
             return
         }
 
@@ -121,6 +123,7 @@ extension AppDelegate {
         if let diskFailure = diskSpaceFailure(lastSeconds: durationHint, streamCount: 2) {
             let message = SavePreflight.notificationMessage(for: diskFailure)
             NotificationManager.shared.showOperationalNotification(title: message.title, body: message.body)
+            companionServer.broadcastActionFeedback(kind: .error, title: message.title, message: message.body)
             await discardSessionRecording()
             isSessionFinalizeInProgress = false
             statusItemController.refreshPresentation()
@@ -212,6 +215,11 @@ extension AppDelegate {
             isSessionFinalizeInProgress = false
             statusItemController.refreshPresentation()
             NotificationManager.shared.showSaveFailedNotification(error: error.localizedDescription)
+            companionServer.broadcastActionFeedback(
+                kind: .error,
+                title: "Session Save Failed",
+                message: error.localizedDescription
+            )
             sessionRecordingLogger.error("Failed to save session recording: \(String(describing: error), privacy: .public)")
             return nil
         }

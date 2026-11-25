@@ -54,19 +54,23 @@ extension AppDelegate {
         })
         settingsObservations.append(Defaults.observe(.systemAudioVolume) { [weak self] _ in
             self?.applyEffectiveAudioVolumes()
-            self?.broadcastCompanionSnapshot()
+            self?.refreshCompanionAudioLevelPreview()
+            self?.scheduleCompanionVolumeSnapshotBroadcast()
         })
         settingsObservations.append(Defaults.observe(.microphoneVolume) { [weak self] _ in
             self?.applyEffectiveAudioVolumes()
-            self?.broadcastCompanionSnapshot()
+            self?.refreshCompanionAudioLevelPreview()
+            self?.scheduleCompanionVolumeSnapshotBroadcast()
         })
         settingsObservations.append(Defaults.observe(.isSystemAudioMuted) { [weak self] _ in
             self?.applyEffectiveAudioVolumes()
             self?.syncAudioMuteStateToUI()
+            self?.refreshCompanionAudioLevelPreview()
         })
         settingsObservations.append(Defaults.observe(.isMicrophoneMuted) { [weak self] _ in
             self?.applyEffectiveAudioVolumes()
             self?.syncAudioMuteStateToUI()
+            self?.refreshCompanionAudioLevelPreview()
         })
 
         // Debounced through one reconciler so preset/UI changes do not race.
@@ -77,6 +81,7 @@ extension AppDelegate {
             self?.scheduleRuntimeSettingsReconcile()
         })
         settingsObservations.append(Defaults.observe(.excludeOwnAppAudio) { [weak self] _ in
+            self?.refreshCompanionAudioLevelPreview()
             self?.scheduleRuntimeSettingsReconcile(needsVideoReset: false, needsFullRestart: false)
         })
 
@@ -84,6 +89,7 @@ extension AppDelegate {
             self?.scheduleRuntimeSettingsReconcile(needsFullRestart: true)
         })
         settingsObservations.append(Defaults.observe(.showCursorInRecording) { [weak self] _ in
+            self?.broadcastCompanionSnapshot()
             Task { @MainActor [weak self] in
                 await self?.applyCursorVisibilitySettingIfNeeded()
             }
@@ -121,9 +127,11 @@ extension AppDelegate {
         settingsObservations.append(Defaults.observe(.captureMicrophone) { [weak self] _ in
             self?.syncMemoryCapsToSettings()
             self?.syncAudioMuteStateToUI()
+            self?.refreshCompanionAudioLevelPreview()
             self?.scheduleRuntimeSettingsReconcile(needsVideoReset: false)
         })
         settingsObservations.append(Defaults.observe(.microphoneID) { [weak self] _ in
+            self?.refreshCompanionAudioLevelPreview()
             self?.scheduleRuntimeSettingsReconcile(needsVideoReset: false)
         })
         // Camera overlay enable/device/resolution can change the video routing
@@ -147,11 +155,15 @@ extension AppDelegate {
         // Pure overlay-layout changes are live-applied to the compositor while
         // capture runs — no pipeline restart needed.
         settingsObservations.append(Defaults.observe(.cameraPosition) { [weak self] _ in
-            guard let self, self.isCaptureRunning else { return }
+            guard let self else { return }
+            self.broadcastCompanionSnapshot()
+            guard self.isCaptureRunning else { return }
             self.frameCompositor.setCameraOverlay(AppSettings.cameraOverlayEnabled ? AppSettings.cameraOverlayLayout : nil)
         })
         settingsObservations.append(Defaults.observe(.cameraSize) { [weak self] _ in
-            guard let self, self.isCaptureRunning else { return }
+            guard let self else { return }
+            self.broadcastCompanionSnapshot()
+            guard self.isCaptureRunning else { return }
             self.frameCompositor.setCameraOverlay(AppSettings.cameraOverlayEnabled ? AppSettings.cameraOverlayLayout : nil)
         })
         settingsObservations.append(Defaults.observe(.cameraBorderEnabled) { [weak self] _ in
@@ -164,18 +176,22 @@ extension AppDelegate {
         settingsObservations.append(Defaults.observe(.captureSystemAudio) { [weak self] _ in
             self?.syncMemoryCapsToSettings()
             self?.syncAudioMuteStateToUI()
+            self?.refreshCompanionAudioLevelPreview()
             self?.scheduleRuntimeSettingsReconcile(needsVideoReset: false, needsFullRestart: false)
         })
         settingsObservations.append(Defaults.observe(.perAppAudioEnabled) { [weak self] _ in
             self?.statusItemController.refreshPresentation()
+            self?.refreshCompanionAudioLevelPreview()
             self?.broadcastCompanionSnapshot()
             self?.scheduleRuntimeSettingsReconcile(needsVideoReset: false, needsFullRestart: false)
         })
         settingsObservations.append(Defaults.observe(.perAppAudioBundleID) { [weak self] _ in
+            self?.refreshCompanionAudioLevelPreview()
             self?.scheduleRuntimeSettingsReconcile(needsVideoReset: false, needsFullRestart: false)
         })
         settingsObservations.append(Defaults.observe(.mutedAudioAppBundleIDs) { [weak self] _ in
             self?.statusItemController.refreshPresentation()
+            self?.refreshCompanionAudioLevelPreview()
             self?.broadcastCompanionSnapshot()
             self?.scheduleRuntimeSettingsReconcile(needsVideoReset: false, needsFullRestart: false)
         })
@@ -186,6 +202,7 @@ extension AppDelegate {
             self?.scheduleRuntimeSettingsReconcile(needsFullRestart: true)
         })
         settingsObservations.append(Defaults.observe(.longBufferEnabled) { [weak self] _ in
+            self?.broadcastCompanionSnapshot()
             self?.scheduleRuntimeSettingsReconcile(needsVideoReset: false, needsFullRestart: false)
         })
         settingsObservations.append(Defaults.observe(.longBufferDurationMinutes) { [weak self] _ in

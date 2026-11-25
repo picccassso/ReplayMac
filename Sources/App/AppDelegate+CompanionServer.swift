@@ -1,8 +1,10 @@
 import Cocoa
 import Combine
+import Audio
 import Branding
 import Capture
 import CompanionServer
+import Save
 import UI
 import Defaults
 import os
@@ -17,6 +19,10 @@ extension AppDelegate {
         }
         companionServer.onSaveExtendedReplay = { [weak self] in
             self?.saveLongBufferFromUI()
+        }
+        companionServer.onSaveReplayDuration = { [weak self] seconds in
+            guard seconds > 0 else { return }
+            self?.saveClip(lastSeconds: TimeInterval(seconds))
         }
         companionServer.onToggleBuffer = { [weak self] in
             self?.toggleCapturePipeline()
@@ -34,46 +40,164 @@ extension AppDelegate {
             guard AppSettings.isFeatureEnabled(.cameraOverlay) else { return }
             self?.toggleCameraOverlayFromUI()
         }
+        companionServer.onToggleCursor = { [weak self] in
+            Defaults[.showCursorInRecording].toggle()
+            self?.broadcastCompanionSnapshot()
+        }
+        companionServer.onToggleAutoRecordGames = { [weak self] in
+            guard AppSettings.isFeatureEnabled(.autoRecordGames) else { return }
+            Defaults[.autoRecordGamesEnabled].toggle()
+            self?.broadcastCompanionSnapshot()
+        }
         companionServer.onRevealClip = { [weak self] clipId in
             guard let self,
-                  let clip = self.mainWindowState.recentClips.first(where: {
-                      $0.id.uuidString.caseInsensitiveCompare(clipId) == .orderedSame || $0.id.uuidString == clipId
-                  }) else { return }
+                  let clip = self.mainWindowState.recentClip(matchingId: clipId) else { return }
             NSWorkspace.shared.activateFileViewerSelecting([clip.url])
         }
         companionServer.onDeleteClip = { [weak self] clipId in
-            guard let self,
-                  let clip = self.mainWindowState.recentClips.first(where: {
-                      $0.id.uuidString.caseInsensitiveCompare(clipId) == .orderedSame || $0.id.uuidString == clipId
-                  }),
-                  !self.mainWindowState.isProtected(clip.url) else { return }
+            guard let self else { return }
+            guard let clip = self.mainWindowState.recentClip(matchingId: clipId) else {
+                self.companionServer.broadcastActionFeedback(
+                    kind: .error,
+                    title: "Delete Failed",
+                    message: "That clip is no longer in the recent clips list."
+                )
+                return
+            }
+            guard !self.mainWindowState.isProtected(clip.url) else {
+                self.companionServer.broadcastActionFeedback(
+                    kind: .error,
+                    title: "Clip In Use",
+                    message: "Close the clip editor or wait for the export to finish before deleting."
+                )
+                return
+            }
             do {
                 try FileManager.default.trashItem(at: clip.url, resultingItemURL: nil)
             } catch {
                 // Leave the clip listed; dropping it would claim a delete that didn't happen.
                 companionLogger.error("Failed to trash clip from companion: \(String(describing: error), privacy: .public)")
+                self.companionServer.broadcastActionFeedback(
+                    kind: .error,
+                    title: "Delete Failed",
+                    message: error.localizedDescription
+                )
                 return
             }
             self.mainWindowState.removeRecentClip(id: clip.id)
             self.broadcastCompanionSnapshot()
         }
         companionServer.onTrimClip = { [weak self] clipId in
-            guard let self,
-                  let clip = self.mainWindowState.recentClips.first(where: {
-                      $0.id.uuidString.caseInsensitiveCompare(clipId) == .orderedSame || $0.id.uuidString == clipId
-                  }),
-                  FileManager.default.fileExists(atPath: clip.url.path) else { return }
+            guard let self else { return }
+            guard let clip = self.mainWindowState.recentClip(matchingId: clipId),
+                  FileManager.default.fileExists(atPath: clip.url.path) else {
+                self.companionServer.broadcastActionFeedback(
+                    kind: .error,
+                    title: "Clip Unavailable",
+                    message: "The clip file could not be found on disk."
+                )
+                return
+            }
             self.openClipEditor(clip.url)
         }
         companionServer.onCopyClip = { [weak self] clipId in
-            guard let self,
-                  let clip = self.mainWindowState.recentClips.first(where: {
-                      $0.id.uuidString.caseInsensitiveCompare(clipId) == .orderedSame || $0.id.uuidString == clipId
-                  }),
-                  FileManager.default.fileExists(atPath: clip.url.path) else { return }
+            guard let self else { return }
+            guard let clip = self.mainWindowState.recentClip(matchingId: clipId),
+                  FileManager.default.fileExists(atPath: clip.url.path) else {
+                self.companionServer.broadcastActionFeedback(
+                    kind: .error,
+                    title: "Copy Failed",
+                    message: "The clip file could not be found on disk."
+                )
+                return
+            }
             let pasteboard = NSPasteboard.general
             pasteboard.clearContents()
-            pasteboard.writeObjects([clip.url as NSURL])
+            if !pasteboard.writeObjects([clip.url as NSURL]) {
+                self.companionServer.broadcastActionFeedback(
+                    kind: .error,
+                    title: "Copy Failed",
+                    message: "macOS couldn't place the clip on the clipboard."
+                )
+            }
+        }
+        companionServer.onToggleClipFavorite = { [weak self] clipId in
+            guard let self else { return }
+            guard let clip = self.mainWindowState.recentClip(matchingId: clipId) else {
+                self.companionServer.broadcastActionFeedback(
+                    kind: .error,
+                    title: "Update Failed",
+                    message: "That clip is no longer in the recent clips list."
+                )
+                return
+            }
+            if case .failure(let error) = self.mainWindowState.toggleRecentClipFavorite(id: clip.id) {
+                self.companionServer.broadcastActionFeedback(
+                    kind: .error,
+                    title: "Update Failed",
+                    message: error.localizedDescription
+                )
+            }
+        }
+        companionServer.onUpdateClipMetadata = { [weak self] clipId, isFavorite, tags, note in
+            guard let self else { return }
+            guard let clip = self.mainWindowState.recentClip(matchingId: clipId) else {
+                self.companionServer.broadcastActionFeedback(
+                    kind: .error,
+                    title: "Update Failed",
+                    message: "That clip is no longer in the recent clips list."
+                )
+                return
+            }
+            if case .failure(let error) = self.mainWindowState.updateRecentClipMetadata(
+                id: clip.id,
+                isFavorite: isFavorite,
+                tags: tags,
+                note: note
+            ) {
+                self.companionServer.broadcastActionFeedback(
+                    kind: .error,
+                    title: "Update Failed",
+                    message: error.localizedDescription
+                )
+            }
+        }
+        companionServer.onRenameClip = { [weak self] clipId, newName in
+            guard let self else { return }
+            guard let clip = self.mainWindowState.recentClip(matchingId: clipId) else {
+                self.companionServer.broadcastActionFeedback(
+                    kind: .error,
+                    title: "Rename Failed",
+                    message: "That clip is no longer in the recent clips list."
+                )
+                return
+            }
+            if case .failure(let error) = self.mainWindowState.renameRecentClip(id: clip.id, newName: newName) {
+                self.companionServer.broadcastActionFeedback(
+                    kind: .error,
+                    title: "Rename Failed",
+                    message: error.localizedDescription
+                )
+            }
+        }
+        companionServer.onSetCameraLayout = { [weak self] position, size in
+            guard let self else { return }
+            if let position, let parsed = Self.cameraPosition(fromWire: position) {
+                Defaults[.cameraPosition] = parsed.rawValue
+            }
+            if let size, let parsed = CameraOverlaySize(rawValue: size) {
+                Defaults[.cameraSize] = parsed.rawValue
+            }
+            if self.isCaptureRunning {
+                self.frameCompositor.setCameraOverlay(AppSettings.cameraOverlayEnabled ? AppSettings.cameraOverlayLayout : nil)
+            }
+            self.broadcastCompanionSnapshot()
+        }
+        companionServer.onPushToMute = { [weak self] active in
+            self?.setPushToMuteMicrophone(active)
+        }
+        companionServer.onResolveClipMediaURL = { [weak self] clipId in
+            self?.mainWindowState.recentClip(matchingId: clipId)?.url
         }
         companionServer.onSetVolume = { [weak self] target, volume in
             switch target {
@@ -84,7 +208,8 @@ extension AppDelegate {
             default:
                 break
             }
-            self?.broadcastCompanionSnapshot()
+            self?.applyEffectiveAudioVolumes()
+            self?.scheduleCompanionVolumeSnapshotBroadcast()
         }
         companionServer.onToggleAppMute = { [weak self] bundleId in
             AppSettings.toggleAudioAppMute(bundleId)
@@ -108,12 +233,17 @@ extension AppDelegate {
             if let uuid = UUID(uuidString: clipId) {
                 return await self.mainWindowState.thumbnailData(for: uuid)
             }
-            if let clip = self.mainWindowState.recentClips.first(where: {
-                $0.id.uuidString.caseInsensitiveCompare(clipId) == .orderedSame
-            }) {
+            if let clip = self.mainWindowState.recentClip(matchingId: clipId) {
                 return await self.mainWindowState.thumbnailData(for: clip.id)
             }
             return nil
+        }
+        companionServer.audioLevelProvider = {
+            let snapshot = AudioLevelMonitor.shared.snapshot()
+            return (microphone: snapshot.microphone, systemAudio: snapshot.systemAudio)
+        }
+        companionServer.onAudioLevelSubscriptionChanged = { [weak self] subscribed in
+            self?.refreshCompanionAudioLevelPreview(subscribed: subscribed)
         }
         companionServer.snapshotProvider = { [weak self] in
             self?.buildCompanionStateSnapshot(type: "state_snapshot") ?? CompanionStateSnapshot.empty
@@ -144,16 +274,53 @@ extension AppDelegate {
         }
     }
 
+    func refreshCompanionAudioLevelPreview(subscribed: Bool? = nil) {
+        let isSubscribed = subscribed ?? companionServer.hasAudioLevelSubscribers
+        guard isSubscribed else {
+            AudioLevelPreview.shared.setCompanionConfiguration(nil)
+            return
+        }
+        let perAppBundleID = AppSettings.perAppAudioEnabled ? Defaults[.perAppAudioBundleID] : ""
+        AudioLevelPreview.shared.setCompanionConfiguration(
+            AudioLevelPreview.Configuration(
+                monitorSystemAudio: AppSettings.captureSystemAudio,
+                monitorMicrophone: AppSettings.captureMicrophone,
+                microphoneDeviceID: Defaults[.microphoneID],
+                perAppAudioBundleID: !perAppBundleID.isEmpty ? perAppBundleID : nil,
+                excludedAudioBundleIDs: !AppSettings.perAppAudioEnabled ? AppSettings.mutedAudioAppBundleIDs : [],
+                excludeOwnAppAudio: Defaults[.excludeOwnAppAudio],
+                systemAudioVolume: AppSettings.effectiveSystemAudioVolume(),
+                microphoneVolume: AppSettings.effectiveMicrophoneVolume(isPushToMuteActive: isPushToMuteActive)
+            )
+        )
+    }
+
+    func scheduleCompanionVolumeSnapshotBroadcast() {
+        companionVolumeBroadcastTask?.cancel()
+        companionVolumeBroadcastTask = Task { @MainActor [weak self] in
+            try? await Task.sleep(for: .milliseconds(50))
+            guard !Task.isCancelled else { return }
+            self?.companionVolumeBroadcastTask = nil
+            self?.broadcastCompanionSnapshot()
+        }
+    }
+
     func buildCompanionStateSnapshot(type: String = "state_snapshot") -> CompanionStateSnapshot {
-        let clips = mainWindowState.recentClips.map { clip in
-            CompanionClipSummary(
+        let recent = mainWindowState.recentClips
+        let metadataMap = mainWindowState.clipMetadataMap(for: recent)
+        let clips = recent.map { clip in
+            let meta = metadataMap[ClipLibraryMetadataStore.key(for: clip.url)] ?? .empty
+            return CompanionClipSummary(
                 id: clip.id.uuidString,
                 filename: clip.url.lastPathComponent,
                 kind: clip.kind.title.lowercased(),
                 savedAt: clip.savedAt.timeIntervalSince1970,
                 duration: clip.duration,
                 fileSize: clip.fileSize,
-                hasThumbnail: clip.thumbnail != nil
+                hasThumbnail: clip.thumbnail != nil,
+                isFavorite: meta.isFavorite,
+                tags: meta.tags,
+                note: meta.notes
             )
         }
 
@@ -201,6 +368,10 @@ extension AppDelegate {
             )
         }
 
+        let activeGameName: String? = AppSettings.autoRecordGamesEnabled
+            ? (recordingAutoStartedByGame ? gameActivityMonitor.activeGameName : nil)
+            : nil
+
         return CompanionStateSnapshot(
             type: type,
             // The replay buffer, as the desktop shows it. Capture also runs for a
@@ -232,12 +403,67 @@ extension AppDelegate {
             perAppAudioEnabled: AppSettings.perAppAudioEnabled,
             isCameraOverlayEnabled: AppSettings.cameraOverlayEnabled,
             isCameraOverlayAvailable: AppSettings.isFeatureEnabled(.cameraOverlay),
+            isExtendedReplayAvailable: AppSettings.isFeatureEnabled(.extendedReplay) && AppSettings.longBufferEnabled,
+            isSessionRecordingAvailable: AppSettings.isFeatureEnabled(.sessionRecording) || menuBarState.isSessionRecording,
+            isAudioMixingAvailable: AppSettings.isFeatureEnabled(.audioMixing),
+            isQuickSavePresetsAvailable: AppSettings.isFeatureEnabled(.quickSaveAndThumbnail),
+            isCaptureProfilesAvailable: AppSettings.isFeatureEnabled(.captureProfiles),
+            isAutoRecordGamesAvailable: AppSettings.isFeatureEnabled(.autoRecordGames),
+            autoRecordGamesEnabled: AppSettings.autoRecordGamesEnabled,
+            activeGameName: activeGameName,
+            showCursorInRecordings: AppSettings.showCursorInRecording,
+            cameraOverlayPosition: Self.wirePosition(from: AppSettings.cameraPositionEnum),
+            cameraOverlaySize: AppSettings.cameraSizeEnum.rawValue,
+            warnings: activeCompanionWarnings(),
             audioApps: audioApps,
             displays: displays,
             profiles: profiles,
             recentClips: clips,
             theme: CompanionThemeBuilder.current()
         )
+    }
+
+    private func activeCompanionWarnings() -> [String] {
+        var warnings: [String] = []
+        if memoryPressureLevel == .critical {
+            let configured = AppSettings.bufferDurationSeconds
+            let effective = MemoryPressurePolicy.replaySeconds(configured: configured, level: .critical)
+            if effective < configured {
+                warnings.append("Critical memory pressure: buffer shortened to \(effective)s")
+            } else {
+                warnings.append("Critical memory pressure")
+            }
+        }
+        if let outputURL = AppSettings.outputDirectoryURL,
+           let volumeName = SavePreflight.unmountedExternalVolumeName(for: outputURL) {
+            warnings.append("Output drive \"\(volumeName)\" is disconnected")
+        }
+        if isCaptureRunning && hasWarnedSystemAudioStalled {
+            warnings.append("System audio stalled")
+        }
+        if isCaptureRunning && micAudioCapture.isStalled {
+            warnings.append("Microphone stalled")
+        }
+        return warnings
+    }
+
+    private static func wirePosition(from position: CameraOverlayPosition) -> String {
+        switch position {
+        case .topLeft: return "topLeft"
+        case .topRight: return "topRight"
+        case .bottomLeft: return "bottomLeft"
+        case .bottomRight: return "bottomRight"
+        }
+    }
+
+    private static func cameraPosition(fromWire value: String) -> CameraOverlayPosition? {
+        switch value {
+        case "topLeft", "top_left": return .topLeft
+        case "topRight", "top_right": return .topRight
+        case "bottomLeft", "bottom_left": return .bottomLeft
+        case "bottomRight", "bottom_right": return .bottomRight
+        default: return nil
+        }
     }
 
     /// Re-sends state when Appearance settings or the macOS accent change, so

@@ -4,6 +4,7 @@ import os
 import Save
 import UI
 import Feedback
+import CompanionServer
 
 private let clipSaveLogger = Logger(subsystem: "com.replaycap", category: "ClipSave")
 
@@ -50,8 +51,8 @@ extension AppDelegate {
             saveInProgress: menuBarState.isSaveInProgress,
             replayBufferEnabled: replayBufferGate.isEnabled
         ) {
+            let message = SavePreflight.notificationMessage(for: failure)
             if failure != .saveInProgress {
-                let message = SavePreflight.notificationMessage(for: failure)
                 NotificationManager.shared.showOperationalNotification(title: message.title, body: message.body)
                 if failure == .notRecording || failure == .replayBufferUnavailable {
                     menuBarState.showBufferNotRunningBriefly()
@@ -59,6 +60,11 @@ extension AppDelegate {
                     menuBarState.showSaveFailedBriefly()
                 }
             }
+            companionServer.broadcastActionFeedback(
+                kind: failure == .saveInProgress ? .info : .error,
+                title: message.title,
+                message: message.body
+            )
             return
         }
 
@@ -73,6 +79,7 @@ extension AppDelegate {
         ) {
             let message = SavePreflight.notificationMessage(for: diskFailure)
             NotificationManager.shared.showOperationalNotification(title: message.title, body: message.body)
+            companionServer.broadcastActionFeedback(kind: .error, title: message.title, message: message.body)
             menuBarState.showSaveFailedBriefly()
             return
         }
@@ -125,22 +132,28 @@ extension AppDelegate {
             menuBarState.finishSaving(success: false)
             statusItemController.refreshPresentation()
             NotificationManager.shared.showSaveFailedNotification(error: error.localizedDescription)
+            companionServer.broadcastActionFeedback(
+                kind: .error,
+                title: "Save Failed",
+                message: error.localizedDescription
+            )
             clipSaveLogger.error("Failed to save clip: \(String(describing: error), privacy: .public)")
         }
     }
 
     func saveConfiguredLongBufferClip(lastSeconds: TimeInterval) async {
         guard AppSettings.longBufferEnabled else {
-            NotificationManager.shared.showOperationalNotification(
-                title: "Long Buffer Disabled",
-                body: "Enable Extended replay buffer in Settings > Video before saving a long clip."
-            )
+            let title = "Long Buffer Disabled"
+            let body = "Enable Extended replay buffer in Settings > Video before saving a long clip."
+            NotificationManager.shared.showOperationalNotification(title: title, body: body)
+            companionServer.broadcastActionFeedback(kind: .error, title: title, message: body)
             return
         }
 
         guard isCaptureRunning else {
             let message = SavePreflight.notificationMessage(for: .notRecording)
             NotificationManager.shared.showOperationalNotification(title: message.title, body: message.body)
+            companionServer.broadcastActionFeedback(kind: .error, title: message.title, message: message.body)
             menuBarState.showBufferNotRunningBriefly()
             return
         }
@@ -148,6 +161,7 @@ extension AppDelegate {
         guard replayBufferGate.isEnabled else {
             let message = SavePreflight.notificationMessage(for: .replayBufferUnavailable)
             NotificationManager.shared.showOperationalNotification(title: message.title, body: message.body)
+            companionServer.broadcastActionFeedback(kind: .error, title: message.title, message: message.body)
             menuBarState.showBufferNotRunningBriefly()
             return
         }
@@ -162,6 +176,7 @@ extension AppDelegate {
         if let diskFailure = diskSpaceFailure(lastSeconds: lastSeconds, streamCount: 2) {
             let message = SavePreflight.notificationMessage(for: diskFailure)
             NotificationManager.shared.showOperationalNotification(title: message.title, body: message.body)
+            companionServer.broadcastActionFeedback(kind: .error, title: message.title, message: message.body)
             menuBarState.showSaveFailedBriefly()
             return
         }
@@ -196,14 +211,19 @@ extension AppDelegate {
         } catch LongBufferRecorderError.longBufferExportAlreadyInProgress {
             menuBarState.finishSaving(success: false)
             statusItemController.refreshPresentation()
-            NotificationManager.shared.showOperationalNotification(
-                title: "Long Replay Already Saving",
-                body: "A long replay is already saving. Wait for it to finish before saving another."
-            )
+            let title = "Long Replay Already Saving"
+            let body = "A long replay is already saving. Wait for it to finish before saving another."
+            NotificationManager.shared.showOperationalNotification(title: title, body: body)
+            companionServer.broadcastActionFeedback(kind: .info, title: title, message: body)
         } catch {
             menuBarState.finishSaving(success: false)
             statusItemController.refreshPresentation()
             NotificationManager.shared.showSaveFailedNotification(error: error.localizedDescription)
+            companionServer.broadcastActionFeedback(
+                kind: .error,
+                title: "Extended Save Failed",
+                message: error.localizedDescription
+            )
             clipSaveLogger.error("Failed to save long-buffer clip: \(String(describing: error), privacy: .public)")
         }
     }
@@ -258,17 +278,17 @@ extension AppDelegate {
     func selectedOutputDirectoryOrNotify() -> URL? {
         OutputDirectoryAccess.ensureAccessIfNeeded()
         guard let outputDirectory = AppSettings.outputDirectoryURL else {
-            NotificationManager.shared.showOperationalNotification(
-                title: "Choose an Output Folder",
-                body: "Open Settings and choose the folder where clips should be saved."
-            )
+            let title = "Choose an Output Folder"
+            let body = "Open Settings and choose the folder where clips should be saved."
+            NotificationManager.shared.showOperationalNotification(title: title, body: body)
+            companionServer.broadcastActionFeedback(kind: .error, title: title, message: body)
             return nil
         }
         if let volumeName = SavePreflight.unmountedExternalVolumeName(for: outputDirectory) {
-            NotificationManager.shared.showOperationalNotification(
-                title: "Output Drive Disconnected",
-                body: "Connect “\(volumeName)” or choose a different output folder in Settings."
-            )
+            let title = "Output Drive Disconnected"
+            let body = "Connect “\(volumeName)” or choose a different output folder in Settings."
+            NotificationManager.shared.showOperationalNotification(title: title, body: body)
+            companionServer.broadcastActionFeedback(kind: .error, title: title, message: body)
             return nil
         }
         return outputDirectory
